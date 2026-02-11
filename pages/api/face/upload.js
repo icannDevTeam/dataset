@@ -1,13 +1,16 @@
 import formidable from 'formidable';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { getFirebaseStorage, getFirestoreDB, initializeFirebase } from '../../../lib/firebase-admin';
 
-// Disable body parser for this route
+// Disable body parser for this route & increase size limit for Vercel
 export const config = {
   api: {
     bodyParser: false,
+    responseLimit: false,
   },
+  maxDuration: 30,
 };
 
 export default async function handler(req, res) {
@@ -21,9 +24,10 @@ export default async function handler(req, res) {
 
     console.log('\n=== UPLOAD REQUEST START ===');
     
-    // Parse form data with formidable
+    // Parse form data with formidable — use os.tmpdir() for Vercel compatibility
+    const tmpDir = os.tmpdir();
     const form = formidable({
-      uploadDir: '/tmp',
+      uploadDir: tmpDir,
       keepExtensions: true,
       maxFileSize: 10 * 1024 * 1024,
       multiples: false,
@@ -108,24 +112,8 @@ export default async function handler(req, res) {
       console.log(`Firebase upload successful: ${fileName}`);
     } catch (fbError) {
       console.error(`Firebase Storage error: ${fbError.message}`);
-      
-      // Fallback to local storage
-      try {
-        console.log('\n--- Fallback to local storage ---');
-        const localDir = path.join(process.cwd(), 'public', 'uploads', className, studentName);
-        if (!fs.existsSync(localDir)) {
-          fs.mkdirSync(localDir, { recursive: true });
-        }
-        const localFileName = `photo_${photoNumber}_${Date.now()}.jpg`;
-        const localPath = path.join(localDir, localFileName);
-        fs.writeFileSync(localPath, imageBuffer);
-        storageUrl = `/uploads/${className}/${studentName}/${localFileName}`;
-        uploadSuccess = true;
-        uploadMethod = 'Local Storage (Firebase unavailable)';
-        console.log(`Local storage success: ${storageUrl}`);
-      } catch (localErr) {
-        console.error(`Local storage error: ${localErr.message}`);
-      }
+      console.error('Full error:', JSON.stringify(fbError, Object.getOwnPropertyNames(fbError), 2));
+      // No local fallback on Vercel (read-only filesystem)
     }
 
     // Save image metadata to Firestore under the student document

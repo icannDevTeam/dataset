@@ -3,5 +3,11 @@
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
   "installCommand": "npm install",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "functions": {
+    "pages/api/face/upload.js": {
+      "maxDuration": 30,
+      "memory": 1024
+    }
+  }
 }
