@@ -54,10 +54,22 @@ export default async function handler(req, res) {
 
   // Debug: log what Vercel actually delivers
   if (req.query.debug === '1') {
+    // Collect raw body
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const rawBody = Buffer.concat(chunks);
+
     return res.status(200).json({
       contentType: req.headers['content-type'],
-      allHeaders: req.headers,
+      contentLength: req.headers['content-length'],
       method: req.method,
+      bodyType: typeof req.body,
+      bodyIsBuffer: Buffer.isBuffer(req.body),
+      bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : null,
+      rawBodyLength: rawBody.length,
+      rawBodyPreview: rawBody.toString('utf8').substring(0, 500),
     });
   }
 
