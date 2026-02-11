@@ -1,9 +1,7 @@
-import formidable, { multipart as multipartPlugin } from 'formidable';
-import fs from 'fs';
-import os from 'os';
+import Busboy from 'busboy';
 import { getFirebaseStorage, getFirestoreDB, initializeFirebase } from '../../../lib/firebase-admin';
 
-// Disable Next.js body parser — formidable will handle it
+// Disable Next.js body parser — we handle multipart ourselves
 export const config = {
   api: {
     bodyParser: false,
@@ -12,20 +10,41 @@ export const config = {
   maxDuration: 30,
 };
 
-// Helper: collect raw request body as a Buffer (Vercel sometimes pre-consumes the stream)
-function getRawBody(req) {
+// Parse multipart form data using busboy (reliable on Vercel, no temp files needed)
+function parseMultipart(req) {
   return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
-}
+    const fields = {};
+    const files = {};
 
-// Helper: parse multipart boundary from Content-Type
-function getBoundary(contentType) {
-  const match = /boundary=(?:"([^"]+)"|([^\s;]+))/i.exec(contentType || '');
-  return match ? (match[1] || match[2]) : null;
+    const busboy = Busboy({
+      headers: req.headers,
+      limits: { fileSize: 10 * 1024 * 1024 },
+    });
+
+    busboy.on('field', (name, val) => {
+      fields[name] = val;
+    });
+
+    busboy.on('file', (name, stream, info) => {
+      const chunks = [];
+      stream.on('data', (chunk) => chunks.push(chunk));
+      stream.on('end', () => {
+        files[name] = {
+          buffer: Buffer.concat(chunks),
+          originalFilename: info.filename,
+          mimetype: info.mimeType,
+          size: Buffer.concat(chunks).length,
+        };
+        // Recalculate to avoid double-concat
+        files[name].size = files[name].buffer.length;
+      });
+    });
+
+    busboy.on('finish', () => resolve({ fields, files }));
+    busboy.on('error', reject);
+
+    req.pipe(busboy);
+  });
 }
 
 export default async function handler(req, res) {
@@ -40,34 +59,19 @@ export default async function handler(req, res) {
     console.log('\n=== UPLOAD REQUEST START ===');
     console.log('Content-Type:', req.headers['content-type']);
     
-    // Parse form data with formidable — force multipart plugin only
-    const tmpDir = os.tmpdir();
-    const form = formidable({
-      uploadDir: tmpDir,
-      keepExtensions: true,
-      maxFileSize: 10 * 1024 * 1024,
-      multiples: false,
-      // Force multipart parser only — prevents JSON parser from activating
-      enabledPlugins: [multipartPlugin],
-    });
-
-    const [fields, files] = await form.parse(req);
+    // Parse multipart form data with busboy
+    const { fields, files } = await parseMultipart(req);
 
     console.log('Form parsed. Fields:', Object.keys(fields), 'Files:', Object.keys(files));
 
-    const getField = (name) => {
-      const val = fields[name];
-      return Array.isArray(val) ? val[0] : val;
-    };
-
-    const studentId = getField('studentId');
-    const studentName = getField('studentName');
-    const className = getField('className');
-    const gradeCode = getField('gradeCode') || '';
-    const gradeName = getField('gradeName') || '';
-    const photoNumber = getField('photoNumber') || '1';
-    const totalPhotos = getField('totalPhotos') || '3';
-    const imageFile = Array.isArray(files.image) ? files.image[0] : files.image;
+    const studentId = fields.studentId;
+    const studentName = fields.studentName;
+    const className = fields.className;
+    const gradeCode = fields.gradeCode || '';
+    const gradeName = fields.gradeName || '';
+    const photoNumber = fields.photoNumber || '1';
+    const totalPhotos = fields.totalPhotos || '3';
+    const imageFile = files.image;
 
     // Build the display label for attendance (e.g. "Albert Arthur 3B")
     const displayLabel = `${studentName} ${className}`;
@@ -86,9 +90,9 @@ export default async function handler(req, res) {
 
     console.log(`Processing photo ${photoNumber}/${totalPhotos} for ${displayLabel}`);
 
-    // Read image file
-    const imageBuffer = fs.readFileSync(imageFile.filepath);
-    console.log(`Image buffer read: ${imageBuffer.length} bytes`);
+    // Image buffer is already in memory from busboy
+    const imageBuffer = imageFile.buffer;
+    console.log(`Image buffer: ${imageBuffer.length} bytes`);
 
     // Upload to Firebase Storage
     let uploadSuccess = false;
@@ -172,11 +176,6 @@ export default async function handler(req, res) {
     } catch (fsError) {
       console.log(`Firestore unavailable: ${fsError.message}`);
     }
-
-    // Clean up temp file
-    try {
-      fs.unlinkSync(imageFile.filepath);
-    } catch (e) { /* ignore */ }
 
     console.log('Upload complete\n');
     
