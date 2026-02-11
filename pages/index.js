@@ -1,4 +1,5 @@
 import Head from 'next/head';
+import Link from 'next/link';
 import React, { useState } from 'react';
 import styles from '../styles/index.module.css';
 import EnrollmentPage from '../components/EnrollmentPage';
@@ -30,6 +31,24 @@ export default function Home() {
         <meta name="description" content="Student photo enrollment for facial attendance" />
       </Head>
       <div className={styles.container}>
+        <div style={{
+          position: 'fixed', top: 16, right: 16, display: 'flex', gap: 8, zIndex: 100
+        }}>
+          <Link href="/hikvision" style={{
+            padding: '8px 14px', background: 'rgba(0,0,0,0.5)', color: '#38bdf8',
+            borderRadius: 6, fontSize: '0.85rem', border: '1px solid rgba(56,189,248,0.3)',
+            textDecoration: 'none'
+          }}>
+            🔐 Hikvision Portal
+          </Link>
+          <Link href="/dashboard" style={{
+            padding: '8px 14px', background: 'rgba(0,0,0,0.5)', color: '#94a3b8',
+            borderRadius: 6, fontSize: '0.85rem', border: '1px solid rgba(148,163,184,0.3)',
+            textDecoration: 'none'
+          }}>
+            📊 Dashboard
+          </Link>
+        </div>
         {currentPage === 'enrollment' ? (
           <EnrollmentPage onStudentData={handleStudentData} />
         ) : (
