@@ -13,64 +13,63 @@ export const config = {
 // Parse multipart form data using busboy (reliable on Vercel, no temp files needed)
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
-    const fields = {};
-    const files = {};
+    // Buffer the raw body first — Vercel may overwrite content-type header
+    const bodyChunks = [];
+    req.on('data', (chunk) => bodyChunks.push(chunk));
+    req.on('error', reject);
+    req.on('end', () => {
+      const rawBody = Buffer.concat(bodyChunks);
 
-    const busboy = Busboy({
-      headers: req.headers,
-      limits: { fileSize: 10 * 1024 * 1024 },
-    });
+      // Fix content-type if Vercel's proxy overwrote it to application/json
+      let headers = { ...req.headers };
+      const ct = headers['content-type'] || '';
+      if (!ct.includes('multipart/form-data')) {
+        const bodyStart = rawBody.toString('utf8', 0, Math.min(200, rawBody.length));
+        if (bodyStart.startsWith('-')) {
+          const boundary = bodyStart.split('\r\n')[0].replace(/^-+/, '');
+          headers['content-type'] = `multipart/form-data; boundary=${boundary}`;
+          console.log('Fixed content-type. Extracted boundary:', boundary);
+        }
+      }
 
-    busboy.on('field', (name, val) => {
-      fields[name] = val;
-    });
+      const fields = {};
+      const files = {};
 
-    busboy.on('file', (name, stream, info) => {
-      const chunks = [];
-      stream.on('data', (chunk) => chunks.push(chunk));
-      stream.on('end', () => {
-        files[name] = {
-          buffer: Buffer.concat(chunks),
-          originalFilename: info.filename,
-          mimetype: info.mimeType,
-          size: Buffer.concat(chunks).length,
-        };
-        // Recalculate to avoid double-concat
-        files[name].size = files[name].buffer.length;
+      const busboy = Busboy({
+        headers,
+        limits: { fileSize: 10 * 1024 * 1024 },
       });
+
+      busboy.on('field', (name, val) => {
+        fields[name] = val;
+      });
+
+      busboy.on('file', (name, stream, info) => {
+        const fileChunks = [];
+        stream.on('data', (chunk) => fileChunks.push(chunk));
+        stream.on('end', () => {
+          const buf = Buffer.concat(fileChunks);
+          files[name] = {
+            buffer: buf,
+            originalFilename: info.filename,
+            mimetype: info.mimeType,
+            size: buf.length,
+          };
+        });
+      });
+
+      busboy.on('finish', () => resolve({ fields, files }));
+      busboy.on('error', reject);
+
+      // Feed the buffered body to busboy
+      busboy.end(rawBody);
     });
-
-    busboy.on('finish', () => resolve({ fields, files }));
-    busboy.on('error', reject);
-
-    req.pipe(busboy);
   });
 }
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  // Debug: log what Vercel actually delivers
-  if (req.query.debug === '1') {
-    // Collect raw body
-    const chunks = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const rawBody = Buffer.concat(chunks);
-
-    return res.status(200).json({
-      contentType: req.headers['content-type'],
-      contentLength: req.headers['content-length'],
-      method: req.method,
-      bodyType: typeof req.body,
-      bodyIsBuffer: Buffer.isBuffer(req.body),
-      bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : null,
-      rawBodyLength: rawBody.length,
-      rawBodyPreview: rawBody.toString('utf8').substring(0, 500),
-    });
   }
 
   try {
