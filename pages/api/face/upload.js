@@ -1,10 +1,9 @@
 import formidable from 'formidable';
 import fs from 'fs';
 import os from 'os';
-import path from 'path';
 import { getFirebaseStorage, getFirestoreDB, initializeFirebase } from '../../../lib/firebase-admin';
 
-// Disable body parser for this route & increase size limit for Vercel
+// Disable Next.js body parser — formidable will handle it
 export const config = {
   api: {
     bodyParser: false,
@@ -12,6 +11,22 @@ export const config = {
   },
   maxDuration: 30,
 };
+
+// Helper: collect raw request body as a Buffer (Vercel sometimes pre-consumes the stream)
+function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+// Helper: parse multipart boundary from Content-Type
+function getBoundary(contentType) {
+  const match = /boundary=(?:"([^"]+)"|([^\s;]+))/i.exec(contentType || '');
+  return match ? (match[1] || match[2]) : null;
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -23,14 +38,17 @@ export default async function handler(req, res) {
     initializeFirebase();
 
     console.log('\n=== UPLOAD REQUEST START ===');
+    console.log('Content-Type:', req.headers['content-type']);
     
-    // Parse form data with formidable — use os.tmpdir() for Vercel compatibility
+    // Parse form data with formidable — force multipart plugin only
     const tmpDir = os.tmpdir();
     const form = formidable({
       uploadDir: tmpDir,
       keepExtensions: true,
       maxFileSize: 10 * 1024 * 1024,
       multiples: false,
+      // Force multipart parser only — prevents JSON parser from activating
+      enabledPlugins: ['multipart'],
     });
 
     const [fields, files] = await form.parse(req);
