@@ -1,4 +1,4 @@
-import formidable from 'formidable';
+import formidable, { multipart as multipartPlugin } from 'formidable';
 import fs from 'fs';
 import os from 'os';
 import { getFirebaseStorage, getFirestoreDB, initializeFirebase } from '../../../lib/firebase-admin';
@@ -48,7 +48,7 @@ export default async function handler(req, res) {
       maxFileSize: 10 * 1024 * 1024,
       multiples: false,
       // Force multipart parser only — prevents JSON parser from activating
-      enabledPlugins: ['multipart'],
+      enabledPlugins: [multipartPlugin],
     });
 
     const [fields, files] = await form.parse(req);
