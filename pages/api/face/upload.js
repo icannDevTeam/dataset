@@ -188,9 +188,11 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Upload error:', error);
+    console.error('Error stack:', error.stack);
     return res.status(500).json({ 
       error: 'Upload failed',
-      message: error.message
+      message: error.message,
+      stack: error.stack?.split('\n').slice(0, 5)
     });
   }
 }
