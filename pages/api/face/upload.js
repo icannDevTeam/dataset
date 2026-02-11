@@ -52,6 +52,15 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // Debug: log what Vercel actually delivers
+  if (req.query.debug === '1') {
+    return res.status(200).json({
+      contentType: req.headers['content-type'],
+      allHeaders: req.headers,
+      method: req.method,
+    });
+  }
+
   try {
     // Initialize Firebase
     initializeFirebase();
