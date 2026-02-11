@@ -1,0 +1,208 @@
+import formidable from 'formidable';
+import fs from 'fs';
+import path from 'path';
+import { getFirebaseStorage, getFirestoreDB, initializeFirebase } from '../../../lib/firebase-admin';
+
+// Disable body parser for this route
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    // Initialize Firebase
+    initializeFirebase();
+
+    console.log('\n=== UPLOAD REQUEST START ===');
+    
+    // Parse form data with formidable
+    const form = formidable({
+      uploadDir: '/tmp',
+      keepExtensions: true,
+      maxFileSize: 10 * 1024 * 1024,
+      multiples: false,
+    });
+
+    const [fields, files] = await form.parse(req);
+
+    console.log('Form parsed. Fields:', Object.keys(fields), 'Files:', Object.keys(files));
+
+    const getField = (name) => {
+      const val = fields[name];
+      return Array.isArray(val) ? val[0] : val;
+    };
+
+    const studentId = getField('studentId');
+    const studentName = getField('studentName');
+    const className = getField('className');
+    const gradeCode = getField('gradeCode') || '';
+    const gradeName = getField('gradeName') || '';
+    const photoNumber = getField('photoNumber') || '1';
+    const totalPhotos = getField('totalPhotos') || '3';
+    const imageFile = Array.isArray(files.image) ? files.image[0] : files.image;
+
+    // Build the display label for attendance (e.g. "Albert Arthur 3B")
+    const displayLabel = `${studentName} ${className}`;
+
+    console.log(`Student: ${studentName}, ID: ${studentId}, Class: ${className}, Photo: ${photoNumber}/${totalPhotos}`);
+    console.log(`Display Label: ${displayLabel}`);
+    console.log(`Image file:`, imageFile ? `${imageFile.originalFilename} (${imageFile.size} bytes)` : 'MISSING');
+
+    if (!studentId || !studentName || !className || !imageFile) {
+      console.error('Missing required fields:', { studentId, studentName, className, hasImage: !!imageFile });
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        details: { studentId, studentName, className, hasImage: !!imageFile }
+      });
+    }
+
+    console.log(`Processing photo ${photoNumber}/${totalPhotos} for ${displayLabel}`);
+
+    // Read image file
+    const imageBuffer = fs.readFileSync(imageFile.filepath);
+    console.log(`Image buffer read: ${imageBuffer.length} bytes`);
+
+    // Upload to Firebase Storage
+    let uploadSuccess = false;
+    let storageUrl = null;
+    let uploadMethod = null;
+    
+    try {
+      console.log('\n--- Uploading to Firebase Storage ---');
+      
+      const storage = getFirebaseStorage();
+      const bucket = storage.bucket();
+      console.log('Storage bucket connected:', bucket.name);
+      
+      // Path: face_dataset/{ClassName}/{StudentName}/photo_{number}_{timestamp}.jpg
+      const fileName = `face_dataset/${className}/${studentName}/photo_${photoNumber}_${Date.now()}.jpg`;
+      console.log('Uploading file:', fileName);
+      
+      const file = bucket.file(fileName);
+      await file.save(imageBuffer, {
+        metadata: {
+          contentType: 'image/jpeg',
+          metadata: {
+            studentId,
+            studentName,
+            className,
+            gradeCode,
+            gradeName,
+            displayLabel,
+            photoNumber,
+            totalPhotos,
+            capturedAt: new Date().toISOString()
+          }
+        }
+      });
+
+      storageUrl = `gs://${process.env.FIREBASE_STORAGE_BUCKET}/${fileName}`;
+      uploadSuccess = true;
+      uploadMethod = 'Firebase Storage';
+      console.log(`Firebase upload successful: ${fileName}`);
+    } catch (fbError) {
+      console.error(`Firebase Storage error: ${fbError.message}`);
+      
+      // Fallback to local storage
+      try {
+        console.log('\n--- Fallback to local storage ---');
+        const localDir = path.join(process.cwd(), 'public', 'uploads', className, studentName);
+        if (!fs.existsSync(localDir)) {
+          fs.mkdirSync(localDir, { recursive: true });
+        }
+        const localFileName = `photo_${photoNumber}_${Date.now()}.jpg`;
+        const localPath = path.join(localDir, localFileName);
+        fs.writeFileSync(localPath, imageBuffer);
+        storageUrl = `/uploads/${className}/${studentName}/${localFileName}`;
+        uploadSuccess = true;
+        uploadMethod = 'Local Storage (Firebase unavailable)';
+        console.log(`Local storage success: ${storageUrl}`);
+      } catch (localErr) {
+        console.error(`Local storage error: ${localErr.message}`);
+      }
+    }
+
+    // Save image metadata to Firestore under the student document
+    try {
+      const db = getFirestoreDB();
+      const imageMetadata = {
+        fileName: imageFile.originalFilename || `photo_${photoNumber}.jpg`,
+        fileSize: imageFile.size,
+        photoNumber: parseInt(photoNumber),
+        totalPhotos: parseInt(totalPhotos),
+        uploadedAt: new Date().toISOString(),
+        storageUrl,
+        uploadMethod,
+        // Full student context saved with each image
+        studentId,
+        studentName,
+        className,
+        gradeCode,
+        gradeName,
+        displayLabel, // "Albert Arthur 3B" - used for attendance display
+      };
+
+      await db.collection('students').doc(studentId).collection('images').add(imageMetadata);
+      
+      // Also update the student document with latest capture info
+      await db.collection('students').doc(studentId).set({
+        id: studentId,
+        name: studentName,
+        homeroom: className,
+        gradeCode,
+        gradeName,
+        displayLabel,
+        lastCaptureAt: new Date().toISOString(),
+        totalImages: parseInt(photoNumber),
+      }, { merge: true });
+
+      console.log(`Firestore metadata saved for ${displayLabel}`);
+    } catch (fsError) {
+      console.log(`Firestore unavailable: ${fsError.message}`);
+    }
+
+    // Clean up temp file
+    try {
+      fs.unlinkSync(imageFile.filepath);
+    } catch (e) { /* ignore */ }
+
+    console.log('Upload complete\n');
+    
+    if (!uploadSuccess) {
+      return res.status(500).json({ 
+        error: 'Upload failed - no storage available'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Photo ${photoNumber}/${totalPhotos} uploaded for ${displayLabel}`,
+      uploadMethod,
+      data: {
+        studentId,
+        studentName,
+        className,
+        gradeCode,
+        gradeName,
+        displayLabel,
+        photoNumber,
+        totalPhotos,
+        size: imageFile.size,
+        storageUrl
+      }
+    });
+
+  } catch (error) {
+    console.error('Upload error:', error);
+    return res.status(500).json({ 
+      error: 'Upload failed',
+      message: error.message
+    });
+  }
+}

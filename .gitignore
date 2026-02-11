@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Next.js build
+.next/
+out/
+build/
+dist/
+
+# Environment / secrets — NEVER commit these
+.env
+.env.local
+.env.*.local
+*.pem
+*.json.bak
+facial-attendance-*.json
+
+# Vercel
+.vercel/
+
+# Uploaded images / student data (sensitive PII)
+public/uploads/
+captured_faces/
+
+# Local capture server (not needed on Vercel)
+capture_server.py
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+coverage/
+*.log
+server.log
