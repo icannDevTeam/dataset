@@ -26,7 +26,8 @@ function parseMultipart(req) {
       if (!ct.includes('multipart/form-data')) {
         const bodyStart = rawBody.toString('utf8', 0, Math.min(200, rawBody.length));
         if (bodyStart.startsWith('-')) {
-          const boundary = bodyStart.split('\r\n')[0].replace(/^-+/, '');
+          // Multipart body lines start with --<boundary>, strip only the leading --
+          const boundary = bodyStart.split('\r\n')[0].substring(2);
           headers['content-type'] = `multipart/form-data; boundary=${boundary}`;
           console.log('Fixed content-type. Extracted boundary:', boundary);
         }
