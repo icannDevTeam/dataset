@@ -221,9 +221,6 @@ export default function HikvisionPortal() {
             <Link href="/" className={styles.navLink}>
               📸 Capture
             </Link>
-            <Link href="/dashboard" className={styles.navLink}>
-              📊 Dashboard
-            </Link>
           </div>
         </div>
 
