@@ -8,9 +8,9 @@
 
 import axios from 'axios';
 
-const HIK_IP = process.env.HIKVISION_IP || '10.26.30.200';
-const HIK_USER = process.env.HIKVISION_USER || 'admin';
-const HIK_PASS = process.env.HIKVISION_PASS || 'password.123';
+const HIK_IP = process.env.HIKVISION_IP || '';
+const HIK_USER = process.env.HIKVISION_USER || '';
+const HIK_PASS = process.env.HIKVISION_PASS || '';
 const HIK_BASE = `http://${HIK_IP}`;
 
 export const config = {

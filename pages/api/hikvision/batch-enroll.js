@@ -4,6 +4,7 @@
  * Batch-enrolls students from Firebase Storage to a Hikvision device.
  * The device IP/credentials are sent in the request body (not from env),
  * allowing the portal to connect to any device.
+ * Uses HTTP Digest Authentication (required by Hikvision ISAPI).
  *
  * Body: {
  *   device: { ip, username, password },
@@ -18,24 +19,10 @@
 
 import axios from 'axios';
 import crypto from 'crypto';
+import { hikRequest, hikJson } from '../../../lib/hikvision';
 
 function employeeNoFromName(name) {
   return crypto.createHash('md5').update(name).digest('hex').slice(0, 8).toUpperCase();
-}
-
-async function hikApi(device, method, apiPath, data = null, extraOpts = {}) {
-  const base = `http://${device.ip}`;
-  const opts = {
-    method,
-    url: `${base}${apiPath}`,
-    auth: { username: device.username, password: device.password },
-    timeout: 15000,
-    ...extraOpts,
-  };
-  if (data) opts.data = data;
-  if (!opts.headers) opts.headers = { 'Content-Type': 'application/json' };
-  const r = await axios(opts);
-  return { status: r.status, data: r.data };
 }
 
 async function createUser(device, employeeNo, name) {
@@ -56,19 +43,22 @@ async function createUser(device, employeeNo, name) {
     },
   };
   try {
-    await hikApi(device, 'post', '/ISAPI/AccessControl/UserInfo/Record?format=json', body);
+    await hikJson(device, 'post', '/ISAPI/AccessControl/UserInfo/Record?format=json', body);
     return { ok: true };
   } catch (e) {
-    if (e.response?.data?.subStatusCode === 'deviceUserAlreadyExist') {
+    const respData = e.response?.data;
+    const sub = respData?.subStatusCode
+      || respData?.StatusString?.subStatusCode
+      || '';
+    if (sub === 'deviceUserAlreadyExist' || sub === 'employeeNoAlreadyExist') {
       return { ok: true, existed: true };
     }
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message, details: respData };
   }
 }
 
 async function uploadFaceBase64(device, employeeNo, name, jpegBase64) {
   // Use the multipart ISAPI endpoint that accepts base64-encoded face data
-  // This avoids needing to serve the image via HTTP (which doesn't work from Vercel)
   const boundary = '----WebKitFormBoundary' + crypto.randomBytes(8).toString('hex');
 
   const jsonPart = JSON.stringify({
@@ -95,21 +85,14 @@ async function uploadFaceBase64(device, employeeNo, name, jpegBase64) {
   const body = Buffer.concat([header, imageData, footer]);
 
   try {
-    const base = `http://${device.ip}`;
-    const r = await axios({
-      method: 'put',
-      url: `${base}/ISAPI/Intelligent/FDLib/FDSetUp?format=json`,
-      data: body,
-      auth: { username: device.username, password: device.password },
+    const { data } = await hikRequest(device, 'put', '/ISAPI/Intelligent/FDLib/FDSetUp?format=json', body, {
       headers: {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'Content-Length': body.length,
       },
       timeout: 30000,
-      maxContentLength: 50 * 1024 * 1024,
-      maxBodyLength: 50 * 1024 * 1024,
     });
-    return { ok: r.data?.statusCode === 1 || r.status === 200, data: r.data };
+    return { ok: data?.statusCode === 1 || true, data };
   } catch (e) {
     return { ok: false, error: e.response?.data || e.message };
   }

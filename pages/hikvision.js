@@ -22,8 +22,8 @@ export default function HikvisionPortal() {
   // Connection state
   const [device, setDevice] = useState({
     ip: '10.26.30.200',
-    username: 'admin',
-    password: 'password.123',
+    username: '',
+    password: '',
   });
   const [connecting, setConnecting] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState(null);

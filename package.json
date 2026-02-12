@@ -11,12 +11,13 @@
   },
   "dependencies": {
     "@google-cloud/firestore": "^8.0.0",
+    "@mhoc/axios-digest-auth": "^0.8.0",
     "axios": "^1.4.0",
+    "busboy": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "firebase": "^10.5.0",
     "firebase-admin": "^11.11.1",
-    "busboy": "^1.6.0",
     "next": "^14.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

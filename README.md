@@ -73,7 +73,7 @@ web-dataset-collector/
 ### Get Binus API Key
 
 Your API_KEY should be the base64 encoded string from your Binus School API:
-- Format: `API_KEY=OUQyQjdEN0EtREFDQy00QkEyLTg3QTAtNUFGNDVDOUZCRTgy`
+- Format: `API_KEY=<your-base64-encoded-api-key>`
 
 ## 🌐 Deploy to Vercel
 

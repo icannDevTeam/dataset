@@ -20,9 +20,9 @@ import { initializeFirebase, getFirebaseStorage } from '../../../lib/firebase-ad
 import os from 'os';
 import net from 'net';
 
-const HIK_IP = process.env.HIKVISION_IP || '10.26.30.200';
-const HIK_USER = process.env.HIKVISION_USER || 'admin';
-const HIK_PASS = process.env.HIKVISION_PASS || 'password.123';
+const HIK_IP = process.env.HIKVISION_IP || '';
+const HIK_USER = process.env.HIKVISION_USER || '';
+const HIK_PASS = process.env.HIKVISION_PASS || '';
 const HIK_BASE = `http://${HIK_IP}`;
 const SERVE_PORT = 8889; // Temp HTTP server port (different from Python's 8888)
 

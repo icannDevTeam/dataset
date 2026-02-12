@@ -3,25 +3,12 @@
  *
  * Tests connection to a Hikvision device and returns device info + enrolled users.
  * Device credentials are sent in the request body (portal can connect to any device).
+ * Uses HTTP Digest Authentication (required by Hikvision ISAPI).
  *
  * Body: { ip, username, password }
  */
 
-import axios from 'axios';
-
-async function hikJson(device, method, apiPath, data = null) {
-  const base = `http://${device.ip}`;
-  const opts = {
-    method,
-    url: `${base}${apiPath}`,
-    auth: { username: device.username, password: device.password },
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 10000,
-  };
-  if (data) opts.data = data;
-  const r = await axios(opts);
-  return r.data;
-}
+import { hikRequest, hikJson } from '../../../lib/hikvision';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -40,13 +27,12 @@ export default async function handler(req, res) {
     // Device info (XML endpoint)
     let deviceInfo = {};
     try {
-      const r = await axios.get(`http://${ip}/ISAPI/System/deviceInfo`, {
-        auth: { username, password },
+      const { data: xml } = await hikRequest(device, 'get', '/ISAPI/System/deviceInfo', null, {
+        headers: { 'Content-Type': 'application/xml' },
         timeout: 10000,
       });
-      const xml = r.data;
       const extract = (tag) => {
-        const m = xml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`));
+        const m = String(xml).match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`));
         return m ? m[1] : '';
       };
       deviceInfo = {
