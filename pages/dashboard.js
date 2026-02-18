@@ -7,14 +7,16 @@
  * Features:
  *   - Auto-refresh every 10 seconds
  *   - Today's summary stats (present, late, absent)
- *   - Student attendance list with timestamps
+ *   - Student attendance list with class, grade, timestamps
+ *   - Filter by class, grade, status
+ *   - Sortable columns (name, class, grade, time, status)
  *   - Date picker for historical view
  *   - Device connection status
  */
 
 import Head from 'next/head';
 import Link from 'next/link';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import styles from '../styles/dashboard.module.css';
 
 function getWIBDate() {
@@ -42,6 +44,16 @@ export default function Dashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const prevRecordCount = useRef(0);
 
+  // Filter & sort state
+  const [availableClasses, setAvailableClasses] = useState([]);
+  const [availableGrades, setAvailableGrades] = useState([]);
+  const [filterClass, setFilterClass] = useState('');
+  const [filterGrade, setFilterGrade] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortField, setSortField] = useState('time');   // name | class | grade | time | status
+  const [sortDir, setSortDir] = useState('asc');         // asc | desc
+
   // Clock ticker
   useEffect(() => {
     const timer = setInterval(() => setClock(getWIBTime()), 1000);
@@ -65,12 +77,14 @@ export default function Dashboard() {
 
       // Check for new records
       if (data.records.length > prevRecordCount.current && prevRecordCount.current > 0) {
-        // New attendance detected — could trigger notification
+        // New attendance detected
       }
       prevRecordCount.current = data.records.length;
 
       setRecords(data.records);
       setSummary(data.summary);
+      setAvailableClasses(data.availableClasses || []);
+      setAvailableGrades(data.availableGrades || []);
       setLastFetch(getWIBTime());
       setError(null);
     } catch (err) {
@@ -124,6 +138,78 @@ export default function Dashboard() {
   };
 
   const isToday = date === getWIBDate();
+
+  // ─── Filtering ───
+  const filteredRecords = useMemo(() => {
+    return records.filter((r) => {
+      if (filterClass && r.homeroom !== filterClass) return false;
+      if (filterGrade && r.grade !== filterGrade) return false;
+      if (filterStatus === 'present' && r.late) return false;
+      if (filterStatus === 'late' && !r.late) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const name = (r.name || '').toLowerCase();
+        const id = (r.employeeNo || '').toLowerCase();
+        if (!name.includes(q) && !id.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [records, filterClass, filterGrade, filterStatus, searchQuery]);
+
+  // ─── Sorting ───
+  const sortedRecords = useMemo(() => {
+    const sorted = [...filteredRecords];
+    sorted.sort((a, b) => {
+      let va, vb;
+      switch (sortField) {
+        case 'name':
+          va = (a.name || '').toLowerCase();
+          vb = (b.name || '').toLowerCase();
+          return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+        case 'class':
+          va = a.homeroom || '';
+          vb = b.homeroom || '';
+          return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+        case 'grade':
+          va = parseInt(a.grade) || 99;
+          vb = parseInt(b.grade) || 99;
+          return sortDir === 'asc' ? va - vb : vb - va;
+        case 'status':
+          va = a.late ? 1 : 0;
+          vb = b.late ? 1 : 0;
+          return sortDir === 'asc' ? va - vb : vb - va;
+        case 'time':
+        default:
+          va = a.timestamp || '';
+          vb = b.timestamp || '';
+          return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+      }
+    });
+    return sorted;
+  }, [filteredRecords, sortField, sortDir]);
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const sortIcon = (field) => {
+    if (sortField !== field) return ' ↕';
+    return sortDir === 'asc' ? ' ↑' : ' ↓';
+  };
+
+  const hasActiveFilters = filterClass || filterGrade || filterStatus || searchQuery;
+
+  const clearFilters = () => {
+    setFilterClass('');
+    setFilterGrade('');
+    setFilterStatus('');
+    setSearchQuery('');
+  };
 
   return (
     <>
@@ -267,6 +353,54 @@ export default function Dashboard() {
               )}
             </div>
 
+            {/* Filter bar */}
+            <div className={styles.filterBar}>
+              <input
+                type="text"
+                placeholder="Search name or ID..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={styles.searchInput}
+              />
+              <select
+                value={filterGrade}
+                onChange={(e) => setFilterGrade(e.target.value)}
+                className={styles.filterSelect}
+              >
+                <option value="">All Grades</option>
+                {availableGrades.map((g) => (
+                  <option key={g} value={g}>Grade {g}</option>
+                ))}
+              </select>
+              <select
+                value={filterClass}
+                onChange={(e) => setFilterClass(e.target.value)}
+                className={styles.filterSelect}
+              >
+                <option value="">All Classes</option>
+                {availableClasses.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className={styles.filterSelect}
+              >
+                <option value="">All Status</option>
+                <option value="present">Present</option>
+                <option value="late">Late</option>
+              </select>
+              {hasActiveFilters && (
+                <button onClick={clearFilters} className={styles.clearFilterBtn} title="Clear all filters">
+                  ✕
+                </button>
+              )}
+              <span className={styles.filterCount}>
+                {sortedRecords.length}{filteredRecords.length !== records.length ? ` / ${records.length}` : ''}
+              </span>
+            </div>
+
             {loading ? (
               <div className={styles.empty}>Loading...</div>
             ) : records.length === 0 ? (
@@ -279,29 +413,51 @@ export default function Dashboard() {
                   </p>
                 )}
               </div>
+            ) : sortedRecords.length === 0 ? (
+              <div className={styles.empty}>
+                <div className={styles.emptyIcon}>🔍</div>
+                <p>No records match current filters</p>
+                <button onClick={clearFilters} className={styles.connectBtn}>Clear Filters</button>
+              </div>
             ) : (
               <div className={styles.tableWrap}>
                 <table className={styles.table}>
                   <thead>
                     <tr>
-                      <th>#</th>
-                      <th>Name</th>
-                      <th>Time</th>
-                      <th>Status</th>
+                      <th className={styles.thNum}>#</th>
+                      <th className={styles.thSortable} onClick={() => handleSort('name')}>
+                        Name{sortIcon('name')}
+                      </th>
+                      <th className={styles.thSortable} onClick={() => handleSort('class')}>
+                        Class{sortIcon('class')}
+                      </th>
+                      <th className={styles.thSortable} onClick={() => handleSort('grade')}>
+                        Grade{sortIcon('grade')}
+                      </th>
+                      <th className={styles.thSortable} onClick={() => handleSort('time')}>
+                        Time{sortIcon('time')}
+                      </th>
+                      <th className={styles.thSortable} onClick={() => handleSort('status')}>
+                        Status{sortIcon('status')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {records.map((r, i) => (
+                    {sortedRecords.map((r, i) => (
                       <tr key={r.id || i} className={r.late ? styles.rowLate : styles.rowPresent}>
                         <td className={styles.rowNum}>{i + 1}</td>
                         <td className={styles.rowName}>{r.name}</td>
+                        <td className={styles.rowClass}>{r.homeroom || '—'}</td>
+                        <td className={styles.rowGrade}>{r.grade || '—'}</td>
                         <td className={styles.rowTime}>
                           {r.timestamp ? r.timestamp.split(' ')[1] || r.timestamp : '—'}
                         </td>
                         <td>
-                          <span className={`${styles.badge} ${r.late ? styles.badgeLate : styles.badgePresent}`}>
-                            {r.status || (r.late ? 'Late' : 'Present')}
-                          </span>
+                          {r.late ? (
+                            <span className={`${styles.badge} ${styles.badgeLate}`}>Late</span>
+                          ) : (
+                            <span className={`${styles.badge} ${styles.badgePresent}`}>Present</span>
+                          )}
                         </td>
                       </tr>
                     ))}
