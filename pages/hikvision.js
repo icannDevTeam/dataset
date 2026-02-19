@@ -42,6 +42,9 @@ export default function HikvisionPortal() {
   const [enrollResults, setEnrollResults] = useState([]);
   const [enrollMessage, setEnrollMessage] = useState('');
 
+  // Delete state
+  const [deletingUser, setDeletingUser] = useState(null);
+
   // Error
   const [error, setError] = useState('');
 
@@ -66,6 +69,32 @@ export default function HikvisionPortal() {
       setError(`Connection failed: ${msg}`);
     } finally {
       setConnecting(false);
+    }
+  };
+
+  // ── Delete user from device ──
+  const handleDeleteUser = async (user) => {
+    if (!confirm(`Remove ${user.name} (${user.employeeNo}) from the device?`)) return;
+    setDeletingUser(user.employeeNo);
+    setError('');
+    try {
+      await axios.post('/api/hikvision/delete', {
+        device,
+        employeeNo: user.employeeNo,
+        name: user.name,
+      });
+      // Remove from local state
+      setEnrolledUsers((prev) => prev.filter((u) => u.employeeNo !== user.employeeNo));
+      setDeviceStats((prev) => ({
+        ...prev,
+        totalUsers: Math.max(0, (prev.totalUsers || 0) - 1),
+        totalFaces: Math.max(0, (prev.totalFaces || 0) - (user.numOfFace || 0)),
+      }));
+    } catch (err) {
+      const msg = err.response?.data?.error || err.response?.data?.details || err.message;
+      setError(`Delete failed: ${msg}`);
+    } finally {
+      setDeletingUser(null);
     }
   };
 
@@ -218,9 +247,9 @@ export default function HikvisionPortal() {
         <div className={styles.header}>
           <h1>🔐 Hikvision Enrollment Portal</h1>
           <div className={styles.headerActions}>
-            <Link href="/" className={styles.navLink}>
-              📸 Capture
-            </Link>
+            <Link href="/device-manager" className={styles.navLink}>📋 Device</Link>
+            <Link href="/dashboard" className={styles.navLink}>📊 Dashboard</Link>
+            <Link href="/" className={styles.navLink}>📸 Capture</Link>
           </div>
         </div>
 
@@ -333,9 +362,19 @@ export default function HikvisionPortal() {
                     enrolledUsers.map((u, i) => (
                       <div key={i} className={styles.enrolledUser}>
                         <span className={styles.enrolledName}>{u.name}</span>
-                        <span className={styles.enrolledBadge}>
-                          {u.numOfFace} face{u.numOfFace !== 1 ? 's' : ''}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span className={styles.enrolledBadge}>
+                            {u.numOfFace} face{u.numOfFace !== 1 ? 's' : ''}
+                          </span>
+                          <button
+                            className={styles.deleteBtn}
+                            onClick={() => handleDeleteUser(u)}
+                            disabled={deletingUser === u.employeeNo}
+                            title={`Remove ${u.name} from device`}
+                          >
+                            {deletingUser === u.employeeNo ? '...' : '✕'}
+                          </button>
+                        </div>
                       </div>
                     ))
                   )}
