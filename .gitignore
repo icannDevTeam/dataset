@@ -25,6 +25,14 @@ captured_faces/
 # Local capture server (not needed on Vercel)
 capture_server.py
 
+# Docs with sensitive info (endpoints, credentials, architecture)
+API_LOOKUP.md
+ARCHITECTURE.md
+DASHBOARD_SYSTEM.md
+DEPLOYMENT_CHECKLIST.md
+INTEGRATION.md
+QUICKSTART.md
+
 # IDE / OS
 .DS_Store
 .idea/
