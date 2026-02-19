@@ -50,8 +50,9 @@ export default function Dashboard() {
   const [filterClass, setFilterClass] = useState('');
   const [filterGrade, setFilterGrade] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterSource, setFilterSource] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortField, setSortField] = useState('time');   // name | class | grade | time | status
+  const [sortField, setSortField] = useState('time');   // name | class | grade | time | status | source
   const [sortDir, setSortDir] = useState('asc');         // asc | desc
 
   // Clock ticker
@@ -146,6 +147,7 @@ export default function Dashboard() {
       if (filterGrade && r.grade !== filterGrade) return false;
       if (filterStatus === 'present' && r.late) return false;
       if (filterStatus === 'late' && !r.late) return false;
+      if (filterSource && (r.source || '') !== filterSource) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         const name = (r.name || '').toLowerCase();
@@ -154,7 +156,7 @@ export default function Dashboard() {
       }
       return true;
     });
-  }, [records, filterClass, filterGrade, filterStatus, searchQuery]);
+  }, [records, filterClass, filterGrade, filterStatus, filterSource, searchQuery]);
 
   // ─── Sorting ───
   const sortedRecords = useMemo(() => {
@@ -178,6 +180,10 @@ export default function Dashboard() {
           va = a.late ? 1 : 0;
           vb = b.late ? 1 : 0;
           return sortDir === 'asc' ? va - vb : vb - va;
+        case 'source':
+          va = (a.source || '').toLowerCase();
+          vb = (b.source || '').toLowerCase();
+          return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
         case 'time':
         default:
           va = a.timestamp || '';
@@ -202,12 +208,13 @@ export default function Dashboard() {
     return sortDir === 'asc' ? ' ↑' : ' ↓';
   };
 
-  const hasActiveFilters = filterClass || filterGrade || filterStatus || searchQuery;
+  const hasActiveFilters = filterClass || filterGrade || filterStatus || filterSource || searchQuery;
 
   const clearFilters = () => {
     setFilterClass('');
     setFilterGrade('');
     setFilterStatus('');
+    setFilterSource('');
     setSearchQuery('');
   };
 
@@ -391,6 +398,15 @@ export default function Dashboard() {
                 <option value="present">Present</option>
                 <option value="late">Late</option>
               </select>
+              <select
+                value={filterSource}
+                onChange={(e) => setFilterSource(e.target.value)}
+                className={styles.filterSelect}
+              >
+                <option value="">All Sources</option>
+                <option value="mobile_face">📱 Mobile</option>
+                <option value="hikvision_terminal">🔐 Hikvision</option>
+              </select>
               {hasActiveFilters && (
                 <button onClick={clearFilters} className={styles.clearFilterBtn} title="Clear all filters">
                   ✕
@@ -440,6 +456,9 @@ export default function Dashboard() {
                       <th className={styles.thSortable} onClick={() => handleSort('status')}>
                         Status{sortIcon('status')}
                       </th>
+                      <th className={styles.thSortable} onClick={() => handleSort('source')}>
+                        Source{sortIcon('source')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -457,6 +476,15 @@ export default function Dashboard() {
                             <span className={`${styles.badge} ${styles.badgeLate}`}>Late</span>
                           ) : (
                             <span className={`${styles.badge} ${styles.badgePresent}`}>Present</span>
+                          )}
+                        </td>
+                        <td>
+                          {r.source === 'mobile_face' ? (
+                            <span className={`${styles.badge} ${styles.badgeMobile}`}>📱 Mobile</span>
+                          ) : r.source === 'hikvision_terminal' ? (
+                            <span className={`${styles.badge} ${styles.badgeHikvision}`}>🔐 Hikvision</span>
+                          ) : (
+                            <span className={`${styles.badge}`}>{r.source || '—'}</span>
                           )}
                         </td>
                       </tr>
