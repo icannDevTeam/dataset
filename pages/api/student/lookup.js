@@ -1,15 +1,28 @@
 import axios from 'axios';
 
+// Sanitize input: allow only alphanumeric, dashes, underscores (prevent injection)
+function sanitizeId(input) {
+  if (typeof input !== 'string' && typeof input !== 'number') return null;
+  const str = String(input).trim();
+  if (!/^[a-zA-Z0-9_-]{1,50}$/.test(str)) return null;
+  return str;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const { studentId } = req.body;
+    const rawId = req.body?.studentId;
 
-    if (!studentId) {
+    if (!rawId) {
       return res.status(400).json({ error: 'studentId is required' });
+    }
+
+    const studentId = sanitizeId(rawId);
+    if (!studentId) {
+      return res.status(400).json({ error: 'Invalid studentId format — only alphanumeric characters allowed' });
     }
 
     const apiKey = process.env.API_KEY;
@@ -22,7 +35,7 @@ export default async function handler(req, res) {
     let token;
     try {
       const tokenResponse = await axios.get(
-        'http://binusian.ws/binusschool/auth/token',
+        'https://binusian.ws/binusschool/auth/token',
         {
           headers: {
             'Authorization': `Basic ${apiKey}`,
@@ -53,7 +66,7 @@ export default async function handler(req, res) {
     let studentResponse;
     try {
       studentResponse = await axios.post(
-        'http://binusian.ws/binusschool/bss-student-enrollment',
+        'https://binusian.ws/binusschool/bss-student-enrollment',
         { IdStudent: String(studentId) },
         {
           headers: {
@@ -140,8 +153,7 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('Unexpected error in student lookup:', error);
     return res.status(500).json({ 
-      error: 'Internal server error',
-      message: error.message 
+      error: 'Internal server error'
     });
   }
 }

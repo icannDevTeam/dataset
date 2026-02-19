@@ -4,9 +4,8 @@
  * Returns the list of enrolled students from the Hikvision device.
  * Used by the dashboard to show who hasn't been recognized yet.
  *
- * Requires device credentials in request body or uses env defaults.
- * Query params:
- *   ?ip=...&username=...&password=...
+ * Device credentials are read from server-side environment variables only.
+ * No credentials are accepted via query parameters (security).
  */
 
 import { hikJson } from '../../../lib/hikvision';
@@ -17,13 +16,13 @@ export default async function handler(req, res) {
   }
 
   const device = {
-    ip: req.query.ip || process.env.HIKVISION_IP || '10.26.30.200',
-    username: req.query.username || process.env.HIKVISION_USER || '',
-    password: req.query.password || process.env.HIKVISION_PASS || '',
+    ip: process.env.HIKVISION_IP || '10.26.30.200',
+    username: process.env.HIKVISION_USER || '',
+    password: process.env.HIKVISION_PASS || '',
   };
 
   if (!device.username || !device.password) {
-    return res.status(400).json({ error: 'Device credentials required' });
+    return res.status(500).json({ error: 'Device credentials not configured on server' });
   }
 
   try {

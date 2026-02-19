@@ -109,6 +109,33 @@ export default async function handler(req, res) {
       });
     }
 
+    // Validate MIME type — only accept actual image files
+    const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedMimes.includes(imageFile.mimetype)) {
+      return res.status(400).json({
+        error: 'Invalid file type',
+        details: `Only JPEG, PNG, and WebP images are accepted. Got: ${imageFile.mimetype}`
+      });
+    }
+
+    // Validate magic bytes (file signature) to prevent MIME spoofing
+    const header = imageFile.buffer.slice(0, 4);
+    const isJPEG = header[0] === 0xFF && header[1] === 0xD8;
+    const isPNG  = header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47;
+    const isWEBP = header.length >= 4 && imageFile.buffer.slice(8, 12).toString() === 'WEBP';
+    if (!isJPEG && !isPNG && !isWEBP) {
+      return res.status(400).json({
+        error: 'Invalid image file',
+        details: 'File content does not match a valid image format'
+      });
+    }
+
+    // Sanitize path components to prevent directory traversal
+    const safeName = (s) => String(s).replace(/[^a-zA-Z0-9 _.-]/g, '').substring(0, 100);
+    const safeStudentName = safeName(studentName);
+    const safeClassName = safeName(className);
+    const safeStudentId = safeName(studentId);
+
     console.log(`Processing photo ${photoNumber}/${totalPhotos} for ${displayLabel}`);
 
     // Image buffer is already in memory from busboy
@@ -128,7 +155,7 @@ export default async function handler(req, res) {
       console.log('Storage bucket connected:', bucket.name);
       
       // Path: face_dataset/{ClassName}/{StudentName}/photo_{number}_{timestamp}.jpg
-      const fileName = `face_dataset/${className}/${studentName}/photo_${photoNumber}_${Date.now()}.jpg`;
+      const fileName = `face_dataset/${safeClassName}/${safeStudentName}/photo_${photoNumber}_${Date.now()}.jpg`;
       console.log('Uploading file:', fileName);
       
       const file = bucket.file(fileName);
@@ -228,9 +255,7 @@ export default async function handler(req, res) {
     console.error('Upload error:', error);
     console.error('Error stack:', error.stack);
     return res.status(500).json({ 
-      error: 'Upload failed',
-      message: error.message,
-      stack: error.stack?.split('\n').slice(0, 5)
+      error: 'Upload failed'
     });
   }
 }
