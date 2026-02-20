@@ -628,6 +628,19 @@ export default function HikvisionPortal() {
             )}
           </div>
         )}
+
+        <footer style={{
+          textAlign: 'center',
+          padding: '1rem',
+          color: '#94a3b8',
+          fontSize: '0.72rem',
+          fontWeight: 500,
+          letterSpacing: '0.02em',
+          borderTop: '1px solid #e2e8f0',
+          marginTop: '2rem',
+        }}>
+          © 2026 BINUS School AI Club
+        </footer>
       </div>
     </>
   );

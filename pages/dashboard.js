@@ -537,10 +537,10 @@ export default function Dashboard() {
         {/* Footer */}
         <footer className={styles.footer}>
           <span>
-            Listener: <code>python attendance_listener.py</code> on Jetson
-          </span>
-          <span>
             {isToday && autoRefresh && '● Live'} · {date}
+          </span>
+          <span className={styles.footerCopyright}>
+            © 2026 BINUS School AI Club
           </span>
         </footer>
       </div>

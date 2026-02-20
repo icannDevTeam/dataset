@@ -58,6 +58,17 @@ export default function Home() {
             onUploadComplete={handleUploadComplete}
           />
         )}
+        <footer style={{
+          textAlign: 'center',
+          padding: '0.75rem 1rem',
+          color: 'rgba(255,255,255,0.4)',
+          fontSize: '0.72rem',
+          fontWeight: 500,
+          letterSpacing: '0.02em',
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+        }}>
+          © 2026 BINUS School AI Club
+        </footer>
       </div>
     </>
   );

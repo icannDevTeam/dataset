@@ -634,6 +634,13 @@
   font-size: 0.75rem;
 }
 
+.footerCopyright {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
 /* ─── Responsive ──────────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
