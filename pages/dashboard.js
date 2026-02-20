@@ -242,6 +242,7 @@ export default function Dashboard() {
         <nav className={styles.nav}>
           <Link href="/" className={styles.navLink}>📷 Capture</Link>
           <Link href="/hikvision" className={styles.navLink}>🔐 Enrollment</Link>
+          <Link href="/mobile-enrollment" className={styles.navLink}>📱 Mobile</Link>
           <Link href="/device-manager" className={styles.navLink}>📋 Device</Link>
           <span className={`${styles.navLink} ${styles.navActive}`}>📊 Dashboard</span>
           <div className={styles.navSpacer} />

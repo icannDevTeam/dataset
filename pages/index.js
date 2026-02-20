@@ -48,6 +48,13 @@ export default function Home() {
           }}>
             🔐 Hikvision Portal
           </Link>
+          <Link href="/mobile-enrollment" style={{
+            padding: '8px 14px', background: 'rgba(0,0,0,0.5)', color: '#c084fc',
+            borderRadius: 6, fontSize: '0.85rem', border: '1px solid rgba(167,139,250,0.3)',
+            textDecoration: 'none'
+          }}>
+            📱 Mobile Enrollment
+          </Link>
         </div>
         {currentPage === 'enrollment' ? (
           <EnrollmentPage onStudentData={handleStudentData} />
