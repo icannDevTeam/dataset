@@ -14,8 +14,10 @@
 import axios from 'axios';
 import { withMetrics, trackExternalCall } from '../../../lib/metrics';
 
-const BINUS_TOKEN_URL = 'https://binusian.ws/binusschool/auth/token';
-const BINUS_ATTENDANCE_URL = 'https://binusian.ws/binusschool/bss-get-simprug-attendance-fr';
+// BINUS API base — defaults to https (Vercel cloud), override via BINUS_API_BASE env var
+const BINUS_BASE = process.env.BINUS_API_BASE || 'https://binusian.ws';
+const BINUS_TOKEN_URL = `${BINUS_BASE}/binusschool/auth/token`;
+const BINUS_ATTENDANCE_URL = `${BINUS_BASE}/binusschool/bss-get-simprug-attendance-fr`;
 
 // Sanitize optional ID fields
 function sanitizeOptionalId(input) {

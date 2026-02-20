@@ -1,6 +1,9 @@
 import axios from 'axios';
 import { withMetrics } from '../../../lib/metrics';
 
+// BINUS API base — defaults to https (Vercel cloud), overridden to http for local dev
+const BINUS_BASE = process.env.BINUS_API_BASE || 'https://binusian.ws';
+
 // Sanitize input: allow only alphanumeric, dashes, underscores (prevent injection)
 function sanitizeId(input) {
   if (typeof input !== 'string' && typeof input !== 'number') return null;
@@ -36,7 +39,7 @@ async function handler(req, res) {
     let token;
     try {
       const tokenResponse = await axios.get(
-        'https://binusian.ws/binusschool/auth/token',
+        `${BINUS_BASE}/binusschool/auth/token`,
         {
           headers: {
             'Authorization': `Basic ${apiKey}`,
@@ -67,7 +70,7 @@ async function handler(req, res) {
     let studentResponse;
     try {
       studentResponse = await axios.post(
-        'https://binusian.ws/binusschool/bss-student-enrollment',
+        `${BINUS_BASE}/binusschool/bss-student-enrollment`,
         { IdStudent: String(studentId) },
         {
           headers: {
