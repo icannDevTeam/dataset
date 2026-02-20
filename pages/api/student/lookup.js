@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { withMetrics } from '../../../lib/metrics';
 
-// BINUS API base — defaults to https (Vercel cloud), overridden to http for local dev
-const BINUS_BASE = process.env.BINUS_API_BASE || 'https://binusian.ws';
+// BINUS API only serves on HTTP port 80 (HTTPS port 443 returns 404)
+const BINUS_BASE = 'http://binusian.ws';
 
 // Sanitize input: allow only alphanumeric, dashes, underscores (prevent injection)
 function sanitizeId(input) {

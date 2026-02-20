@@ -14,8 +14,8 @@
 import axios from 'axios';
 import { withMetrics, trackExternalCall } from '../../../lib/metrics';
 
-// BINUS API base — defaults to https (Vercel cloud), override via BINUS_API_BASE env var
-const BINUS_BASE = process.env.BINUS_API_BASE || 'https://binusian.ws';
+// BINUS API only serves on HTTP port 80 (HTTPS port 443 returns 404)
+const BINUS_BASE = 'http://binusian.ws';
 const BINUS_TOKEN_URL = `${BINUS_BASE}/binusschool/auth/token`;
 const BINUS_ATTENDANCE_URL = `${BINUS_BASE}/binusschool/bss-get-simprug-attendance-fr`;
 
