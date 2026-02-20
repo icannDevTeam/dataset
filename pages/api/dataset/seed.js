@@ -20,8 +20,9 @@
  */
 
 import { initializeFirebase, getFirebaseStorage, getFirestoreDB } from '../../../lib/firebase-admin';
+import { withMetrics } from '../../../lib/metrics';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === 'GET') {
     return handleGetPhotos(req, res);
   }
@@ -125,3 +126,5 @@ async function handleSaveDescriptors(req, res) {
     return res.status(500).json({ error: 'Failed to save descriptors', details: error.message });
   }
 }
+
+export default withMetrics(handler);

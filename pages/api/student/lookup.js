@@ -36,7 +36,7 @@ async function handler(req, res) {
     let token;
     try {
       const tokenResponse = await axios.get(
-        'http://binusian.ws/binusschool/auth/token',
+        'https://binusian.ws/binusschool/auth/token',
         {
           headers: {
             'Authorization': `Basic ${apiKey}`,
@@ -67,7 +67,7 @@ async function handler(req, res) {
     let studentResponse;
     try {
       studentResponse = await axios.post(
-        'http://binusian.ws/binusschool/bss-student-enrollment',
+        'https://binusian.ws/binusschool/bss-student-enrollment',
         { IdStudent: String(studentId) },
         {
           headers: {

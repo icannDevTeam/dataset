@@ -55,6 +55,13 @@ export default function Home() {
           }}>
             📱 Mobile Enrollment
           </Link>
+          <Link href="/attendance-monitor" style={{
+            padding: '8px 14px', background: 'rgba(0,0,0,0.5)', color: '#2dd4bf',
+            borderRadius: 6, fontSize: '0.85rem', border: '1px solid rgba(45,212,191,0.3)',
+            textDecoration: 'none'
+          }}>
+            📋 BINUS Logs
+          </Link>
         </div>
         {currentPage === 'enrollment' ? (
           <EnrollmentPage onStudentData={handleStudentData} />

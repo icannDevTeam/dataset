@@ -288,6 +288,7 @@ export default function MobileEnrollmentPortal() {
           <h1>📱 Mobile App Enrollment</h1>
           <div className={styles.headerActions}>
             <Link href="/dashboard" className={styles.navLink}>📊 Dashboard</Link>
+            <Link href="/attendance-monitor" className={styles.navLink}>📋 BINUS Logs</Link>
             <Link href="/hikvision" className={styles.navLink}>🔐 Hikvision</Link>
             <Link href="/" className={styles.navLink}>📸 Collector</Link>
           </div>

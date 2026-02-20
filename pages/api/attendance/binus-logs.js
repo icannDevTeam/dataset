@@ -14,8 +14,8 @@
 import axios from 'axios';
 import { withMetrics, trackExternalCall } from '../../../lib/metrics';
 
-const BINUS_TOKEN_URL = 'http://binusian.ws/binusschool/auth/token';
-const BINUS_ATTENDANCE_URL = 'http://binusian.ws/binusschool/bss-get-simprug-attendance-fr';
+const BINUS_TOKEN_URL = 'https://binusian.ws/binusschool/auth/token';
+const BINUS_ATTENDANCE_URL = 'https://binusian.ws/binusschool/bss-get-simprug-attendance-fr';
 
 // Sanitize optional ID fields
 function sanitizeOptionalId(input) {

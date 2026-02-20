@@ -9,6 +9,7 @@
  */
 
 import { getFirestoreDB } from '../../../lib/firebase-admin';
+import { withMetrics } from '../../../lib/metrics';
 
 function getWIBDate(dateStr) {
   if (dateStr) return dateStr;
@@ -16,7 +17,7 @@ function getWIBDate(dateStr) {
   return now.toISOString().slice(0, 10);
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -113,3 +114,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message });
   }
 }
+
+export default withMetrics(handler);
