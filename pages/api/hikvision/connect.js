@@ -8,7 +8,7 @@
  * Body: { ip, username, password }
  */
 
-import { hikRequest, hikJson } from '../../../lib/hikvision';
+import { hikRequest, hikJson, isAllowedDeviceIP } from '../../../lib/hikvision';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -19,6 +19,10 @@ export default async function handler(req, res) {
 
   if (!ip || !username || !password) {
     return res.status(400).json({ error: 'Missing device credentials (ip, username, password)' });
+  }
+
+  if (!isAllowedDeviceIP(ip)) {
+    return res.status(400).json({ error: 'Invalid device IP. Only private LAN addresses are allowed.' });
   }
 
   const device = { ip, username, password };

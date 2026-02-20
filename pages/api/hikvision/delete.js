@@ -9,7 +9,7 @@
  *   2. Delete user record from device
  */
 
-import { hikRequest, hikJson } from '../../../lib/hikvision';
+import { hikRequest, hikJson, isAllowedDeviceIP } from '../../../lib/hikvision';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -20,6 +20,10 @@ export default async function handler(req, res) {
 
   if (!device?.ip || !device?.username || !device?.password) {
     return res.status(400).json({ error: 'Missing device credentials' });
+  }
+
+  if (!isAllowedDeviceIP(device.ip)) {
+    return res.status(400).json({ error: 'Invalid device IP. Only private LAN addresses are allowed.' });
   }
 
   if (!employeeNo) {
@@ -74,7 +78,9 @@ export default async function handler(req, res) {
     const sub = error.response?.data?.subStatusCode
       || error.response?.data?.StatusString?.subStatusCode
       || '';
-    if (sub === 'employeeNoNotExist' || sub === 'deviceUserNotExist') {
+    const errMsg = error.response?.data?.errorMsg || '';
+    if (sub === 'employeeNoNotExist' || sub === 'deviceUserNotExist'
+        || (sub === 'badJsonContent' && errMsg === 'employeeNo')) {
       return res.status(200).json({
         success: true,
         message: `${name || employeeNo} was already removed`,

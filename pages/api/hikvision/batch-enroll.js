@@ -109,6 +109,12 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing device credentials (ip, username, password)' });
   }
 
+  // SSRF protection — only allow private LAN IPs
+  const { isAllowedDeviceIP } = await import('../../../lib/hikvision');
+  if (!isAllowedDeviceIP(device.ip)) {
+    return res.status(400).json({ error: 'Invalid device IP. Only private LAN addresses are allowed.' });
+  }
+
   if (!students || !Array.isArray(students) || students.length === 0) {
     return res.status(400).json({ error: 'No students to enroll' });
   }

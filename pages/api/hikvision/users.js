@@ -9,7 +9,7 @@
  * Returns: { users: [...], device: {...}, capacity: {...} }
  */
 
-import { hikRequest, hikJson } from '../../../lib/hikvision';
+import { hikRequest, hikJson, isAllowedDeviceIP } from '../../../lib/hikvision';
 import { initializeFirebase, getFirebaseAdmin } from '../../../lib/firebase-admin';
 
 export default async function handler(req, res) {
@@ -21,6 +21,10 @@ export default async function handler(req, res) {
 
   if (!device?.ip || !device?.username || !device?.password) {
     return res.status(400).json({ error: 'Missing device credentials' });
+  }
+
+  if (!isAllowedDeviceIP(device.ip)) {
+    return res.status(400).json({ error: 'Invalid device IP. Only private LAN addresses are allowed.' });
   }
 
   try {

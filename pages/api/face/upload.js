@@ -131,7 +131,14 @@ export default async function handler(req, res) {
     }
 
     // Sanitize path components to prevent directory traversal
-    const safeName = (s) => String(s).replace(/[^a-zA-Z0-9 _.-]/g, '').substring(0, 100);
+    const safeName = (s) => {
+      let clean = String(s).replace(/[^a-zA-Z0-9 _.-]/g, '');  // strip dangerous chars
+      clean = clean.replace(/\.{2,}/g, '.');  // collapse ".." sequences to single dot
+      clean = clean.replace(/^[.\s]+/, '');    // strip leading dots/spaces
+      clean = clean.replace(/[.\s]+$/, '');    // strip trailing dots/spaces
+      clean = clean.substring(0, 100);
+      return clean || 'unknown';               // never return empty string
+    };
     const safeStudentName = safeName(studentName);
     const safeClassName = safeName(className);
     const safeStudentId = safeName(studentId);
