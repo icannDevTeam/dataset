@@ -67,7 +67,7 @@ export default function Home() {
           letterSpacing: '0.02em',
           borderTop: '1px solid rgba(255,255,255,0.06)',
         }}>
-          © 2026 BINUS School AI Club
+          © 2026 BINUS School Simprug AI Club
         </footer>
       </div>
     </>

@@ -639,7 +639,7 @@ export default function HikvisionPortal() {
           borderTop: '1px solid #e2e8f0',
           marginTop: '2rem',
         }}>
-          © 2026 BINUS School AI Club
+          © 2026 BINUS School Simprug AI Club
         </footer>
       </div>
     </>

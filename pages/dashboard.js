@@ -540,7 +540,7 @@ export default function Dashboard() {
             {isToday && autoRefresh && '● Live'} · {date}
           </span>
           <span className={styles.footerCopyright}>
-            © 2026 BINUS School AI Club
+            © 2026 BINUS School Simprug AI Club
           </span>
         </footer>
       </div>
