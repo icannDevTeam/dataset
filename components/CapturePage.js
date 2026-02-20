@@ -120,11 +120,31 @@ export default function CapturePage({ studentData, onBack, onUploadComplete }) {
     let cancelled = false;
 
     const init = async () => {
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setError('Camera access is not supported in this browser. Please use a modern browser with HTTPS.');
+        return;
+      }
+
       // Trigger a permission prompt first (needed to get device labels)
       try {
         const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         tempStream.getTracks().forEach(t => t.stop());
-      } catch (_) {}
+      } catch (permErr) {
+        console.error('Camera permission error:', permErr.name, permErr.message);
+        if (permErr.name === 'NotAllowedError') {
+          setError('Camera access denied. Please allow camera permissions in your browser settings and reload the page.');
+        } else if (permErr.name === 'NotFoundError') {
+          setError('No camera found on this device.');
+        } else if (permErr.name === 'NotReadableError') {
+          setError('Camera is in use by another application. Please close other apps using the camera and try again.');
+        } else {
+          setError(`Camera error: ${permErr.message || permErr.name}`);
+        }
+        return;
+      }
+
+      if (cancelled) return;
 
       const videoDevices = await enumerateCameras();
       if (cancelled) return;
@@ -367,7 +387,23 @@ export default function CapturePage({ studentData, onBack, onUploadComplete }) {
               muted
               className={styles.video}
             />
-            {!cameraReady && <div className={styles.cameraLoading}>Initializing camera...</div>}
+            {!cameraReady && !error && <div className={styles.cameraLoading}>Initializing camera...</div>}
+            {!cameraReady && error && (
+              <div className={styles.cameraLoading} style={{ color: '#f87171', fontSize: '0.9rem', padding: '1.5rem' }}>
+                ⚠️ {error}
+                <br /><br />
+                <button
+                  onClick={() => { setError(''); window.location.reload(); }}
+                  style={{
+                    padding: '8px 16px', background: 'rgba(248,113,113,0.2)',
+                    color: '#f87171', border: '1px solid rgba(248,113,113,0.4)',
+                    borderRadius: 6, cursor: 'pointer', fontSize: '0.85rem'
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
 
             {/* Face guide overlay */}
             <svg className={styles.faceGuide} viewBox="0 0 640 480" preserveAspectRatio="none">
