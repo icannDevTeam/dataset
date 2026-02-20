@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { withMetrics } from '../../../lib/metrics';
 
 // Sanitize input: allow only alphanumeric, dashes, underscores (prevent injection)
 function sanitizeId(input) {
@@ -8,7 +9,7 @@ function sanitizeId(input) {
   return str;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -35,7 +36,7 @@ export default async function handler(req, res) {
     let token;
     try {
       const tokenResponse = await axios.get(
-        'https://binusian.ws/binusschool/auth/token',
+        'http://binusian.ws/binusschool/auth/token',
         {
           headers: {
             'Authorization': `Basic ${apiKey}`,
@@ -66,7 +67,7 @@ export default async function handler(req, res) {
     let studentResponse;
     try {
       studentResponse = await axios.post(
-        'https://binusian.ws/binusschool/bss-student-enrollment',
+        'http://binusian.ws/binusschool/bss-student-enrollment',
         { IdStudent: String(studentId) },
         {
           headers: {
@@ -157,3 +158,5 @@ export default async function handler(req, res) {
     });
   }
 }
+
+export default withMetrics(handler);

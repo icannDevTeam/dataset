@@ -73,7 +73,7 @@ app.post('/api/student/lookup', async (req, res) => {
     try {
       // Step 1: Get auth token from Binus API
       const tokenResponse = await axios.get(
-        'https://binusian.ws/binusschool/auth/token',
+        'http://binusian.ws/binusschool/auth/token',
         {
           headers: {
             'Authorization': `Basic ${apiKey}`
@@ -90,7 +90,7 @@ app.post('/api/student/lookup', async (req, res) => {
 
       // Step 2: Call C2 Student Enrollment API to get student info
       const studentResponse = await axios.post(
-        'https://binusian.ws/binusschool/bss-student-enrollment',
+        'http://binusian.ws/binusschool/bss-student-enrollment',
         { IdStudent: String(studentId) },
         {
           headers: {
