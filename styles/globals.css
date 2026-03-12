@@ -1,3 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Existing reset (preserved) ────────────────────────────────────── */
+
 * {
   margin: 0;
   padding: 0;
@@ -40,4 +46,74 @@ img {
   max-width: 100%;
   height: auto;
   display: block;
+}
+
+/* ── New design system utilities (opt-in only) ─────────────────────── */
+/* Apply .aura-theme to a page wrapper to activate the new dark theme. */
+/* Existing pages are completely unaffected.                           */
+
+.aura-theme {
+  background-color: #020617;
+  color: #f8fafc;
+  background-image:
+    radial-gradient(circle at 15% 50%, rgba(6, 182, 212, 0.05) 0%, transparent 40%),
+    radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.05) 0%, transparent 40%);
+  background-attachment: fixed;
+}
+
+.aura-theme .noise-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.02;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+.glass-panel {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Scrollbar — scoped to .aura-theme so existing pages keep defaults */
+.aura-theme ::-webkit-scrollbar { width: 6px; height: 6px; }
+.aura-theme ::-webkit-scrollbar-track { background: #0f172a; }
+.aura-theme ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+.aura-theme ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Animation delay helpers */
+.delay-100 { animation-delay: 100ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+
+/* Fade-in-up animation for cards */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s ease-out both;
+}
+
+/* Range slider — scoped to .aura-theme */
+.aura-theme input[type=range] { -webkit-appearance: none; background: transparent; }
+.aura-theme input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 20px; width: 20px; border-radius: 50%;
+  background: #22d3ee; cursor: pointer; margin-top: -8px;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
+  border: 2px solid #020617;
+}
+.aura-theme input[type=range]::-webkit-slider-runnable-track {
+  width: 100%; height: 4px; cursor: pointer;
+  background: #334155; border-radius: 2px;
 }

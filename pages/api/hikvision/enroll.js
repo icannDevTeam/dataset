@@ -16,7 +16,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
-import { initializeFirebase, getFirebaseStorage } from '../../../lib/firebase-admin';
+import { initializeFirebase, getFirebaseStorage, getFirebaseAdmin } from '../../../lib/firebase-admin';
 import os from 'os';
 import net from 'net';
 
@@ -217,6 +217,26 @@ async function handler(req, res) {
       console.log(`☁️  Firebase backup: ${blobPath}`);
     } catch (fbErr) {
       console.warn('⚠️  Firebase backup failed (non-fatal):', fbErr.message);
+    }
+
+    // Step 5: Save to student_metadata so Device Manager can link back
+    try {
+      const admin = getFirebaseAdmin();
+      const db = admin.firestore();
+      await db.collection('student_metadata').doc(employeeNo).set({
+        employeeNo,
+        name: studentName,
+        homeroom: homeroom || '',
+        grade: gradeCode || '',
+        idStudent: studentId || '',
+        idBinusian: '',
+        linkedTo: studentId || '',
+        enrolledAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+      console.log(`📋 student_metadata/${employeeNo} saved`);
+    } catch (metaErr) {
+      console.warn('⚠️  student_metadata save failed (non-fatal):', metaErr.message);
     }
 
     return res.status(200).json({

@@ -43,6 +43,7 @@ async function handler(req, res) {
 
     // Build metadata lookup: employeeNo → { homeroom, grade }
     const metaMap = {};
+    const nameMap = {};
     metadataSnap.forEach((doc) => {
       const d = doc.to_dict ? doc.to_dict() : doc.data();
       metaMap[doc.id] = {
@@ -50,6 +51,9 @@ async function handler(req, res) {
         grade: d.grade || d.gradeCode || '',
         name: d.name || '',
       };
+      if (d.name && d.homeroom) {
+        nameMap[d.name] = metaMap[doc.id];
+      }
     });
 
     // Also build from students collection (keyed by studentId = employeeNo)
@@ -67,6 +71,9 @@ async function handler(req, res) {
         if (!metaMap[id].homeroom && d.homeroom) metaMap[id].homeroom = d.homeroom;
         if (!metaMap[id].grade && (d.gradeCode || d.grade)) metaMap[id].grade = d.gradeCode || d.grade;
       }
+      if (d.name && d.homeroom && !nameMap[d.name]) {
+        nameMap[d.name] = { homeroom: d.homeroom, grade: d.gradeCode || d.grade || '', name: d.name };
+      }
     });
 
     // Enrich attendance records with class/grade
@@ -76,6 +83,11 @@ async function handler(req, res) {
       const meta = metaMap[data.employeeNo] || metaMap[doc.id] || {};
       data.homeroom = data.homeroom || meta.homeroom || '';
       data.grade = data.grade || meta.grade || '';
+      // Name-based fallback if homeroom still missing
+      if (!data.homeroom && data.name && nameMap[data.name]) {
+        data.homeroom = nameMap[data.name].homeroom;
+        if (!data.grade) data.grade = nameMap[data.name].grade;
+      }
       records.push(data);
     });
 

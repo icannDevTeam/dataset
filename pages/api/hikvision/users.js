@@ -63,16 +63,26 @@ async function handler(req, res) {
       if (pos >= total || userList.length === 0) break;
     }
 
-    // 2. Enrich with Firestore student_metadata
-    let metadataMap = {};
+    // 2. Enrich with Firestore student_metadata + students collections
+    //    Uses three lookup strategies:
+    //    a) Direct match by employeeNo (works for Python Firebase pipeline)
+    //    b) linkedTo resolution (HEX card IDs → real student entry)
+    //    c) Name-based fallback (MD5 employeeNo → match by student name)
+    let metadataMap = {};  // employeeNo → metadata
+    let nameMap = {};      // name → metadata (fallback)
+    let linkedMap = {};    // employeeNo → linkedTo employeeNo
     try {
       initializeFirebase();
       const admin = getFirebaseAdmin();
       const db = admin.firestore();
-      const snap = await db.collection('student_metadata').get();
-      snap.forEach((doc) => {
+      const [metaSnap, studentsSnap] = await Promise.all([
+        db.collection('student_metadata').get(),
+        db.collection('students').get(),
+      ]);
+
+      // Build from student_metadata
+      metaSnap.forEach((doc) => {
         const d = doc.data();
-        // Map by employeeNo (document ID or field)
         const empNo = d.employeeNo || doc.id;
         metadataMap[empNo] = {
           grade: d.grade || d.gradeName || '',
@@ -81,36 +91,74 @@ async function handler(req, res) {
           idBinusian: d.idBinusian || d.IdBinusian || '',
           studentId: d.studentId || doc.id || '',
         };
+        // Track linkedTo for HEX card ID resolution
+        if (d.linkedTo) linkedMap[empNo] = d.linkedTo;
+        // Name-based fallback (only store if entry has homeroom)
+        if (d.name && d.homeroom) {
+          nameMap[d.name] = metadataMap[empNo];
+        }
+      });
+
+      // Build from students collection (keyed by studentId)
+      studentsSnap.forEach((doc) => {
+        const d = doc.data();
+        const id = doc.id;
+        if (!metadataMap[id]) {
+          metadataMap[id] = {
+            grade: d.gradeCode || d.grade || '',
+            homeroom: d.homeroom || d.className || '',
+            idStudent: '',
+            idBinusian: '',
+            studentId: id,
+          };
+        } else {
+          // Fill in gaps
+          if (!metadataMap[id].homeroom && d.homeroom) metadataMap[id].homeroom = d.homeroom;
+          if (!metadataMap[id].grade && (d.gradeCode || d.grade)) metadataMap[id].grade = d.gradeCode || d.grade;
+        }
+        if (d.name && d.homeroom && !nameMap[d.name]) {
+          nameMap[d.name] = metadataMap[id];
+        }
       });
     } catch (e) {
       console.warn('Firestore metadata fetch (non-fatal):', e.message);
     }
 
-    // 3. Also try the students collection for additional data
-    try {
-      const admin = getFirebaseAdmin();
-      const db = admin.firestore();
-      const snap = await db.collection('students').get();
-      snap.forEach((doc) => {
-        const d = doc.data();
-        const empNo = d.employeeNo || doc.id;
-        if (!metadataMap[empNo]) {
-          metadataMap[empNo] = {
-            grade: d.grade || '',
-            homeroom: d.homeroom || d.className || '',
-            idStudent: '',
-            idBinusian: '',
-            studentId: doc.id,
+    // 3. Merge device users with metadata (multi-strategy lookup)
+    const enrichedUsers = allUsers.map((u) => {
+      // Strategy a: direct employeeNo match
+      let meta = metadataMap[u.employeeNo];
+
+      // Strategy b: resolve linkedTo (HEX card → real student entry)
+      //   Fill in any gaps (idStudent, idBinusian, homeroom, grade)
+      if (meta && linkedMap[u.employeeNo]) {
+        const linked = metadataMap[linkedMap[u.employeeNo]];
+        if (linked) {
+          meta = {
+            grade: meta.grade || linked.grade,
+            homeroom: meta.homeroom || linked.homeroom,
+            idStudent: meta.idStudent || linked.idStudent,
+            idBinusian: meta.idBinusian || linked.idBinusian,
+            studentId: meta.studentId || linked.studentId,
           };
         }
-      });
-    } catch (e) {
-      // Non-fatal
-    }
+      }
 
-    // 4. Merge device users with metadata
-    const enrichedUsers = allUsers.map((u) => {
-      const meta = metadataMap[u.employeeNo] || {};
+      // Strategy c: name-based fallback
+      if ((!meta || !meta.homeroom) && u.name && nameMap[u.name]) {
+        const nameMeta = nameMap[u.name];
+        meta = meta
+          ? {
+              grade: meta.grade || nameMeta.grade,
+              homeroom: meta.homeroom || nameMeta.homeroom,
+              idStudent: meta.idStudent || nameMeta.idStudent,
+              idBinusian: meta.idBinusian || nameMeta.idBinusian,
+              studentId: meta.studentId || nameMeta.studentId,
+            }
+          : { ...nameMeta };
+      }
+
+      meta = meta || {};
       return {
         ...u,
         grade: meta.grade || '',
@@ -121,7 +169,7 @@ async function handler(req, res) {
       };
     });
 
-    // 5. Device info
+    // 4. Device info
     let deviceInfo = {};
     try {
       const { data: xml } = await hikRequest(device, 'get', '/ISAPI/System/deviceInfo', null, {
@@ -143,7 +191,7 @@ async function handler(req, res) {
       deviceInfo = { error: e.message };
     }
 
-    // 6. Capacity
+    // 5. Capacity
     let capacity = {};
     try {
       const data = await hikJson(device, 'get', '/ISAPI/AccessControl/UserInfo/capabilities?format=json');

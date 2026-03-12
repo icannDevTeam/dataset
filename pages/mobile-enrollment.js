@@ -187,8 +187,8 @@ export default function MobileEnrollmentPortal() {
             if (detection) {
               descriptors.push(Array.from(detection.descriptor));
             }
-          } catch {
-            // Skip individual photo errors
+          } catch (photoErr) {
+            console.warn(`   Face detection error for ${photo.name}:`, photoErr.message);
           }
         }
 

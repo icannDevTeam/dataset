@@ -20,6 +20,7 @@
 import axios from 'axios';
 import crypto from 'crypto';
 import { hikRequest, hikJson } from '../../../lib/hikvision';
+import { initializeFirebase, getFirebaseAdmin } from '../../../lib/firebase-admin';
 
 function employeeNoFromName(name) {
   return crypto.createHash('md5').update(name).digest('hex').slice(0, 8).toUpperCase();
@@ -175,6 +176,25 @@ async function handler(req, res) {
         continue;
       }
       console.log(`  Face enrolled on device`);
+
+      // Step 4: Save to student_metadata for Device Manager enrichment
+      try {
+        initializeFirebase();
+        const admin = getFirebaseAdmin();
+        const db = admin.firestore();
+        await db.collection('student_metadata').doc(employeeNo).set({
+          employeeNo,
+          name: studentName,
+          homeroom: className || '',
+          grade: '',
+          idStudent: studentId || '',
+          linkedTo: studentId || '',
+          enrolledAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+      } catch (metaErr) {
+        console.warn(`  student_metadata save failed (non-fatal): ${metaErr.message}`);
+      }
 
       result.success = true;
     } catch (err) {

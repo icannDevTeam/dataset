@@ -56,11 +56,14 @@ async function handleGetPhotos(req, res) {
 
     const photos = [];
     for (const file of imageFiles.slice(0, 10)) {
-      const [url] = await file.getSignedUrl({
-        action: 'read',
-        expires: Date.now() + 30 * 60 * 1000, // 30 min
-      });
-      photos.push({ name: file.name.split('/').pop(), url });
+      // Download image server-side and return as base64 data URL
+      // to avoid CORS issues with Firebase Storage signed URLs
+      // (tainted canvas prevents face-api.js from reading pixel data)
+      const [buffer] = await file.download();
+      const ext = file.name.split('.').pop().toLowerCase();
+      const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      const dataUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+      photos.push({ name: file.name.split('/').pop(), url: dataUrl });
     }
 
     return res.status(200).json({ success: true, photos });
