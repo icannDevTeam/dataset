@@ -23,6 +23,7 @@ const NAV_SECTIONS = [
       { href: '/device-manager', icon: 'ph-cpu', label: 'Device Manager' },
       { href: '/attendance-monitor', icon: 'ph-list-checks', label: 'Attendance Monitor' },
       { href: '/hikvision', icon: 'ph-fingerprint', label: 'Hikvision' },
+      { href: '/v2/device-sync', icon: 'ph-cloud-arrow-down', label: 'Device Sync' },
     ],
   },
 ];
