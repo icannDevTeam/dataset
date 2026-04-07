@@ -40,6 +40,9 @@ export default function DashboardV2() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastFetch, setLastFetch] = useState(null);
 
+  // Thumbnails
+  const [thumbnails, setThumbnails] = useState({});
+
   // Filter & sort
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -77,6 +80,14 @@ export default function DashboardV2() {
       return () => clearInterval(timer);
     }
   }, [fetchAttendance, autoRefresh]);
+
+  // Fetch student face thumbnails (once)
+  useEffect(() => {
+    fetch('/api/dataset/thumbnails')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.thumbnails) setThumbnails(data.thumbnails); })
+      .catch(() => {});
+  }, []);
 
   // Fetch enrolled for absent count
   useEffect(() => {
@@ -425,7 +436,18 @@ export default function DashboardV2() {
                 <div className="space-y-1">
                   {lateStudents.slice(0, 20).map((s, i) => (
                     <div key={s.employeeNo || i} className="p-3 rounded-xl hover:bg-white/5 transition-colors flex gap-3 items-start border border-transparent hover:border-slate-700/50">
-                      <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+                      {(thumbnails[s.employeeNo] || thumbnails[`name:${s.name}`]) ? (
+                        <img
+                          src={thumbnails[s.employeeNo] || thumbnails[`name:${s.name}`]}
+                          alt={s.name}
+                          className="w-10 h-10 rounded-lg object-cover border border-amber-500/20 flex-shrink-0 bg-slate-800"
+                          onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                        />
+                      ) : null}
+                      <div
+                        className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 items-center justify-center flex-shrink-0"
+                        style={{ display: (thumbnails[s.employeeNo] || thumbnails[`name:${s.name}`]) ? 'none' : 'flex' }}
+                      >
                         <i className="ph ph-clock-countdown text-lg text-amber-400"></i>
                       </div>
                       <div className="flex-1 min-w-0">
@@ -536,7 +558,18 @@ export default function DashboardV2() {
                     <tr key={r.id || r.employeeNo || i} className={`hover:bg-slate-800/30 transition-colors group ${r.late ? 'bg-amber-950/5' : ''}`}>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
+                          {(thumbnails[r.employeeNo] || thumbnails[`name:${r.name}`]) ? (
+                            <img
+                              src={thumbnails[r.employeeNo] || thumbnails[`name:${r.name}`]}
+                              alt={r.name}
+                              className="w-10 h-10 rounded-lg object-cover border border-slate-700 flex-shrink-0 bg-slate-800"
+                              onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                            />
+                          ) : null}
+                          <div
+                            className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 items-center justify-center flex-shrink-0"
+                            style={{ display: (thumbnails[r.employeeNo] || thumbnails[`name:${r.name}`]) ? 'none' : 'flex' }}
+                          >
                             <span className="text-sm font-bold text-slate-400">{(r.name || '?')[0].toUpperCase()}</span>
                           </div>
                           <div>

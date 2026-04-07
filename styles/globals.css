@@ -117,3 +117,93 @@ img {
   width: 100%; height: 4px; cursor: pointer;
   background: #334155; border-radius: 2px;
 }
+
+/* ── Print styles for Reports page ─────────────────────────────────── */
+@media print {
+  /* Hide non-printable elements */
+  .no-print,
+  .aura-theme nav,
+  .aura-theme .noise-overlay,
+  .aura-theme aside,
+  .aura-theme button:not(.print-keep) {
+    display: none !important;
+  }
+
+  /* Show print-only elements */
+  .print-show {
+    display: block !important;
+  }
+
+  /* Reset dark theme for printing */
+  body,
+  .aura-theme {
+    background: white !important;
+    color: black !important;
+    background-image: none !important;
+  }
+
+  /* Make main content full width (no sidebar) */
+  .aura-theme main,
+  .aura-theme [class*="ml-"] {
+    margin-left: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Glass panels → clean white boxes for print */
+  .glass-panel {
+    background: white !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: none !important;
+  }
+
+  /* Text colors for print */
+  .print-title { color: black !important; }
+  h1, h2, h3, h4, h5, h6 { color: black !important; }
+  p, span, td, th, div { color: #1e293b !important; }
+  .text-white { color: black !important; }
+  .text-slate-300, .text-slate-400, .text-slate-500 { color: #475569 !important; }
+  .text-emerald-400 { color: #059669 !important; }
+  .text-amber-400 { color: #d97706 !important; }
+  .text-red-400 { color: #dc2626 !important; }
+  .text-brand-400, .text-brand-500 { color: #0891b2 !important; }
+
+  /* Table styles for print */
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border-bottom: 1px solid #e2e8f0 !important; padding: 6px 12px !important; }
+  th { font-weight: 600; border-bottom: 2px solid #cbd5e1 !important; }
+  tr:hover { background: transparent !important; }
+
+  /* Summary cards for print */
+  .print-summary .glass-panel {
+    border-left-width: 3px !important;
+    padding: 8px 12px !important;
+  }
+
+  /* Page breaks */
+  .print-break-inside-avoid { page-break-inside: avoid; break-inside: avoid; }
+  .print-section { page-break-before: auto; }
+
+  /* Progress bars visible in print */
+  .bg-emerald-500, .bg-brand-500, .bg-amber-500, .bg-red-500 {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  [class*="bg-emerald"], [class*="bg-brand"], [class*="bg-amber"], [class*="bg-red"],
+  [class*="bg-slate-800"], [class*="bg-indigo"], [class*="bg-violet"] {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide sidebar completely */
+  aside, [class*="w-64"], [class*="w-\\[72px\\]"] {
+    display: none !important;
+  }
+
+  @page {
+    margin: 1cm;
+    size: A4 landscape;
+  }
+}

@@ -13,7 +13,7 @@ const NAV_SECTIONS = [
     items: [
       { href: '/v2', icon: 'ph-squares-four', label: 'Dashboard' },
       { href: '/v2/analytics', icon: 'ph-chart-line-up', label: 'Analytics' },
-      { href: '/v2/settings', icon: 'ph-gear-six', label: 'Settings' },
+      { href: '/v2/reports', icon: 'ph-file-text', label: 'Reports' },
     ],
   },
   {
@@ -24,17 +24,19 @@ const NAV_SECTIONS = [
       { href: '/attendance-monitor', icon: 'ph-list-checks', label: 'Attendance Monitor' },
       { href: '/hikvision', icon: 'ph-fingerprint', label: 'Hikvision' },
       { href: '/v2/device-sync', icon: 'ph-cloud-arrow-down', label: 'Device Sync' },
+      { href: '/v2/settings', icon: 'ph-gear-six', label: 'Settings' },
     ],
   },
 ];
 
 export default function V2Layout({ children }) {
   const router = useRouter();
-  const [clock, setClock] = useState(getWIBTime());
+  const [clock, setClock] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
+    setClock(getWIBTime());
     const timer = setInterval(() => setClock(getWIBTime()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -52,17 +54,20 @@ export default function V2Layout({ children }) {
   const sidebar = (
     <div className={`flex flex-col h-full ${collapsed ? 'w-[72px]' : 'w-64'} transition-all duration-300`}>
       {/* Brand */}
-      <div className="flex items-center gap-3 px-4 h-16 border-b border-slate-800/80 flex-shrink-0">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-400 to-indigo-600 flex items-center justify-center shadow-[0_0_15px_rgba(34,211,238,0.3)] relative overflow-hidden flex-shrink-0">
-          <i className="ph ph-scan text-white text-xl z-10"></i>
-          <div className="absolute inset-0 bg-white/20 h-[2px] w-full animate-scan-line"></div>
-        </div>
+      <div className={`flex items-center gap-3 ${collapsed ? 'px-3 justify-center' : 'px-4'} h-20 border-b border-slate-800/80 flex-shrink-0`}>
+        <img
+          src="/binus-logo.jpg"
+          alt="BINUS"
+          className="w-9 h-9 rounded-lg object-contain flex-shrink-0 bg-white p-0.5"
+        />
         {!collapsed && (
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-bold text-lg tracking-tight text-white whitespace-nowrap">
-              BINUS<span className="text-brand-400">Face</span>
+          <div className="min-w-0">
+            <span className="font-bold text-sm tracking-tight text-white leading-tight block">
+              BINUS School Simprug
             </span>
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-brand-500/20 text-brand-400 border border-brand-500/30 uppercase tracking-wide flex-shrink-0">v2</span>
+            <span className="text-[10px] text-slate-400 leading-tight block">
+              Attendance Monitoring
+            </span>
           </div>
         )}
       </div>
@@ -131,10 +136,8 @@ export default function V2Layout({ children }) {
           <i className="ph ph-list text-2xl"></i>
         </button>
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-400 to-indigo-600 flex items-center justify-center">
-            <i className="ph ph-scan text-white text-sm"></i>
-          </div>
-          <span className="font-bold text-sm text-white">BINUS<span className="text-brand-400">Face</span></span>
+          <img src="/binus-logo.jpg" alt="BINUS" className="w-7 h-7 rounded-lg object-contain bg-white p-0.5" />
+          <span className="font-bold text-sm text-white">BINUS <span className="text-slate-400 font-normal text-xs">Simprug</span></span>
         </div>
         <span className="text-xs font-mono text-slate-400">{clock}</span>
       </header>
