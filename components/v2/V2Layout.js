@@ -215,8 +215,18 @@ export default function V2Layout({ children }) {
         )}
         {user && collapsed && (
           <button onClick={signOut} title="Sign out"
-            className="flex items-center justify-center w-full py-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-white/5 transition-all">
+            className="group relative flex items-center justify-center w-full py-2.5 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 transition-all">
             <i className="ph ph-sign-out text-lg"></i>
+            <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
+              Sign Out
+            </div>
+          </button>
+        )}
+        {!collapsed && (
+          <button onClick={signOut}
+            className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 transition-all text-sm font-medium">
+            <i className="ph ph-sign-out text-lg"></i>
+            <span>Sign Out</span>
           </button>
         )}
         {!collapsed && (
@@ -253,7 +263,9 @@ export default function V2Layout({ children }) {
           <img src="/binus-logo.jpg" alt="BINUS" className="w-7 h-7 rounded-lg object-contain bg-white p-0.5" />
           <span className="font-bold text-sm text-white">BINUS <span className="text-slate-400 font-normal text-xs">Simprug</span></span>
         </div>
-        <span className="text-xs font-mono text-slate-400">{clock}</span>
+        <button onClick={signOut} title="Sign out" className="text-slate-400 hover:text-red-400 transition-colors">
+          <i className="ph ph-sign-out text-xl"></i>
+        </button>
       </header>
 
       {/* Mobile overlay */}
@@ -274,7 +286,7 @@ export default function V2Layout({ children }) {
         </aside>
 
         {/* Main content */}
-        <main className={`flex-1 ${collapsed ? 'lg:ml-[72px]' : 'lg:ml-64'} transition-all duration-300 pt-14 lg:pt-0`}>
+        <main className={`flex-1 relative z-10 ${collapsed ? 'lg:ml-[72px]' : 'lg:ml-64'} transition-all duration-300 pt-14 lg:pt-0`}>
           {children}
         </main>
       </div>
