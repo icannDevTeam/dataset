@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
+import { useAuth } from '../../lib/AuthContext';
 
 function getWIBTime() {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -34,6 +35,7 @@ const NAV_SECTIONS = [
 
 export default function V2Layout({ children }) {
   const router = useRouter();
+  const { user, signOut } = useAuth();
   const [clock, setClock] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -154,6 +156,32 @@ export default function V2Layout({ children }) {
 
       {/* Bottom section */}
       <div className="border-t border-slate-800/80 p-3 flex-shrink-0 space-y-2">
+        {/* User info */}
+        {user && !collapsed && (
+          <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/5 border border-slate-800">
+            {user.photoURL ? (
+              <img src={user.photoURL} alt="" className="w-7 h-7 rounded-full flex-shrink-0" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-brand-500/20 text-brand-400 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                {(user.displayName || user.email || '?').charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium text-white truncate">{user.displayName || 'User'}</div>
+              <div className="text-[10px] text-slate-500 truncate">{user.email}</div>
+            </div>
+            <button onClick={signOut} title="Sign out"
+              className="text-slate-500 hover:text-red-400 transition-colors flex-shrink-0">
+              <i className="ph ph-sign-out text-lg"></i>
+            </button>
+          </div>
+        )}
+        {user && collapsed && (
+          <button onClick={signOut} title="Sign out"
+            className="flex items-center justify-center w-full py-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-white/5 transition-all">
+            <i className="ph ph-sign-out text-lg"></i>
+          </button>
+        )}
         {!collapsed && (
           <div className="flex items-center justify-between px-3 py-2">
             <span className="text-xs font-mono text-slate-400">{clock} <span className="text-slate-600">WIB</span></span>
