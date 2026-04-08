@@ -197,13 +197,13 @@ export default function DashboardV2() {
   const sourceLabel = (source) => {
     if (!source) return 'Unknown';
     if (source.includes('mobile')) return 'Mobile';
-    if (source.includes('hikvision') || source.includes('device')) return 'Hikvision';
+    if (source.includes('hikvision') || source.includes('device')) return 'Basement 1 Terminal';
     return source;
   };
 
   return (
     <V2Layout>
-      <Head><title>Dashboard — BINUSFace v2</title></Head>
+      <Head><title>Dashboard — BINUSFace</title></Head>
       <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
 
         {/* Hero Section */}
@@ -631,7 +631,7 @@ export default function DashboardV2() {
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-slate-500 text-sm">
             <i className="ph ph-shield-check text-brand-500 text-lg"></i>
-            <span>BINUSFace Attendance System v2</span>
+            <span>BINUSFace Attendance System</span>
           </div>
           <div className="flex items-center gap-6 text-sm">
             <span className="text-slate-600">BINUS School Serpong</span>

@@ -23,7 +23,7 @@ export default function V2Nav({ clock }) {
           <span className="font-bold text-lg tracking-tight text-white">
             BINUS<span className="text-brand-400">Face</span>
           </span>
-          <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-brand-500/20 text-brand-400 border border-brand-500/30 uppercase tracking-wide">v2</span>
+
         </div>
 
         {/* Nav Links */}

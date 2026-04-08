@@ -169,7 +169,7 @@ export default function AnalyticsPage() {
 
   return (
     <V2Layout>
-      <Head><title>Analytics — BINUSFace v2</title></Head>
+      <Head><title>Analytics — BINUSFace</title></Head>
 
       <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
 

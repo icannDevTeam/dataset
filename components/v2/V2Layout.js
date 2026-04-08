@@ -19,7 +19,10 @@ const NAV_SECTIONS = [
   {
     label: 'Management',
     items: [
-      { href: '/', icon: 'ph-user-circle-plus', label: 'Enrollment' },
+      { icon: 'ph-user-circle-plus', label: 'Enrollment', children: [
+        { href: '/', label: 'Dataset Capture' },
+        { href: '/mobile-enrollment', label: 'Mobile Enrollment' },
+      ]},
       { href: '/device-manager', icon: 'ph-cpu', label: 'Device Manager' },
       { href: '/attendance-monitor', icon: 'ph-list-checks', label: 'Attendance Monitor' },
       { href: '/hikvision', icon: 'ph-fingerprint', label: 'Hikvision' },
@@ -34,6 +37,7 @@ export default function V2Layout({ children }) {
   const [clock, setClock] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [expandedNav, setExpandedNav] = useState(null);
 
   useEffect(() => {
     setClock(getWIBTime());
@@ -81,6 +85,51 @@ export default function V2Layout({ children }) {
             )}
             <div className="space-y-1">
               {section.items.map((item) => {
+                if (item.children) {
+                  const childActive = item.children.some((c) => isActive(c.href));
+                  const isOpen = expandedNav === item.label || childActive;
+                  return (
+                    <div key={item.label}>
+                      <button
+                        onClick={() => setExpandedNav(isOpen && !childActive ? null : item.label)}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                          childActive
+                            ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
+                            : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
+                        }`}
+                        title={collapsed ? item.label : undefined}
+                      >
+                        <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
+                        {!collapsed && (
+                          <>
+                            <span className="flex-1 text-left">{item.label}</span>
+                            <i className={`ph ${isOpen ? 'ph-caret-up' : 'ph-caret-down'} text-xs text-slate-500`}></i>
+                          </>
+                        )}
+                      </button>
+                      {isOpen && !collapsed && (
+                        <div className="ml-5 pl-4 border-l border-slate-800 mt-1 space-y-0.5">
+                          {item.children.map((child) => {
+                            const cActive = isActive(child.href);
+                            return (
+                              <Link
+                                key={child.href}
+                                href={child.href}
+                                className={`block px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                                  cActive
+                                    ? 'text-brand-400 bg-brand-500/5'
+                                    : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
+                                }`}
+                              >
+                                {child.label}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
                 const active = isActive(item.href);
                 return (
                   <Link

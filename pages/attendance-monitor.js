@@ -99,11 +99,11 @@ export default function AttendanceMonitor() {
     }
   }, [startDate]);
 
-  // Build sync map: studentId -> local attendance record
+  // Build sync map: employeeNo -> local attendance record
   const localMap = React.useMemo(() => {
     const map = new Map();
     localRecords.forEach(r => {
-      if (r.studentId) map.set(r.studentId, r);
+      if (r.employeeNo) map.set(r.employeeNo, r);
     });
     return map;
   }, [localRecords]);

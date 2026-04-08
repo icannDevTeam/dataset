@@ -87,6 +87,25 @@ img {
 .aura-theme ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
 .aura-theme ::-webkit-scrollbar-thumb:hover { background: #475569; }
 
+/* Select dropdowns — force dark background on options */
+.aura-theme select {
+  background-color: #0f172a;
+  color: #f1f5f9;
+}
+.aura-theme select option {
+  background-color: #0f172a;
+  color: #f1f5f9;
+}
+.aura-theme select option:checked {
+  background-color: #164e63;
+  color: #fff;
+}
+
+/* Date inputs — readable text */
+.aura-theme input[type="date"] {
+  color-scheme: dark;
+}
+
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
