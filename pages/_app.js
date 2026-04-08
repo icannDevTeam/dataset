@@ -2,26 +2,26 @@ import '../styles/globals.css';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
-import { canAccess } from '../lib/permissions';
+import { canAccessPath } from '../lib/permissions';
 
 // Pages that don't require authentication
 const PUBLIC_PAGES = ['/login'];
 
 function AuthGate({ Component, pageProps }) {
   const router = useRouter();
-  const { authorized, role, loading, sessionWarning, extendSession } = useAuth();
+  const { authorized, role, permissions, loading, sessionWarning, extendSession } = useAuth();
   const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
-    if (!loading && authorized && role) {
-      if (!PUBLIC_PAGES.includes(router.pathname) && !canAccess(role, router.pathname)) {
+    if (!loading && authorized && permissions) {
+      if (!PUBLIC_PAGES.includes(router.pathname) && !canAccessPath(permissions, router.pathname)) {
         setAccessDenied(true);
         setTimeout(() => router.replace('/v2'), 2000);
       } else {
         setAccessDenied(false);
       }
     }
-  }, [loading, authorized, role, router.pathname]);
+  }, [loading, authorized, permissions, router.pathname]);
 
   // Public pages: render without auth check
   if (PUBLIC_PAGES.includes(router.pathname)) {

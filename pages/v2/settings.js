@@ -3,11 +3,11 @@ import { useRouter } from 'next/router';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import { useAuth } from '../../lib/AuthContext';
-import { getAllowedSettingsTabs } from '../../lib/permissions';
+import { getAllowedSettingsTabs, FEATURES, FEATURE_GROUPS, resolvePermissions, diffFromDefaults } from '../../lib/permissions';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, role } = useAuth();
+  const { user, role, permissions } = useAuth();
   const [activeTab, setActiveTab] = useState('');
   const [users, setUsers] = useState([]);
   const [accessLogs, setAccessLogs] = useState([]);
@@ -21,6 +21,8 @@ export default function SettingsPage() {
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [editingPerms, setEditingPerms] = useState(null); // { email, role, permissions }
+  const [savingPerms, setSavingPerms] = useState(false);
 
   const getAuthHeaders = useCallback(async () => {
     if (!user) return {};
@@ -106,6 +108,71 @@ export default function SettingsPage() {
     } catch {}
   }
 
+  function openPermEditor(u) {
+    setEditingPerms({
+      email: u.email,
+      name: u.name,
+      role: u.role,
+      permissions: { ...u.permissions },
+    });
+  }
+
+  function togglePermAction(feature, action) {
+    setEditingPerms(prev => ({
+      ...prev,
+      permissions: {
+        ...prev.permissions,
+        [feature]: {
+          ...prev.permissions[feature],
+          [action]: !prev.permissions?.[feature]?.[action],
+        },
+      },
+    }));
+  }
+
+  function toggleAllFeatureActions(feature) {
+    const meta = FEATURES[feature];
+    if (!meta) return;
+    const current = editingPerms.permissions[feature] || {};
+    const allEnabled = meta.actions.every(a => current[a]);
+    setEditingPerms(prev => ({
+      ...prev,
+      permissions: {
+        ...prev.permissions,
+        [feature]: Object.fromEntries(meta.actions.map(a => [a, !allEnabled])),
+      },
+    }));
+  }
+
+  function changeEditRole(newRole) {
+    // When role changes, reset permissions to that role's defaults
+    const newPerms = resolvePermissions(newRole);
+    setEditingPerms(prev => ({ ...prev, role: newRole, permissions: newPerms }));
+  }
+
+  async function savePermissions() {
+    if (!editingPerms) return;
+    setSavingPerms(true);
+    try {
+      const headers = await getAuthHeaders();
+      const overrides = diffFromDefaults(editingPerms.role, editingPerms.permissions);
+      const res = await fetch('/api/auth/users', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          email: editingPerms.email,
+          role: editingPerms.role,
+          permissions: overrides,
+        }),
+      });
+      if (res.ok) {
+        setEditingPerms(null);
+        fetchUsers();
+      }
+    } catch {}
+    setSavingPerms(false);
+  }
+
   function timeAgo(iso) {
     if (!iso) return 'Never';
     const diff = Date.now() - new Date(iso).getTime();
@@ -129,7 +196,7 @@ export default function SettingsPage() {
     { id: 'integrations', icon: 'ph-plugs', label: 'Integrations' },
   ];
 
-  const allowedTabIds = useMemo(() => getAllowedSettingsTabs(role || 'viewer'), [role]);
+  const allowedTabIds = useMemo(() => getAllowedSettingsTabs(permissions || {}), [permissions]);
   const tabs = useMemo(() => allTabs.filter(t => allowedTabIds.includes(t.id)), [allowedTabIds]);
 
   // Set default active tab to first allowed tab
@@ -408,19 +475,28 @@ export default function SettingsPage() {
                                   {isAdmin && (
                                     <td className="px-6 py-4 text-right">
                                       {!isMe && !u.superAdmin && (
-                                        deleteConfirm === u.email ? (
-                                          <div className="flex items-center gap-2">
-                                            <button onClick={() => handleDelete(u.email)}
-                                              className="text-xs font-medium text-red-400 hover:text-red-300">Confirm</button>
-                                            <button onClick={() => setDeleteConfirm(null)}
-                                              className="text-xs text-slate-500 hover:text-white">Cancel</button>
-                                          </div>
-                                        ) : (
-                                          <button onClick={() => setDeleteConfirm(u.email)}
-                                            className="text-xs text-slate-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
-                                            <i className="ph ph-trash text-base"></i>
-                                          </button>
-                                        )
+                                        <div className="flex items-center gap-2 justify-end">
+                                          {role === 'owner' && (
+                                            <button onClick={() => openPermEditor(u)}
+                                              title="Edit permissions"
+                                              className="text-xs text-slate-500 hover:text-brand-400 transition-colors opacity-0 group-hover:opacity-100">
+                                              <i className="ph ph-sliders-horizontal text-base"></i>
+                                            </button>
+                                          )}
+                                          {deleteConfirm === u.email ? (
+                                            <div className="flex items-center gap-2">
+                                              <button onClick={() => handleDelete(u.email)}
+                                                className="text-xs font-medium text-red-400 hover:text-red-300">Confirm</button>
+                                              <button onClick={() => setDeleteConfirm(null)}
+                                                className="text-xs text-slate-500 hover:text-white">Cancel</button>
+                                            </div>
+                                          ) : (
+                                            <button onClick={() => setDeleteConfirm(u.email)}
+                                              className="text-xs text-slate-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
+                                              <i className="ph ph-trash text-base"></i>
+                                            </button>
+                                          )}
+                                        </div>
                                       )}
                                     </td>
                                   )}
@@ -429,6 +505,95 @@ export default function SettingsPage() {
                             })}
                           </tbody>
                         </table>
+                      </div>
+                    )}
+
+                    {/* ── Permission Editor Panel ─── */}
+                    {editingPerms && (
+                      <div className="border-t border-slate-800 bg-slate-900/60 p-6 space-y-6 animate-fade-in-up">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                              <i className="ph ph-sliders-horizontal text-brand-400"></i>
+                              Permissions for {editingPerms.name || editingPerms.email}
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-1">Toggle features and actions this user can access.</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <select value={editingPerms.role} onChange={e => changeEditRole(e.target.value)}
+                              className="bg-slate-950/50 border border-slate-700 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-brand-500 cursor-pointer">
+                              <option value="viewer">Viewer</option>
+                              <option value="admin">Admin</option>
+                              <option value="owner">Owner</option>
+                            </select>
+                            <button onClick={() => setEditingPerms(null)} className="text-slate-500 hover:text-white transition-colors">
+                              <i className="ph ph-x text-lg"></i>
+                            </button>
+                          </div>
+                        </div>
+
+                        {FEATURE_GROUPS.map(group => (
+                          <div key={group.label}>
+                            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-3">{group.label}</p>
+                            <div className="space-y-1">
+                              {group.features.map(featureKey => {
+                                const meta = FEATURES[featureKey];
+                                if (!meta) return null;
+                                const perms = editingPerms.permissions[featureKey] || {};
+                                const allOn = meta.actions.every(a => perms[a]);
+                                const someOn = meta.actions.some(a => perms[a]);
+
+                                return (
+                                  <div key={featureKey}
+                                    className="flex items-center gap-4 px-4 py-2.5 rounded-xl border border-slate-800/50 hover:bg-white/[0.02] transition-colors">
+                                    {/* Feature toggle */}
+                                    <button onClick={() => toggleAllFeatureActions(featureKey)}
+                                      className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${
+                                        allOn ? 'bg-brand-500 border-brand-500' :
+                                        someOn ? 'bg-brand-500/30 border-brand-500/50' :
+                                        'bg-slate-900 border-slate-700 hover:border-slate-500'
+                                      }`}>
+                                      {allOn && <i className="ph ph-check text-xs text-white font-bold"></i>}
+                                      {someOn && !allOn && <i className="ph ph-minus text-xs text-white font-bold"></i>}
+                                    </button>
+
+                                    {/* Feature info */}
+                                    <div className="flex items-center gap-2 min-w-[180px]">
+                                      <i className={`ph ${meta.icon} text-base ${someOn ? 'text-slate-200' : 'text-slate-600'}`}></i>
+                                      <span className={`text-sm font-medium ${someOn ? 'text-white' : 'text-slate-500'}`}>{meta.label}</span>
+                                    </div>
+
+                                    {/* Action toggles */}
+                                    <div className="flex items-center gap-2 ml-auto">
+                                      {meta.actions.map(action => (
+                                        <button key={action} onClick={() => togglePermAction(featureKey, action)}
+                                          className={`px-3 py-1 rounded-lg text-[10px] uppercase font-bold tracking-wider border transition-all ${
+                                            perms[action]
+                                              ? action === 'delete' ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
+                                                : action === 'edit' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                                                : action === 'export' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/20'
+                                                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                                              : 'bg-slate-950/50 text-slate-600 border-slate-800 hover:border-slate-600 hover:text-slate-400'
+                                          }`}>
+                                          {action}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+
+                        <div className="flex items-center gap-3 pt-2 border-t border-slate-800">
+                          <button onClick={savePermissions} disabled={savingPerms}
+                            className="px-5 py-2 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold transition-all disabled:opacity-50">
+                            {savingPerms ? 'Saving...' : 'Save Permissions'}
+                          </button>
+                          <button onClick={() => setEditingPerms(null)}
+                            className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+                        </div>
                       </div>
                     )}
                   </div>

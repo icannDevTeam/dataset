@@ -9,6 +9,7 @@
  */
 import { initializeFirebase, getFirestoreDB } from '../../../lib/firebase-admin';
 import { withAuth } from '../../../lib/auth-middleware';
+import { resolvePermissions } from '../../../lib/permissions';
 import admin from 'firebase-admin';
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
@@ -53,10 +54,13 @@ async function handler(req, res) {
       const snapshot = await usersRef.orderBy('addedAt', 'desc').get();
       const users = snapshot.docs.map((doc) => {
         const d = doc.data();
+        const userRole = d.role || 'viewer';
         return {
           email: doc.id,
           name: d.name || '',
-          role: d.role || 'viewer',
+          role: userRole,
+          permissions: resolvePermissions(userRole, d.permissions || {}),
+          customPermissions: d.permissions || {},
           photoURL: d.photoURL || null,
           addedBy: d.addedBy || 'unknown',
           addedAt: d.addedAt?.toDate?.()?.toISOString() || null,
@@ -168,6 +172,56 @@ async function handler(req, res) {
     } catch (err) {
       console.error('[USERS DELETE]', err.message);
       return res.status(500).json({ error: 'Failed to remove user' });
+    }
+  }
+
+  // PATCH — Update user role and/or permissions
+  if (req.method === 'PATCH') {
+    const { email, role: newRole, permissions: newPermissions } = req.body;
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Email is required.' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Can't modify the super admin (they always have full owner perms)
+    if (SUPER_ADMIN && cleanEmail === SUPER_ADMIN) {
+      return res.status(403).json({ error: 'Super admin permissions cannot be modified.' });
+    }
+
+    // Only owners can update permissions
+    if (caller.role !== 'owner') {
+      return res.status(403).json({ error: 'Only owners can update user permissions.' });
+    }
+
+    try {
+      const doc = await usersRef.doc(cleanEmail).get();
+      if (!doc.exists) {
+        return res.status(404).json({ error: 'User not found.' });
+      }
+
+      const update = {};
+      if (newRole && ['owner', 'admin', 'viewer'].includes(newRole)) {
+        update.role = newRole;
+      }
+      if (newPermissions && typeof newPermissions === 'object') {
+        update.permissions = newPermissions;
+      }
+
+      if (Object.keys(update).length === 0) {
+        return res.status(400).json({ error: 'Nothing to update.' });
+      }
+
+      await usersRef.doc(cleanEmail).update(update);
+
+      const updatedRole = update.role || doc.data().role || 'viewer';
+      const updatedOverrides = update.permissions !== undefined ? update.permissions : (doc.data().permissions || {});
+      const resolved = resolvePermissions(updatedRole, updatedOverrides);
+
+      return res.status(200).json({ ok: true, email: cleanEmail, role: updatedRole, permissions: resolved });
+    } catch (err) {
+      console.error('[USERS PATCH]', err.message);
+      return res.status(500).json({ error: 'Failed to update user' });
     }
   }
 

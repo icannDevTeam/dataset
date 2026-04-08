@@ -36,13 +36,13 @@ const NAV_SECTIONS = [
 
 export default function V2Layout({ children }) {
   const router = useRouter();
-  const { user, role, signOut } = useAuth();
+  const { user, role, permissions, signOut } = useAuth();
   const [clock, setClock] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expandedNav, setExpandedNav] = useState(null);
 
-  const filteredNav = useMemo(() => filterNavForRole(NAV_SECTIONS, role || 'viewer'), [role]);
+  const filteredNav = useMemo(() => filterNavForRole(NAV_SECTIONS, permissions), [permissions]);
 
   useEffect(() => {
     setClock(getWIBTime());

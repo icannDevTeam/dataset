@@ -6,6 +6,7 @@
  */
 import { initializeFirebase, getFirestoreDB } from '../../../lib/firebase-admin';
 import { withAuth } from '../../../lib/auth-middleware';
+import { resolvePermissions } from '../../../lib/permissions';
 import admin from 'firebase-admin';
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
@@ -56,7 +57,7 @@ async function handler(req, res) {
           name: decoded.name || superDoc.data().name,
         });
       }
-      return res.status(200).json({ authorized: true, role: 'owner' });
+      return res.status(200).json({ authorized: true, role: 'owner', permissions: resolvePermissions('owner') });
     }
 
     // Check if ANY users exist — if not, seed super admin first
@@ -99,7 +100,9 @@ async function handler(req, res) {
       name: decoded.name || userData.name,
     });
 
-    return res.status(200).json({ authorized: true, role: userData.role || 'viewer' });
+    const userRole = userData.role || 'viewer';
+    const permissions = resolvePermissions(userRole, userData.permissions || {});
+    return res.status(200).json({ authorized: true, role: userRole, permissions });
   } catch (err) {
     console.error('[AUTH VERIFY]', err.message);
     if (err.code === 'auth/id-token-expired') {
