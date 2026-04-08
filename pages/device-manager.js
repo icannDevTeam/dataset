@@ -243,9 +243,9 @@ export default function DeviceManager() {
         <div className={styles.header}>
           <h1>📋 Device Manager</h1>
           <div className={styles.headerActions}>
-            <Link href="/dashboard" className={styles.navLink}>📊 Dashboard</Link>
+            <Link href="/v2" className={styles.navLink}>📊 Dashboard</Link>
             <Link href="/hikvision" className={styles.navLink}>🔐 Enrollment</Link>
-            <Link href="/" className={styles.navLink}>📸 Capture</Link>
+            <Link href="/enrollment" className={styles.navLink}>📸 Capture</Link>
           </div>
         </div>
 

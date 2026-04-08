@@ -34,7 +34,7 @@ export default function Home() {
         <div style={{
           position: 'fixed', top: 16, right: 16, display: 'flex', gap: 8, zIndex: 100
         }}>
-          <Link href="/dashboard" style={{
+          <Link href="/v2" style={{
             padding: '8px 14px', background: 'rgba(0,0,0,0.5)', color: '#34d399',
             borderRadius: 6, fontSize: '0.85rem', border: '1px solid rgba(52,211,153,0.3)',
             textDecoration: 'none'

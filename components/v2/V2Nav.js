@@ -42,8 +42,8 @@ export default function V2Nav({ clock }) {
             </Link>
           ))}
           <div className="h-5 w-px bg-slate-800 mx-2"></div>
-          <Link href="/dashboard" className="px-3 py-2 text-xs font-medium rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all border border-slate-800">
-            v1 Dashboard
+          <Link href="/enrollment" className="px-3 py-2 text-xs font-medium rounded-md text-slate-500 hover:text-slate-300 hover:bg-white/5 transition-all border border-slate-800">
+            Dataset Capture
           </Link>
         </nav>
 

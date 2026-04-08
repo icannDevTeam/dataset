@@ -249,8 +249,8 @@ export default function HikvisionPortal() {
           <div className={styles.headerActions}>
             <Link href="/mobile-enrollment" className={styles.navLink}>📱 Mobile</Link>
             <Link href="/attendance-monitor" className={styles.navLink}>📋 BINUS Logs</Link>
-            <Link href="/dashboard" className={styles.navLink}>📊 Dashboard</Link>
-            <Link href="/" className={styles.navLink}>📸 Capture</Link>
+            <Link href="/v2" className={styles.navLink}>📊 Dashboard</Link>
+            <Link href="/enrollment" className={styles.navLink}>📸 Capture</Link>
           </div>
         </div>
 

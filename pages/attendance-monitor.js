@@ -208,10 +208,10 @@ export default function AttendanceMonitor() {
         <div className={styles.header}>
           <h1>📋 BINUS Attendance Log Monitor</h1>
           <div className={styles.headerActions}>
-            <Link href="/dashboard" className={styles.navLink}>📊 Dashboard</Link>
+            <Link href="/v2" className={styles.navLink}>📊 Dashboard</Link>
             <Link href="/hikvision" className={styles.navLink}>🔐 Hikvision</Link>
             <Link href="/mobile-enrollment" className={styles.navLink}>📱 Mobile</Link>
-            <Link href="/" className={styles.navLink}>📸 Capture</Link>
+            <Link href="/enrollment" className={styles.navLink}>📸 Capture</Link>
           </div>
         </div>
 

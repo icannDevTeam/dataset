@@ -266,7 +266,7 @@ export default function Dashboard() {
               <span className="px-4 py-2 text-sm font-medium rounded-md bg-white/10 text-brand-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
                 Dashboard
               </span>
-              <Link href="/" className="px-4 py-2 text-sm font-medium rounded-md text-slate-400 hover:text-slate-100 hover:bg-white/5 transition-all">
+              <Link href="/enrollment" className="px-4 py-2 text-sm font-medium rounded-md text-slate-400 hover:text-slate-100 hover:bg-white/5 transition-all">
                 Capture
               </Link>
               <Link href="/hikvision" className="px-4 py-2 text-sm font-medium rounded-md text-slate-400 hover:text-slate-100 hover:bg-white/5 transition-all">
