@@ -1,13 +1,14 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import { useAuth } from '../../lib/AuthContext';
+import { getAllowedSettingsTabs } from '../../lib/permissions';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('security');
+  const { user, role } = useAuth();
+  const [activeTab, setActiveTab] = useState('');
   const [users, setUsers] = useState([]);
   const [accessLogs, setAccessLogs] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -20,7 +21,6 @@ export default function SettingsPage() {
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [currentUserRole, setCurrentUserRole] = useState('viewer');
 
   const getAuthHeaders = useCallback(async () => {
     if (!user) return {};
@@ -36,8 +36,6 @@ export default function SettingsPage() {
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
-        const me = data.users?.find(u => u.email === user?.email?.toLowerCase());
-        if (me) setCurrentUserRole(me.role);
       }
     } catch {}
     setLoadingUsers(false);
@@ -121,15 +119,25 @@ export default function SettingsPage() {
     return new Date(iso).toLocaleDateString();
   }
 
-  const isAdmin = ['owner', 'admin'].includes(currentUserRole);
+  const isAdmin = ['owner', 'admin'].includes(role);
 
-  const tabs = [
+  const allTabs = [
     { id: 'security', icon: 'ph-shield-check', label: 'Security & Audit' },
     { id: 'user-management', icon: 'ph-users', label: 'User Management' },
     { id: 'ai-parameters', icon: 'ph-bounding-box', label: 'AI Parameters' },
     { id: 'notifications', icon: 'ph-bell-ringing', label: 'Notifications' },
     { id: 'integrations', icon: 'ph-plugs', label: 'Integrations' },
   ];
+
+  const allowedTabIds = useMemo(() => getAllowedSettingsTabs(role || 'viewer'), [role]);
+  const tabs = useMemo(() => allTabs.filter(t => allowedTabIds.includes(t.id)), [allowedTabIds]);
+
+  // Set default active tab to first allowed tab
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.find(t => t.id === activeTab)) {
+      setActiveTab(tabs[0].id);
+    }
+  }, [tabs, activeTab]);
 
     return (
     <V2Layout>
@@ -149,7 +157,7 @@ export default function SettingsPage() {
                 {user.photoURL && <img src={user.photoURL} alt="" className="w-7 h-7 rounded-full" referrerPolicy="no-referrer" />}
                 <div className="text-sm">
                   <div className="text-white font-medium">{user.displayName}</div>
-                  <div className="text-slate-500 text-xs">{currentUserRole}</div>
+                  <div className="text-slate-500 text-xs">{role}</div>
                 </div>
               </div>
             )}

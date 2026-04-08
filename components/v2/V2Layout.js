@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../lib/AuthContext';
+import { filterNavForRole } from '../../lib/permissions';
 
 function getWIBTime() {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -35,11 +36,13 @@ const NAV_SECTIONS = [
 
 export default function V2Layout({ children }) {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, role, signOut } = useAuth();
   const [clock, setClock] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expandedNav, setExpandedNav] = useState(null);
+
+  const filteredNav = useMemo(() => filterNavForRole(NAV_SECTIONS, role || 'viewer'), [role]);
 
   useEffect(() => {
     setClock(getWIBTime());
@@ -80,7 +83,7 @@ export default function V2Layout({ children }) {
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto no-scrollbar py-4 px-3 space-y-6">
-        {NAV_SECTIONS.map((section) => (
+        {filteredNav.map((section) => (
           <div key={section.label}>
             {!collapsed && (
               <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest px-3 mb-2">{section.label}</p>
@@ -169,6 +172,13 @@ export default function V2Layout({ children }) {
             <div className="flex-1 min-w-0">
               <div className="text-xs font-medium text-white truncate">{user.displayName || 'User'}</div>
               <div className="text-[10px] text-slate-500 truncate">{user.email}</div>
+              {role && (
+                <span className={`inline-block mt-0.5 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                  role === 'owner' ? 'bg-amber-500/10 text-amber-400' :
+                  role === 'admin' ? 'bg-brand-500/10 text-brand-400' :
+                  'bg-slate-500/10 text-slate-400'
+                }`}>{role}</span>
+              )}
             </div>
             <button onClick={signOut} title="Sign out"
               className="text-slate-500 hover:text-red-400 transition-colors flex-shrink-0">
