@@ -15,6 +15,7 @@ export default function SettingsPage() {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
+  const [invitePassword, setInvitePassword] = useState('');
   const [inviteRole, setInviteRole] = useState('viewer');
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
@@ -61,7 +62,11 @@ export default function SettingsPage() {
 
   async function handleInvite(e) {
     e.preventDefault();
-    if (!inviteEmail.trim()) return;
+    if (!inviteEmail.trim() || !invitePassword) return;
+    if (invitePassword.length < 6) {
+      setInviteError('Password must be at least 6 characters.');
+      return;
+    }
     setInviteLoading(true);
     setInviteError('');
     try {
@@ -69,13 +74,14 @@ export default function SettingsPage() {
       const res = await fetch('/api/auth/users', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ email: inviteEmail.trim(), name: inviteName.trim(), role: inviteRole }),
+        body: JSON.stringify({ email: inviteEmail.trim(), name: inviteName.trim(), password: invitePassword, role: inviteRole }),
       });
       const data = await res.json();
       if (res.ok) {
         setShowInvite(false);
         setInviteEmail('');
         setInviteName('');
+        setInvitePassword('');
         setInviteRole('viewer');
         fetchUsers();
       } else {
@@ -297,7 +303,13 @@ export default function SettingsPage() {
                           <div>
                             <label className="text-xs text-slate-400 block mb-1">Email Address</label>
                             <input type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
-                              placeholder="user@example.com" required
+                              placeholder="user@binus.edu" required
+                              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-400 block mb-1">Password</label>
+                            <input type="password" value={invitePassword} onChange={e => setInvitePassword(e.target.value)}
+                              placeholder="Min. 6 characters" required minLength={6}
                               className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
                           </div>
                           <div className="grid grid-cols-2 gap-4">
@@ -364,11 +376,18 @@ export default function SettingsPage() {
                                     </div>
                                   </td>
                                   <td className="px-6 py-4">
-                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] uppercase font-bold border ${
-                                      u.role === 'owner' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                                      u.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' :
-                                      'bg-slate-500/10 text-slate-400 border-slate-500/20'
-                                    }`}>{u.role}</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] uppercase font-bold border ${
+                                        u.role === 'owner' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                        u.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' :
+                                        'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                                      }`}>{u.role}</span>
+                                      {u.superAdmin && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] uppercase font-bold bg-red-500/10 text-red-400 border border-red-500/20">
+                                          <i className="ph ph-crown text-xs"></i> Super
+                                        </span>
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="px-6 py-4">
                                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] uppercase font-bold ${
@@ -380,7 +399,7 @@ export default function SettingsPage() {
                                   <td className="px-6 py-4 text-slate-400 text-sm">{u.lastLogin ? timeAgo(u.lastLogin) : 'Never'}</td>
                                   {isAdmin && (
                                     <td className="px-6 py-4 text-right">
-                                      {!isMe && (
+                                      {!isMe && !u.superAdmin && (
                                         deleteConfirm === u.email ? (
                                           <div className="flex items-center gap-2">
                                             <button onClick={() => handleDelete(u.email)}

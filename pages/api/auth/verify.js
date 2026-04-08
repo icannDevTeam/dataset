@@ -1,11 +1,14 @@
 /**
  * POST /api/auth/verify
  * Verifies Firebase ID token and checks if the user's email is authorized.
- * On first-ever call with no users in Firestore, auto-seeds the caller as owner.
+ * SUPER_ADMIN_EMAIL always gets owner access and cannot be removed.
+ * On first-ever call with no users, auto-seeds the super admin as owner.
  */
 import { initializeFirebase, getFirestoreDB } from '../../../lib/firebase-admin';
 import { withAuth } from '../../../lib/auth-middleware';
 import admin from 'firebase-admin';
+
+const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
 
 async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -26,25 +29,57 @@ async function handler(req, res) {
       return res.status(403).json({ error: 'No email associated with this account.', authorized: false });
     }
 
+    const cleanEmail = email.toLowerCase();
     const db = getFirestoreDB();
     const usersRef = db.collection('dashboard_users');
 
-    // Check if ANY users exist — if not, auto-seed the first sign-in as owner
+    // Super admin always gets owner access — auto-create if missing
+    if (SUPER_ADMIN && cleanEmail === SUPER_ADMIN) {
+      const superDoc = await usersRef.doc(cleanEmail).get();
+      if (!superDoc.exists) {
+        await usersRef.doc(cleanEmail).set({
+          email: cleanEmail,
+          name: decoded.name || cleanEmail.split('@')[0],
+          role: 'owner',
+          addedBy: 'system',
+          addedAt: admin.firestore.FieldValue.serverTimestamp(),
+          photoURL: decoded.picture || null,
+          superAdmin: true,
+        });
+      } else {
+        // Ensure super admin always stays owner
+        await usersRef.doc(cleanEmail).update({
+          role: 'owner',
+          superAdmin: true,
+          lastLogin: admin.firestore.FieldValue.serverTimestamp(),
+          photoURL: decoded.picture || superDoc.data().photoURL || null,
+          name: decoded.name || superDoc.data().name,
+        });
+      }
+      return res.status(200).json({ authorized: true, role: 'owner' });
+    }
+
+    // Check if ANY users exist — if not, seed super admin first
     const snapshot = await usersRef.limit(1).get();
-    if (snapshot.empty) {
-      await usersRef.doc(email.toLowerCase()).set({
-        email: email.toLowerCase(),
-        name: decoded.name || email.split('@')[0],
+    if (snapshot.empty && SUPER_ADMIN) {
+      // Seed the super admin even if they're not the one signing in
+      await usersRef.doc(SUPER_ADMIN).set({
+        email: SUPER_ADMIN,
+        name: 'Super Admin',
         role: 'owner',
         addedBy: 'system',
         addedAt: admin.firestore.FieldValue.serverTimestamp(),
-        photoURL: decoded.picture || null,
+        superAdmin: true,
       });
-      return res.status(200).json({ authorized: true, role: 'owner', firstUser: true });
+      // Current user is not the super admin, deny
+      return res.status(403).json({
+        error: `${email} is not authorized. Ask an admin to add your email.`,
+        authorized: false,
+      });
     }
 
     // Check if user is authorized
-    const userDoc = await usersRef.doc(email.toLowerCase()).get();
+    const userDoc = await usersRef.doc(cleanEmail).get();
     if (!userDoc.exists) {
       return res.status(403).json({
         error: `${email} is not authorized. Ask an admin to add your email.`,
@@ -58,7 +93,7 @@ async function handler(req, res) {
     }
 
     // Update last login
-    await usersRef.doc(email.toLowerCase()).update({
+    await usersRef.doc(cleanEmail).update({
       lastLogin: admin.firestore.FieldValue.serverTimestamp(),
       photoURL: decoded.picture || userData.photoURL || null,
       name: decoded.name || userData.name,

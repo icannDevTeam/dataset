@@ -11,6 +11,8 @@ import { initializeFirebase, getFirestoreDB } from '../../../lib/firebase-admin'
 import { withAuth } from '../../../lib/auth-middleware';
 import admin from 'firebase-admin';
 
+const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
+
 async function verifyAdmin(req) {
   const authHeader = req.headers['authorization'];
   if (!authHeader?.startsWith('Bearer ')) {
@@ -60,6 +62,7 @@ async function handler(req, res) {
           addedAt: d.addedAt?.toDate?.()?.toISOString() || null,
           lastLogin: d.lastLogin?.toDate?.()?.toISOString() || null,
           disabled: d.disabled || false,
+          superAdmin: d.superAdmin || (SUPER_ADMIN && doc.id === SUPER_ADMIN) || false,
         };
       });
       return res.status(200).json({ users });
@@ -70,9 +73,12 @@ async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const { email, role, name } = req.body;
+    const { email, role, name, password } = req.body;
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ error: 'Valid email is required.' });
+    }
+    if (!password || typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
 
     const cleanEmail = email.toLowerCase().trim();
@@ -92,6 +98,22 @@ async function handler(req, res) {
       const existing = await usersRef.doc(cleanEmail).get();
       if (existing.exists) {
         return res.status(409).json({ error: 'This email is already authorized.' });
+      }
+
+      // Create Firebase Auth user
+      let authUser;
+      try {
+        authUser = await admin.auth().getUserByEmail(cleanEmail);
+      } catch (err) {
+        if (err.code === 'auth/user-not-found') {
+          authUser = await admin.auth().createUser({
+            email: cleanEmail,
+            password: password,
+            displayName: name || cleanEmail.split('@')[0],
+          });
+        } else {
+          throw err;
+        }
       }
 
       await usersRef.doc(cleanEmail).set({
@@ -122,6 +144,11 @@ async function handler(req, res) {
     // Can't remove yourself
     if (cleanEmail === caller.email) {
       return res.status(400).json({ error: 'You cannot remove yourself.' });
+    }
+
+    // Can't remove the super admin
+    if (SUPER_ADMIN && cleanEmail === SUPER_ADMIN) {
+      return res.status(403).json({ error: 'The super admin cannot be removed.' });
     }
 
     try {
