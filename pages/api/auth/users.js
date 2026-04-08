@@ -189,9 +189,16 @@ async function handler(req, res) {
       return res.status(403).json({ error: 'Super admin permissions cannot be modified.' });
     }
 
-    // Only owners can update permissions
+    // Owners can edit anyone; admins can only edit viewers
     if (caller.role !== 'owner') {
-      return res.status(403).json({ error: 'Only owners can update user permissions.' });
+      const doc = await usersRef.doc(cleanEmail).get();
+      if (!doc.exists) {
+        return res.status(404).json({ error: 'User not found.' });
+      }
+      const targetRole = doc.data().role;
+      if (caller.role !== 'admin' || targetRole !== 'viewer') {
+        return res.status(403).json({ error: 'You can only update viewer permissions.' });
+      }
     }
 
     try {

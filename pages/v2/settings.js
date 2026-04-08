@@ -23,6 +23,20 @@ export default function SettingsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [editingPerms, setEditingPerms] = useState(null); // { email, role, permissions }
   const [savingPerms, setSavingPerms] = useState(false);
+  const [logFilter, setLogFilter] = useState('');
+
+  const filteredLogs = useMemo(() => {
+    if (!logFilter.trim()) return accessLogs;
+    const q = logFilter.toLowerCase().trim();
+    return accessLogs.filter(l =>
+      (l.ip || '').toLowerCase().includes(q) ||
+      (l.email || '').toLowerCase().includes(q) ||
+      (l.name || '').toLowerCase().includes(q) ||
+      (l.browser || '').toLowerCase().includes(q) ||
+      (l.os || '').toLowerCase().includes(q) ||
+      (l.device || '').toLowerCase().includes(q)
+    );
+  }, [accessLogs, logFilter]);
 
   const getAuthHeaders = useCallback(async () => {
     if (!user) return {};
@@ -301,10 +315,35 @@ export default function SettingsPage() {
                         </button>
                       </div>
 
+                      {/* Filter bar */}
+                      <div className="px-6 py-3 border-b border-slate-800/50 bg-slate-950/30">
+                        <div className="relative max-w-sm">
+                          <i className="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"></i>
+                          <input
+                            type="text"
+                            value={logFilter}
+                            onChange={e => setLogFilter(e.target.value)}
+                            placeholder="Filter by IP, user, browser, OS..."
+                            className="w-full bg-slate-900/50 border border-slate-700/50 rounded-lg py-2 pl-9 pr-8 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
+                          />
+                          {logFilter && (
+                            <button onClick={() => setLogFilter('')}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors">
+                              <i className="ph ph-x text-sm"></i>
+                            </button>
+                          )}
+                        </div>
+                        {logFilter && (
+                          <p className="text-[10px] text-slate-500 mt-1.5">{filteredLogs.length} of {accessLogs.length} entries</p>
+                        )}
+                      </div>
+
                       {loadingLogs ? (
                         <div className="p-12 text-center"><div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto"></div></div>
                       ) : accessLogs.length === 0 ? (
                         <div className="p-12 text-center text-slate-500">No access logs yet. Logs are recorded on each sign-in.</div>
+                      ) : filteredLogs.length === 0 ? (
+                        <div className="p-12 text-center text-slate-500">No logs match &ldquo;{logFilter}&rdquo;</div>
                       ) : (
                         <div className="overflow-x-auto">
                           <table className="w-full text-left whitespace-nowrap text-sm">
@@ -319,7 +358,7 @@ export default function SettingsPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/50">
-                              {accessLogs.map((log) => (
+                              {filteredLogs.map((log) => (
                                 <tr key={log.id} className="hover:bg-slate-800/30 transition-colors">
                                   <td className="px-6 py-3">
                                     <div className="font-medium text-white text-xs">{log.name}</div>
@@ -476,13 +515,12 @@ export default function SettingsPage() {
                                     <td className="px-6 py-4 text-right">
                                       {!isMe && !u.superAdmin && (
                                         <div className="flex items-center gap-2 justify-end">
-                                          {role === 'owner' && (
-                                            <button onClick={() => openPermEditor(u)}
-                                              title="Edit permissions"
-                                              className="text-xs text-slate-500 hover:text-brand-400 transition-colors opacity-0 group-hover:opacity-100">
-                                              <i className="ph ph-sliders-horizontal text-base"></i>
-                                            </button>
-                                          )}
+                                          <button onClick={() => openPermEditor(u)}
+                                            title="Edit permissions"
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-brand-400 border border-slate-700/50 rounded-lg hover:bg-brand-500/5 hover:border-brand-500/30 transition-all">
+                                            <i className="ph ph-sliders-horizontal text-sm"></i>
+                                            <span>Permissions</span>
+                                          </button>
                                           {deleteConfirm === u.email ? (
                                             <div className="flex items-center gap-2">
                                               <button onClick={() => handleDelete(u.email)}
@@ -492,7 +530,7 @@ export default function SettingsPage() {
                                             </div>
                                           ) : (
                                             <button onClick={() => setDeleteConfirm(u.email)}
-                                              className="text-xs text-slate-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
+                                              className="text-xs text-slate-500 hover:text-red-400 transition-colors">
                                               <i className="ph ph-trash text-base"></i>
                                             </button>
                                           )}
