@@ -261,19 +261,19 @@ export default function SettingsPage() {
         </div>
 
         {/* Layout Grid for Settings */}
-        <div className="flex flex-col lg:flex-row gap-8">
+        <div className="flex flex-col lg:flex-row gap-6">
             
-            {/* Left Sidebar Navigation */}
-            <aside className="w-full lg:w-64 flex-shrink-0">
-                <nav className="space-y-1">
+            {/* Left Sidebar Navigation — horizontal on small, vertical on large */}
+            <aside className="w-full lg:w-52 flex-shrink-0">
+                <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0">
                     {tabs.map(tab => (
                       <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors text-left ${
+                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl transition-colors text-left whitespace-nowrap ${
                           activeTab === tab.id
                             ? 'bg-white/5 text-brand-400 border border-slate-700/50'
                             : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
                         }`}>
-                        <i className={`ph ${tab.icon} text-xl`}></i>
+                        <i className={`ph ${tab.icon} text-lg`}></i>
                         <span className="font-medium text-sm">{tab.label}</span>
                       </button>
                     ))}
@@ -281,7 +281,7 @@ export default function SettingsPage() {
             </aside>
 
             {/* Right Content Area */}
-            <div className="flex-1 space-y-8 pb-12">
+            <div className="flex-1 min-w-0 space-y-8 pb-12">
 
                 {/* ─── Security & Audit Tab ─── */}
                 {activeTab === 'security' && (
@@ -321,7 +321,7 @@ export default function SettingsPage() {
 
                     {/* Access Logs Table */}
                     <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
-                      <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/40 flex items-center justify-between">
+                      <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/40 flex items-center justify-between">
                         <div>
                           <h2 className="text-lg font-semibold text-white">Access Log</h2>
                           <p className="text-sm text-slate-400 mt-1">Recent dashboard sign-in events with device & IP information.</p>
@@ -332,7 +332,7 @@ export default function SettingsPage() {
                       </div>
 
                       {/* Filter bar */}
-                      <div className="px-6 py-3 border-b border-slate-800/50 bg-slate-950/30">
+                      <div className="px-5 py-3 border-b border-slate-800/50 bg-slate-950/30">
                         <div className="relative max-w-sm">
                           <i className="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"></i>
                           <input
@@ -363,28 +363,28 @@ export default function SettingsPage() {
                       ) : (
                         <div className="overflow-x-auto">
                           <table className="w-full text-left whitespace-nowrap text-sm">
-                            <thead className="bg-slate-950/50 text-slate-400 border-b border-slate-800 text-xs uppercase tracking-wider font-semibold">
+                            <thead className="bg-slate-950/50 text-slate-400 border-b border-slate-800 text-[10px] uppercase tracking-wider font-semibold">
                               <tr>
-                                <th className="px-6 py-4">User</th>
-                                <th className="px-6 py-4">IP Address</th>
-                                <th className="px-6 py-4">Device</th>
-                                <th className="px-6 py-4">Browser</th>
-                                <th className="px-6 py-4">OS</th>
-                                <th className="px-6 py-4">Time</th>
+                                <th className="px-4 py-3">User</th>
+                                <th className="px-4 py-3">IP Address</th>
+                                <th className="px-4 py-3">Device</th>
+                                <th className="px-4 py-3">Browser</th>
+                                <th className="px-4 py-3">OS</th>
+                                <th className="px-4 py-3">Time</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-800/50">
                               {filteredLogs.map((log) => (
                                 <tr key={log.id} className="hover:bg-slate-800/30 transition-colors">
-                                  <td className="px-6 py-3">
+                                  <td className="px-4 py-2.5">
                                     <div className="font-medium text-white text-xs">{log.name}</div>
                                     <div className="text-[10px] text-slate-500">{log.email}</div>
                                   </td>
-                                  <td className="px-6 py-3">
-                                    <code className="text-xs font-mono text-slate-300 bg-slate-800/50 px-2 py-0.5 rounded">{log.ip}</code>
+                                  <td className="px-4 py-2.5">
+                                    <code className="text-[11px] font-mono text-slate-300 bg-slate-800/50 px-1.5 py-0.5 rounded">{log.ip}</code>
                                   </td>
-                                  <td className="px-6 py-3">
-                                    <span className={`inline-flex items-center gap-1.5 text-xs ${
+                                  <td className="px-4 py-2.5">
+                                    <span className={`inline-flex items-center gap-1 text-xs ${
                                       log.device === 'Mobile' ? 'text-amber-400' :
                                       log.device === 'Tablet' ? 'text-indigo-400' : 'text-slate-300'
                                     }`}>
@@ -392,9 +392,9 @@ export default function SettingsPage() {
                                       {log.device}
                                     </span>
                                   </td>
-                                  <td className="px-6 py-3 text-xs text-slate-300">{log.browser}</td>
-                                  <td className="px-6 py-3 text-xs text-slate-400">{log.os}</td>
-                                  <td className="px-6 py-3 text-xs text-slate-400">{timeAgo(log.timestamp)}</td>
+                                  <td className="px-4 py-2.5 text-xs text-slate-300">{log.browser}</td>
+                                  <td className="px-4 py-2.5 text-xs text-slate-400">{log.os}</td>
+                                  <td className="px-4 py-2.5 text-xs text-slate-400">{timeAgo(log.timestamp)}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -476,14 +476,14 @@ export default function SettingsPage() {
                     ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full text-left whitespace-nowrap text-sm border-collapse">
-                          <thead className="bg-slate-950/50 text-slate-400 border-b border-slate-800 text-xs uppercase tracking-wider font-semibold">
+                          <thead className="bg-slate-950/50 text-slate-400 border-b border-slate-800 text-[10px] uppercase tracking-wider font-semibold">
                             <tr>
-                              <th className="px-6 py-4">User</th>
-                              <th className="px-6 py-4">Role</th>
-                              <th className="px-6 py-4">Status</th>
-                              {isAdmin && <th className="px-6 py-4">IP Address</th>}
-                              <th className="px-6 py-4">Last Active</th>
-                              {isAdmin && <th className="px-6 py-4 text-right">Actions</th>}
+                              <th className="px-4 py-3">User</th>
+                              <th className="px-4 py-3">Role</th>
+                              <th className="px-4 py-3">Status</th>
+                              {isAdmin && <th className="px-4 py-3">IP</th>}
+                              <th className="px-4 py-3">Last Active</th>
+                              {isAdmin && <th className="px-4 py-3 text-right">Actions</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/50">
@@ -491,22 +491,22 @@ export default function SettingsPage() {
                               const isMe = u.email === user?.email?.toLowerCase();
                               return (
                                 <tr key={u.email} className="hover:bg-slate-800/30 transition-colors group">
-                                  <td className="px-6 py-4">
-                                    <div className="flex items-center gap-3">
+                                  <td className="px-4 py-3">
+                                    <div className="flex items-center gap-2.5">
                                       {u.photoURL ? (
-                                        <img src={u.photoURL} alt="" className="w-8 h-8 rounded-full border border-slate-700" referrerPolicy="no-referrer" />
+                                        <img src={u.photoURL} alt="" className="w-7 h-7 rounded-full border border-slate-700" referrerPolicy="no-referrer" />
                                       ) : (
-                                        <div className="w-8 h-8 rounded-full bg-brand-500/20 text-brand-400 flex items-center justify-center font-bold border border-brand-500/30 text-xs">
+                                        <div className="w-7 h-7 rounded-full bg-brand-500/20 text-brand-400 flex items-center justify-center font-bold border border-brand-500/30 text-[10px]">
                                           {(u.name || u.email).slice(0, 2).toUpperCase()}
                                         </div>
                                       )}
                                       <div>
-                                        <div className="font-medium text-white">{u.name}{isMe ? ' (You)' : ''}</div>
-                                        <div className="text-xs text-slate-500 mt-0.5">{u.email}</div>
+                                        <div className="font-medium text-white text-sm">{u.name}{isMe ? ' (You)' : ''}</div>
+                                        <div className="text-[10px] text-slate-500">{u.email}</div>
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="px-6 py-4">
+                                  <td className="px-4 py-3">
                                     <div className="flex items-center gap-2">
                                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] uppercase font-bold border ${
                                         u.role === 'owner' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
@@ -520,8 +520,8 @@ export default function SettingsPage() {
                                       )}
                                     </div>
                                   </td>
-                                  <td className="px-6 py-4">
-                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] uppercase font-bold ${
+                                  <td className="px-4 py-3">
+                                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold ${
                                       u.disabled ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
                                       u.lastLogin ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-500 border border-slate-600/20'
                                     }`}>
@@ -529,17 +529,17 @@ export default function SettingsPage() {
                                     </span>
                                   </td>
                                   {isAdmin && (
-                                    <td className="px-6 py-4">
+                                    <td className="px-4 py-3">
                                       {u.lastIP ? (
-                                        <code className="text-xs font-mono text-slate-400 bg-slate-800/50 px-2 py-0.5 rounded">{u.lastIP}</code>
+                                        <code className="text-[11px] font-mono text-slate-400 bg-slate-800/50 px-1.5 py-0.5 rounded">{u.lastIP}</code>
                                       ) : (
                                         <span className="text-xs text-slate-600">—</span>
                                       )}
                                     </td>
                                   )}
-                                  <td className="px-6 py-4 text-slate-400 text-sm">{u.lastLogin ? timeAgo(u.lastLogin) : 'Never'}</td>
+                                  <td className="px-4 py-3 text-slate-400 text-xs">{u.lastLogin ? timeAgo(u.lastLogin) : 'Never'}</td>
                                   {isAdmin && (
-                                    <td className="px-6 py-4 text-right">
+                                    <td className="px-4 py-3 text-right">
                                       {!isMe && !u.superAdmin ? (
                                         <div className="flex items-center gap-1.5 justify-end flex-wrap">
                                           <button onClick={() => openPermEditor(u)}
