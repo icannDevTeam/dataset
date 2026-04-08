@@ -21,6 +21,7 @@ export default function SettingsPage() {
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [actionConfirm, setActionConfirm] = useState(null); // { email, action: 'suspend'|'revoke'|'unsuspend' }
   const [editingPerms, setEditingPerms] = useState(null); // { email, role, permissions }
   const [savingPerms, setSavingPerms] = useState(false);
   const [logFilter, setLogFilter] = useState('');
@@ -117,6 +118,21 @@ export default function SettingsPage() {
       });
       if (res.ok) {
         setDeleteConfirm(null);
+        fetchUsers();
+      }
+    } catch {}
+  }
+
+  async function handleUserAction(email, action) {
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/auth/users', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ email, action }),
+      });
+      if (res.ok) {
+        setActionConfirm(null);
         fetchUsers();
       }
     } catch {}
@@ -465,8 +481,9 @@ export default function SettingsPage() {
                               <th className="px-6 py-4">User</th>
                               <th className="px-6 py-4">Role</th>
                               <th className="px-6 py-4">Status</th>
+                              {isAdmin && <th className="px-6 py-4">IP Address</th>}
                               <th className="px-6 py-4">Last Active</th>
-                              {isAdmin && <th className="px-6 py-4 w-12"></th>}
+                              {isAdmin && <th className="px-6 py-4 text-right">Actions</th>}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/50">
@@ -505,36 +522,100 @@ export default function SettingsPage() {
                                   </td>
                                   <td className="px-6 py-4">
                                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] uppercase font-bold ${
+                                      u.disabled ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
                                       u.lastLogin ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-500 border border-slate-600/20'
                                     }`}>
-                                      {u.lastLogin ? 'Active' : 'Invited'}
+                                      {u.disabled ? 'Suspended' : u.lastLogin ? 'Active' : 'Invited'}
                                     </span>
                                   </td>
+                                  {isAdmin && (
+                                    <td className="px-6 py-4">
+                                      {u.lastIP ? (
+                                        <code className="text-xs font-mono text-slate-400 bg-slate-800/50 px-2 py-0.5 rounded">{u.lastIP}</code>
+                                      ) : (
+                                        <span className="text-xs text-slate-600">—</span>
+                                      )}
+                                    </td>
+                                  )}
                                   <td className="px-6 py-4 text-slate-400 text-sm">{u.lastLogin ? timeAgo(u.lastLogin) : 'Never'}</td>
                                   {isAdmin && (
                                     <td className="px-6 py-4 text-right">
-                                      {!isMe && !u.superAdmin && (
-                                        <div className="flex items-center gap-2 justify-end">
+                                      {!isMe && !u.superAdmin ? (
+                                        <div className="flex items-center gap-1.5 justify-end flex-wrap">
                                           <button onClick={() => openPermEditor(u)}
                                             title="Edit permissions"
-                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-brand-400 border border-slate-700/50 rounded-lg hover:bg-brand-500/5 hover:border-brand-500/30 transition-all">
-                                            <i className="ph ph-sliders-horizontal text-sm"></i>
-                                            <span>Permissions</span>
+                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-slate-400 hover:text-brand-400 border border-slate-700/50 rounded-lg hover:bg-brand-500/5 hover:border-brand-500/30 transition-all">
+                                            <i className="ph ph-sliders-horizontal text-xs"></i>
+                                            Permissions
                                           </button>
+
+                                          {/* Suspend / Unsuspend */}
+                                          {actionConfirm?.email === u.email && actionConfirm?.action === 'suspend' ? (
+                                            <div className="flex items-center gap-1.5">
+                                              <button onClick={() => handleUserAction(u.email, 'suspend')}
+                                                className="px-2.5 py-1.5 text-[10px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20">Confirm</button>
+                                              <button onClick={() => setActionConfirm(null)}
+                                                className="text-[10px] text-slate-500 hover:text-white">Cancel</button>
+                                            </div>
+                                          ) : actionConfirm?.email === u.email && actionConfirm?.action === 'unsuspend' ? (
+                                            <div className="flex items-center gap-1.5">
+                                              <button onClick={() => handleUserAction(u.email, 'unsuspend')}
+                                                className="px-2.5 py-1.5 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20">Confirm</button>
+                                              <button onClick={() => setActionConfirm(null)}
+                                                className="text-[10px] text-slate-500 hover:text-white">Cancel</button>
+                                            </div>
+                                          ) : u.disabled ? (
+                                            <button onClick={() => setActionConfirm({ email: u.email, action: 'unsuspend' })}
+                                              title="Unsuspend user"
+                                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/10 transition-all">
+                                              <i className="ph ph-play text-xs"></i>
+                                              Activate
+                                            </button>
+                                          ) : (
+                                            <button onClick={() => setActionConfirm({ email: u.email, action: 'suspend' })}
+                                              title="Suspend user"
+                                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-amber-400 border border-amber-500/20 rounded-lg hover:bg-amber-500/10 transition-all">
+                                              <i className="ph ph-pause text-xs"></i>
+                                              Suspend
+                                            </button>
+                                          )}
+
+                                          {/* Revoke */}
+                                          {actionConfirm?.email === u.email && actionConfirm?.action === 'revoke' ? (
+                                            <div className="flex items-center gap-1.5">
+                                              <button onClick={() => handleUserAction(u.email, 'revoke')}
+                                                className="px-2.5 py-1.5 text-[10px] font-semibold text-orange-400 bg-orange-500/10 border border-orange-500/20 rounded-lg hover:bg-orange-500/20">Confirm</button>
+                                              <button onClick={() => setActionConfirm(null)}
+                                                className="text-[10px] text-slate-500 hover:text-white">Cancel</button>
+                                            </div>
+                                          ) : (
+                                            <button onClick={() => setActionConfirm({ email: u.email, action: 'revoke' })}
+                                              title="Revoke all permissions (reset to viewer)"
+                                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-orange-400 border border-orange-500/20 rounded-lg hover:bg-orange-500/10 transition-all">
+                                              <i className="ph ph-prohibit text-xs"></i>
+                                              Revoke
+                                            </button>
+                                          )}
+
+                                          {/* Delete */}
                                           {deleteConfirm === u.email ? (
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-1.5">
                                               <button onClick={() => handleDelete(u.email)}
-                                                className="text-xs font-medium text-red-400 hover:text-red-300">Confirm</button>
+                                                className="px-2.5 py-1.5 text-[10px] font-semibold text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20">Confirm</button>
                                               <button onClick={() => setDeleteConfirm(null)}
-                                                className="text-xs text-slate-500 hover:text-white">Cancel</button>
+                                                className="text-[10px] text-slate-500 hover:text-white">Cancel</button>
                                             </div>
                                           ) : (
                                             <button onClick={() => setDeleteConfirm(u.email)}
-                                              className="text-xs text-slate-500 hover:text-red-400 transition-colors">
-                                              <i className="ph ph-trash text-base"></i>
+                                              title="Delete user permanently"
+                                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/10 transition-all">
+                                              <i className="ph ph-trash text-xs"></i>
+                                              Delete
                                             </button>
                                           )}
                                         </div>
+                                      ) : (
+                                        <span className="text-xs text-slate-600">—</span>
                                       )}
                                     </td>
                                   )}

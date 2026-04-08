@@ -52,6 +52,19 @@ async function handler(req, res) {
   if (req.method === 'GET') {
     try {
       const snapshot = await usersRef.orderBy('addedAt', 'desc').get();
+
+      // Fetch last access log per user for IP info
+      const ipMap = {};
+      try {
+        const logsSnap = await db.collection('access_logs').orderBy('timestamp', 'desc').limit(200).get();
+        for (const doc of logsSnap.docs) {
+          const d = doc.data();
+          if (d.email && !ipMap[d.email]) {
+            ipMap[d.email] = d.ip || null;
+          }
+        }
+      } catch {}
+
       const users = snapshot.docs.map((doc) => {
         const d = doc.data();
         const userRole = d.role || 'viewer';
@@ -65,6 +78,7 @@ async function handler(req, res) {
           addedBy: d.addedBy || 'unknown',
           addedAt: d.addedAt?.toDate?.()?.toISOString() || null,
           lastLogin: d.lastLogin?.toDate?.()?.toISOString() || null,
+          lastIP: ipMap[doc.id] || null,
           disabled: d.disabled || false,
           superAdmin: d.superAdmin || (SUPER_ADMIN && doc.id === SUPER_ADMIN) || false,
         };
@@ -168,6 +182,13 @@ async function handler(req, res) {
       }
 
       await usersRef.doc(cleanEmail).delete();
+
+      // Disable Firebase Auth user so they can't sign in again
+      try {
+        const authUser = await admin.auth().getUserByEmail(cleanEmail);
+        await admin.auth().updateUser(authUser.uid, { disabled: true });
+      } catch {}
+
       return res.status(200).json({ ok: true });
     } catch (err) {
       console.error('[USERS DELETE]', err.message);
@@ -175,9 +196,9 @@ async function handler(req, res) {
     }
   }
 
-  // PATCH — Update user role and/or permissions
+  // PATCH — Update user role, permissions, suspend, or revoke
   if (req.method === 'PATCH') {
-    const { email, role: newRole, permissions: newPermissions } = req.body;
+    const { email, role: newRole, permissions: newPermissions, action: patchAction } = req.body;
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ error: 'Email is required.' });
     }
@@ -208,6 +229,34 @@ async function handler(req, res) {
       }
 
       const update = {};
+
+      // Handle suspend / unsuspend
+      if (patchAction === 'suspend') {
+        update.disabled = true;
+        try {
+          const authUser = await admin.auth().getUserByEmail(cleanEmail);
+          await admin.auth().updateUser(authUser.uid, { disabled: true });
+        } catch {}
+        await usersRef.doc(cleanEmail).update(update);
+        return res.status(200).json({ ok: true, email: cleanEmail, disabled: true });
+      }
+
+      if (patchAction === 'unsuspend') {
+        update.disabled = false;
+        try {
+          const authUser = await admin.auth().getUserByEmail(cleanEmail);
+          await admin.auth().updateUser(authUser.uid, { disabled: false });
+        } catch {}
+        await usersRef.doc(cleanEmail).update(update);
+        return res.status(200).json({ ok: true, email: cleanEmail, disabled: false });
+      }
+
+      // Handle revoke — strip all custom permissions, reset to viewer
+      if (patchAction === 'revoke') {
+        await usersRef.doc(cleanEmail).update({ role: 'viewer', permissions: {} });
+        return res.status(200).json({ ok: true, email: cleanEmail, role: 'viewer', permissions: resolvePermissions('viewer') });
+      }
+
       if (newRole && ['owner', 'admin', 'viewer'].includes(newRole)) {
         update.role = newRole;
       }
