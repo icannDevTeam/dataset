@@ -20,7 +20,7 @@ const NAV_SECTIONS = [
     label: 'Management',
     items: [
       { icon: 'ph-user-circle-plus', label: 'Enrollment', children: [
-        { href: '/', label: 'Dataset Capture' },
+        { href: '/enrollment', label: 'Dataset Capture' },
         { href: '/mobile-enrollment', label: 'Mobile Enrollment' },
       ]},
       { href: '/device-manager', icon: 'ph-cpu', label: 'Device Manager' },

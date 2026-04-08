@@ -40,3 +40,4 @@ QUICKSTART.md
 coverage/
 *.log
 server.log
+.vercel

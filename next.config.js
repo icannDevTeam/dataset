@@ -47,6 +47,11 @@ const nextConfig = {
         destination: '/v2',
         permanent: true,
       },
+      {
+        source: '/',
+        destination: '/v2',
+        permanent: false,
+      },
     ];
   },
 };
