@@ -333,7 +333,7 @@ export default function SettingsPage() {
                                 className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white appearance-none focus:outline-none focus:border-brand-500 cursor-pointer">
                                 <option value="viewer">Viewer</option>
                                 <option value="admin">Admin</option>
-                                {currentUserRole === 'owner' && <option value="owner">Owner</option>}
+                                {role === 'owner' && <option value="owner">Owner</option>}
                               </select>
                             </div>
                           </div>
