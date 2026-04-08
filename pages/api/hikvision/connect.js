@@ -10,6 +10,7 @@
 
 import { hikRequest, hikJson, isAllowedDeviceIP } from '../../../lib/hikvision';
 import { withMetrics } from '../../../lib/metrics';
+import { withAuth } from '../../../lib/auth-middleware';
 
 async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -128,4 +129,4 @@ async function handler(req, res) {
   }
 }
 
-export default withMetrics(handler);
+export default withAuth(withMetrics(handler));

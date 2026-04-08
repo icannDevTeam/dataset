@@ -11,6 +11,7 @@
 
 import { initializeFirebase, getFirebaseStorage, getFirestoreDB } from '../../../lib/firebase-admin';
 import { withMetrics } from '../../../lib/metrics';
+import { withAuth } from '../../../lib/auth-middleware';
 
 // In-memory cache: { thumbnails, expiry }
 let cache = { thumbnails: null, expiry: 0 };
@@ -110,4 +111,4 @@ async function handler(req, res) {
   }
 }
 
-export default withMetrics(handler);
+export default withAuth(withMetrics(handler));

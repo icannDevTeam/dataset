@@ -10,6 +10,7 @@
 
 import { getFirestoreDB } from '../../../lib/firebase-admin';
 import { withMetrics } from '../../../lib/metrics';
+import { withAuth } from '../../../lib/auth-middleware';
 
 function getWIBDate(dateStr) {
   if (dateStr) return dateStr;
@@ -115,4 +116,4 @@ async function handler(req, res) {
   }
 }
 
-export default withMetrics(handler);
+export default withAuth(withMetrics(handler));

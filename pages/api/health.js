@@ -1,4 +1,5 @@
 import { withMetrics } from '../../lib/metrics';
+import { withAuth } from '../../lib/auth-middleware';
 
 function handler(req, res) {
   res.status(200).json({ 
@@ -8,4 +9,4 @@ function handler(req, res) {
   });
 }
 
-export default withMetrics(handler);
+export default withAuth(withMetrics(handler), { public: true });

@@ -13,6 +13,7 @@
 
 import axios from 'axios';
 import { withMetrics, trackExternalCall } from '../../../lib/metrics';
+import { withAuth } from '../../../lib/auth-middleware';
 
 // BINUS API only serves on HTTP port 80 (HTTPS port 443 returns 404)
 const BINUS_BASE = 'http://binusian.ws';
@@ -172,4 +173,4 @@ async function handler(req, res) {
   }
 }
 
-export default withMetrics(handler);
+export default withAuth(withMetrics(handler));

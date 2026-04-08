@@ -16,6 +16,7 @@
 import { hikJson, isAllowedDeviceIP } from '../../../lib/hikvision';
 import { initializeFirebase, getFirebaseAdmin } from '../../../lib/firebase-admin';
 import { withMetrics } from '../../../lib/metrics';
+import { withAuth } from '../../../lib/auth-middleware';
 
 const WIB_OFFSET = 7 * 3600 * 1000;
 const CUTOFF_HOUR = 7;
@@ -260,4 +261,4 @@ async function handler(req, res) {
   });
 }
 
-export default withMetrics(handler);
+export default withAuth(withMetrics(handler));
