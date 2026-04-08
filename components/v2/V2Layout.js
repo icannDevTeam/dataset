@@ -88,11 +88,38 @@ export default function V2Layout({ children }) {
             {!collapsed && (
               <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest px-3 mb-2">{section.label}</p>
             )}
+            {collapsed && (
+              <div className="w-full flex justify-center mb-2">
+                <div className="w-6 border-t border-slate-800"></div>
+              </div>
+            )}
             <div className="space-y-1">
               {section.items.map((item) => {
                 if (item.children) {
                   const childActive = item.children.some((c) => isActive(c.href));
                   const isOpen = expandedNav === item.label || childActive;
+
+                  if (collapsed) {
+                    // When collapsed, show icon and navigate to first child on click
+                    return (
+                      <button
+                        key={item.label}
+                        onClick={() => router.push(item.children[0].href)}
+                        className={`group relative w-full flex items-center justify-center px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                          childActive
+                            ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
+                            : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
+                        }`}
+                        title={item.label}
+                      >
+                        <i className={`ph ${item.icon} text-xl`}></i>
+                        <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
+                          {item.label}
+                        </div>
+                      </button>
+                    );
+                  }
+
                   return (
                     <div key={item.label}>
                       <button
@@ -102,17 +129,12 @@ export default function V2Layout({ children }) {
                             ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
                             : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
                         }`}
-                        title={collapsed ? item.label : undefined}
                       >
                         <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
-                        {!collapsed && (
-                          <>
-                            <span className="flex-1 text-left">{item.label}</span>
-                            <i className={`ph ${isOpen ? 'ph-caret-up' : 'ph-caret-down'} text-xs text-slate-500`}></i>
-                          </>
-                        )}
+                        <span className="flex-1 text-left">{item.label}</span>
+                        <i className={`ph ${isOpen ? 'ph-caret-up' : 'ph-caret-down'} text-xs text-slate-500`}></i>
                       </button>
-                      {isOpen && !collapsed && (
+                      {isOpen && (
                         <div className="ml-5 pl-4 border-l border-slate-800 mt-1 space-y-0.5">
                           {item.children.map((child) => {
                             const cActive = isActive(child.href);
@@ -140,7 +162,7 @@ export default function V2Layout({ children }) {
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                    className={`group relative flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                       active
                         ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]'
                         : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
@@ -149,6 +171,11 @@ export default function V2Layout({ children }) {
                   >
                     <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
                     {!collapsed && <span>{item.label}</span>}
+                    {collapsed && (
+                      <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
+                        {item.label}
+                      </div>
+                    )}
                   </Link>
                 );
               })}
