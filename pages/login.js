@@ -11,11 +11,14 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  const redirectTo = router.query.from || '/v2';
+  const sessionExpired = router.query.expired === '1';
+
   useEffect(() => {
     if (authorized && user) {
-      router.replace('/v2');
+      router.replace(redirectTo);
     }
-  }, [authorized, user, router]);
+  }, [authorized, user, router, redirectTo]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -72,6 +75,13 @@ export default function LoginPage() {
                 <h2 className="text-lg font-semibold text-white">Dashboard Access</h2>
                 <p className="text-sm text-slate-400 mt-1">Sign in with your credentials</p>
               </div>
+
+              {sessionExpired && !error && (
+                <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm flex items-start gap-3">
+                  <i className="ph ph-clock-countdown text-xl flex-shrink-0 mt-0.5"></i>
+                  <span>Your session has expired. Please sign in again.</span>
+                </div>
+              )}
 
               {error && (
                 <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start gap-3">

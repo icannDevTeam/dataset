@@ -9,7 +9,7 @@ const PUBLIC_PAGES = ['/login'];
 
 function AuthGate({ Component, pageProps }) {
   const router = useRouter();
-  const { authorized, role, loading } = useAuth();
+  const { authorized, role, loading, sessionWarning, extendSession } = useAuth();
   const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
@@ -63,7 +63,33 @@ function AuthGate({ Component, pageProps }) {
     );
   }
 
-  return <Component {...pageProps} />;
+  return (
+    <>
+      <Component {...pageProps} />
+      {/* Session timeout warning */}
+      {sessionWarning && (
+        <div className="fixed bottom-6 right-6 z-[9999] animate-slide-up">
+          <div className="glass-panel rounded-xl border border-amber-500/30 bg-slate-900/95 backdrop-blur-xl p-4 shadow-2xl shadow-black/40 max-w-sm">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white">Session Expiring</p>
+                <p className="text-xs text-slate-400 mt-1">You will be signed out in 2 minutes due to inactivity.</p>
+                <button onClick={extendSession}
+                  className="mt-3 px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-semibold transition-colors">
+                  Stay Signed In
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 export default function App({ Component, pageProps }) {
