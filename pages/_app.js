@@ -14,7 +14,11 @@ function AuthGate({ Component, pageProps }) {
 
   useEffect(() => {
     if (!loading && authorized && permissions) {
-      if (!PUBLIC_PAGES.includes(router.pathname) && !canAccessPath(permissions, router.pathname)) {
+      const path = router.pathname;
+      // Skip access check for index/dashboard and public pages
+      if (path === '/v2' || PUBLIC_PAGES.includes(path)) {
+        setAccessDenied(false);
+      } else if (!canAccessPath(permissions, path)) {
         setAccessDenied(true);
         setTimeout(() => router.replace('/v2'), 2000);
       } else {
@@ -28,7 +32,7 @@ function AuthGate({ Component, pageProps }) {
     return <Component {...pageProps} />;
   }
 
-  // Loading state
+  // Still loading auth
   if (loading) {
     return (
       <div className="aura-theme antialiased min-h-screen flex items-center justify-center">
@@ -47,6 +51,11 @@ function AuthGate({ Component, pageProps }) {
       router.replace('/login');
     }
     return null;
+  }
+
+  // Permissions still resolving — show page (avoids flash of denied)
+  if (!permissions) {
+    return <Component {...pageProps} />;
   }
 
   // Access denied for this role → redirect to dashboard
