@@ -16,9 +16,10 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (authorized && user) {
-      router.replace(redirectTo);
+      // Full page load instead of client-side nav to ensure clean state after auth
+      window.location.href = redirectTo;
     }
-  }, [authorized, user, router, redirectTo]);
+  }, [authorized, user, redirectTo]);
 
   async function handleSubmit(e) {
     e.preventDefault();
