@@ -49,7 +49,7 @@ async function handler(req, res) {
         authUser = await admin.auth().createUser({
           email: cleanEmail,
           password: password,
-          displayName: 'Super Admin',
+          displayName: 'Admin',
         });
       } else {
         throw err;
@@ -60,7 +60,7 @@ async function handler(req, res) {
     if (!existing.exists) {
       await usersRef.doc(cleanEmail).set({
         email: cleanEmail,
-        name: 'Super Admin',
+        name: 'Admin',
         role: 'owner',
         addedBy: 'system',
         addedAt: admin.firestore.FieldValue.serverTimestamp(),

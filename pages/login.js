@@ -6,7 +6,7 @@ import { useAuth } from '../lib/AuthContext';
 export default function LoginPage() {
   const router = useRouter();
   const { user, authorized, loading, error, signIn } = useAuth();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -22,9 +22,11 @@ export default function LoginPage() {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!email.trim() || !password) return;
+    if (!username.trim() || !password) return;
     setSubmitting(true);
-    await signIn(email.trim(), password);
+    // Auto-append @binus.edu if no @ present
+    const email = username.trim().includes('@') ? username.trim() : `${username.trim().toLowerCase()}@binus.edu`;
+    await signIn(email, password);
     setSubmitting(false);
   }
 
@@ -92,16 +94,16 @@ export default function LoginPage() {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="text-xs font-medium text-slate-400 block mb-1.5">Email Address</label>
+                  <label className="text-xs font-medium text-slate-400 block mb-1.5">Username</label>
                   <div className="relative">
-                    <i className="ph ph-envelope absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
+                    <i className="ph ph-user absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
                     <input
-                      type="email"
-                      value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      placeholder="you@binus.edu"
+                      type="text"
+                      value={username}
+                      onChange={e => setUsername(e.target.value)}
+                      placeholder="Admin"
                       required
-                      autoComplete="email"
+                      autoComplete="username"
                       className="w-full bg-slate-950/50 border border-slate-700 rounded-xl py-3 pl-11 pr-4 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"
                     />
                   </div>
