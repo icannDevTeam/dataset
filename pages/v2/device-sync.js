@@ -152,7 +152,7 @@ export default function DeviceSyncPage() {
 
   return (
     <V2Layout>
-      <Head><title>Device Sync — BINUSFace</title></Head>
+      <Head><title>Device Sync — BINUS Attendance</title></Head>
 
       <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 max-w-[1600px] mx-auto">
         {/* Header */}
@@ -165,6 +165,12 @@ export default function DeviceSyncPage() {
             <p className="text-slate-400 mt-2 max-w-2xl">
               Pull missed attendance events from Hikvision terminals and sync to the dashboard.
             </p>
+            <div className="mt-3 flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm max-w-2xl">
+              <i className="ph ph-warning-circle text-lg flex-shrink-0 mt-0.5"></i>
+              <span>
+                <strong>Note:</strong> Dashboard sync only saves to Firestore. To also push attendance to the <strong>BINUS database</strong>, run the attendance listener (<code className="text-amber-400/80 bg-amber-500/10 px-1 rounded">attendance_listener.py</code>) before syncing.
+              </span>
+            </div>
           </div>
         </div>
 
@@ -502,6 +508,14 @@ export default function DeviceSyncPage() {
                               )}
                             </div>
                           ))}
+                        </div>
+                      )}
+                      {syncResult.synced > 0 && (
+                        <div className="mt-4 flex items-start gap-2 p-3 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-300 text-sm">
+                          <i className="ph ph-info text-lg flex-shrink-0 mt-0.5"></i>
+                          <span>
+                            {syncResult.synced} record(s) saved to <strong>Firestore only</strong>. To push to the BINUS database, ensure <code className="text-blue-400/80 bg-blue-500/10 px-1 rounded">attendance_listener.py</code> is running — it will automatically push to the BINUS API on next catch-up sync.
+                          </span>
                         </div>
                       )}
                     </>

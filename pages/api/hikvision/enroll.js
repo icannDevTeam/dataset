@@ -166,7 +166,19 @@ async function handler(req, res) {
   }
 
   const employeeNo = employeeNoFromName(studentName);
-  console.log(`\n📝 Enrolling: ${studentName} (${employeeNo}) — ${homeroom}`);
+
+  // Extract enrolling user from session cookie
+  let enrolledBy = 'unknown';
+  try {
+    const sessionCookie = req.cookies?.__session || req.headers?.cookie?.match(/__session=([^;]+)/)?.[1];
+    if (sessionCookie) {
+      const decoded = Buffer.from(sessionCookie, 'base64').toString();
+      const email = decoded.split(':')[0];
+      if (email) enrolledBy = email;
+    }
+  } catch { /* ignore */ }
+
+  console.log(`\n📝 Enrolling: ${studentName} (${employeeNo}) — ${homeroom} [by ${enrolledBy}]`);
 
   try {
     // Step 1: Create user on device
@@ -234,6 +246,7 @@ async function handler(req, res) {
         linkedTo: studentId || '',
         enrolledAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        enrolledBy,
       }, { merge: true });
       console.log(`📋 student_metadata/${employeeNo} saved`);
     } catch (metaErr) {

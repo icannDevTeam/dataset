@@ -169,7 +169,7 @@ export default function AnalyticsPage() {
 
   return (
     <V2Layout>
-      <Head><title>Analytics — BINUSFace</title></Head>
+      <Head><title>Analytics — BINUS Attendance</title></Head>
 
       <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
 
@@ -724,7 +724,7 @@ export default function AnalyticsPage() {
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-slate-500 text-sm">
             <i className="ph ph-shield-check text-brand-500 text-lg"></i>
-            <span>BINUSFace Attendance System v2</span>
+            <span>BINUS Attendance System</span>
           </div>
           <div className="flex items-center gap-6 text-sm">
             <span className="text-slate-600">BINUS School Serpong</span>

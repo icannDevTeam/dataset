@@ -238,7 +238,7 @@ export default function SettingsPage() {
 
     return (
     <V2Layout>
-        <Head><title>Settings — BINUSFace</title></Head>
+        <Head><title>Settings — BINUS Attendance</title></Head>
 
     {/* Main Content */}
     <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 max-w-[1600px] mx-auto">
@@ -892,7 +892,7 @@ export default function SettingsPage() {
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-slate-500 text-sm">
                 <i className="ph ph-shield-check text-brand-500 text-lg"></i>
-                <span>BINUSFace Attendance System</span>
+                <span>BINUS Attendance System</span>
             </div>
             <div className="flex items-center gap-6 text-sm">
                 <span className="text-slate-600">BINUS School Simprug</span>

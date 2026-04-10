@@ -48,7 +48,7 @@ export default function LoginPage() {
   return (
     <>
       <Head>
-        <title>Sign In — BINUSFace</title>
+        <title>Sign In — BINUS Attendance</title>
         <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.0.3/src/regular/style.css" />
       </Head>
 
@@ -67,7 +67,7 @@ export default function LoginPage() {
             <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-white/10 backdrop-blur border border-slate-700/50 mb-6 shadow-lg shadow-black/20">
               <img src="/binus-logo.jpg" alt="BINUS" className="w-14 h-14 rounded-lg object-contain bg-white p-0.5" />
             </div>
-            <h1 className="text-3xl font-bold tracking-tight text-white">BINUSFace</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-white">BINUS Attendance</h1>
             <p className="text-slate-400 mt-2">Attendance Monitoring System</p>
           </div>
 
