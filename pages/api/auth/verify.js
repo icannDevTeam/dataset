@@ -61,22 +61,26 @@ async function handler(req, res) {
     }
 
     // Check if ANY users exist — if not, seed super admin first
+    // Security: only seeds if SUPER_ADMIN env var is configured and the
+    // signing-in user IS the super admin (prevents unauthorized seeding)
     const snapshot = await usersRef.limit(1).get();
     if (snapshot.empty && SUPER_ADMIN) {
-      // Seed the super admin even if they're not the one signing in
+      // Only the super admin can trigger initial seeding
+      if (cleanEmail !== SUPER_ADMIN) {
+        return res.status(403).json({
+          error: `System not initialized. The super admin must sign in first.`,
+          authorized: false,
+        });
+      }
       await usersRef.doc(SUPER_ADMIN).set({
         email: SUPER_ADMIN,
-        name: 'Super Admin',
+        name: decoded.name || 'Super Admin',
         role: 'owner',
         addedBy: 'system',
         addedAt: admin.firestore.FieldValue.serverTimestamp(),
         superAdmin: true,
       });
-      // Current user is not the super admin, deny
-      return res.status(403).json({
-        error: `${email} is not authorized. Ask an admin to add your email.`,
-        authorized: false,
-      });
+      return res.status(200).json({ authorized: true, role: 'owner', permissions: resolvePermissions('owner') });
     }
 
     // Check if user is authorized

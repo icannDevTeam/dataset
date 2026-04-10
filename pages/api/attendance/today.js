@@ -19,7 +19,11 @@ import { withMetrics } from '../../../lib/metrics';
 import { withAuth } from '../../../lib/auth-middleware';
 
 function getWIBDate(dateStr) {
-  if (dateStr) return dateStr;
+  if (dateStr) {
+    // Validate date format strictly
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+    return dateStr;
+  }
   // UTC+7
   const now = new Date(Date.now() + 7 * 3600 * 1000);
   return now.toISOString().slice(0, 10);
@@ -32,6 +36,9 @@ async function handler(req, res) {
 
   try {
     const date = getWIBDate(req.query.date);
+    if (!date) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
     const db = getFirestoreDB();
 
     // Fetch attendance records and student metadata in parallel
@@ -128,7 +135,7 @@ async function handler(req, res) {
     });
   } catch (error) {
     console.error('Attendance API error:', error.message);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
 

@@ -86,7 +86,7 @@ async function handler(req, res) {
     } catch (err) {
       tokenTimer({ error: true });
       console.error('BINUS token error:', err.message);
-      return res.status(502).json({ error: 'Failed to authenticate with BINUS API', details: err.message });
+      return res.status(502).json({ error: 'Failed to authenticate with BINUS API' });
     }
 
     if (!token) {
@@ -127,7 +127,7 @@ async function handler(req, res) {
       if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
         return res.status(504).json({ error: 'BINUS API timeout — try a shorter date range' });
       }
-      return res.status(502).json({ error: 'Failed to fetch attendance logs', details: err.message });
+      return res.status(502).json({ error: 'Failed to fetch attendance logs' });
     }
 
     const data = logRes.data;
@@ -169,7 +169,7 @@ async function handler(req, res) {
     });
   } catch (err) {
     console.error('Attendance log handler error:', err);
-    return res.status(500).json({ error: 'Internal server error', details: err.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
 

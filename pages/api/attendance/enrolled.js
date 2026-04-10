@@ -62,7 +62,7 @@ async function handler(req, res) {
     return res.status(200).json({ users, total: users.length });
   } catch (error) {
     console.error('Enrolled API error:', error.message);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
 

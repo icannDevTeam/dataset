@@ -99,7 +99,6 @@ async function handler(req, res) {
     console.error('Status error:', error.message);
     return res.status(500).json({
       error: 'Failed to get device status',
-      details: error.message,
     });
   }
 }

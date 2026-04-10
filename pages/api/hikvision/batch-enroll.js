@@ -139,8 +139,14 @@ async function handler(req, res) {
       console.log(`\nEnrolling: ${studentName} (${employeeNo}) - ${className}`);
 
       // Step 1: Download photo from Firebase signed URL
+      // SSRF protection: only allow Firebase Storage URLs
       let jpegBase64;
       try {
+        const allowedHosts = ['firebasestorage.googleapis.com', 'storage.googleapis.com'];
+        const parsedUrl = new URL(photoUrl);
+        if (!allowedHosts.some(h => parsedUrl.hostname.endsWith(h))) {
+          throw new Error(`Blocked: photo URL must be from Firebase Storage, got ${parsedUrl.hostname}`);
+        }
         const imgResponse = await axios.get(photoUrl, {
           responseType: 'arraybuffer',
           timeout: 15000,

@@ -85,7 +85,6 @@ async function handler(req, res) {
 
     return res.status(500).json({
       error: 'Failed to capture face from device',
-      details: error.message,
     });
   }
 }

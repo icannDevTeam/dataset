@@ -70,7 +70,7 @@ async function handleGetPhotos(req, res) {
     return res.status(200).json({ success: true, photos });
   } catch (error) {
     console.error('Get photos error:', error.message);
-    return res.status(500).json({ error: 'Failed to get photos', details: error.message });
+    return res.status(500).json({ error: 'Failed to get photos' });
   }
 }
 
@@ -127,7 +127,7 @@ async function handleSaveDescriptors(req, res) {
     });
   } catch (error) {
     console.error('Save descriptors error:', error.message);
-    return res.status(500).json({ error: 'Failed to save descriptors', details: error.message });
+    return res.status(500).json({ error: 'Failed to save descriptors' });
   }
 }
 

@@ -90,7 +90,7 @@ async function handler(req, res) {
   return res.status(405).json({ error: 'Method not allowed' });
 }
 
-export default withAuth(handler, { public: true });
+export default withAuth(handler, { public: false });
 
 function parseUserAgent(ua) {
   const result = { device: 'Unknown', browser: 'Unknown', os: 'Unknown' };

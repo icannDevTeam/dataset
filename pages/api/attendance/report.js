@@ -337,7 +337,7 @@ async function handler(req, res) {
     });
   } catch (error) {
     console.error('Report API error:', error.message);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
 

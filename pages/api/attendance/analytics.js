@@ -46,7 +46,12 @@ async function handler(req, res) {
 
   try {
     const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 90);
-    const toDate = getWIBDate(req.query.to);
+    // Validate date format
+    const rawTo = req.query.to;
+    if (rawTo && !/^\d{4}-\d{2}-\d{2}$/.test(rawTo)) {
+      return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+    }
+    const toDate = getWIBDate(rawTo);
     const toMs = new Date(toDate + 'T00:00:00Z').getTime();
     const fromDate = new Date(toMs - (days - 1) * 86400000).toISOString().slice(0, 10);
 
@@ -258,7 +263,7 @@ async function handler(req, res) {
     });
   } catch (error) {
     console.error('Analytics API error:', error.message);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
 

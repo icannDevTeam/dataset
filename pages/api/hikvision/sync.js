@@ -115,7 +115,7 @@ async function handler(req, res) {
   try {
     initializeFirebase();
   } catch (e) {
-    return res.status(500).json({ error: 'Firebase initialization failed', details: e.message });
+    return res.status(500).json({ error: 'Firebase initialization failed' });
   }
 
   const admin = getFirebaseAdmin();

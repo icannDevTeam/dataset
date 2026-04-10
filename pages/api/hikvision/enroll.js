@@ -263,7 +263,6 @@ async function handler(req, res) {
     console.error('Enrollment error:', error.message);
     return res.status(500).json({
       error: 'Enrollment failed',
-      details: error.message,
     });
   }
 }

@@ -107,7 +107,7 @@ async function handler(req, res) {
     return res.status(200).json({ success: true, thumbnails });
   } catch (error) {
     console.error('Thumbnails API error:', error.message);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
 

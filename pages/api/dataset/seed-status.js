@@ -99,7 +99,7 @@ async function handler(req, res) {
     });
   } catch (error) {
     console.error('Seed status error:', error.message);
-    return res.status(500).json({ error: 'Failed to get seed status', details: error.message });
+    return res.status(500).json({ error: 'Failed to get seed status' });
   }
 }
 
