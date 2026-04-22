@@ -178,14 +178,15 @@ async function handler(req, res) {
           if (r.homeroom) allClassSet.add(r.homeroom);
           if (r.grade) allGradeSet.add(r.grade);
           if (r.status) allStatusSet.add(r.status);
-          const source = r.source || r.deviceName || 'Unknown';
-          allSourceSet.add(source);
+          // Prefer deviceName (human-readable terminal name) over raw source string
+          const terminalName = r.deviceName || (r.source === 'hikvision_terminal' ? 'Hikvision Terminal' : r.source) || 'Unknown';
+          allSourceSet.add(terminalName);
 
           // Apply filters
           if (filterClasses && r.homeroom && !filterClasses.includes(r.homeroom)) continue;
           if (filterGrade && r.grade !== filterGrade) continue;
           if (filterStatus && r.status !== filterStatus) continue;
-          if (filterSource && source !== filterSource) continue;
+          if (filterSource && terminalName !== filterSource) continue;
 
           if (r.status === 'Present') dayPresent++;
           if (r.status === 'Late') dayLate++;
@@ -204,14 +205,16 @@ async function handler(req, res) {
           studentDays[key].dates[date] = {
             status: r.status,
             timestamp: r.timestamp || '',
-            source,
+            source: terminalName,
             confidence: r.confidence,
           };
 
-          // Track per-source
-          if (!sourceMap[source]) sourceMap[source] = { totalScans: 0, students: new Set() };
-          sourceMap[source].totalScans++;
-          sourceMap[source].students.add(key);
+          // Track per-terminal (keyed by human-readable name)
+          if (!sourceMap[terminalName]) sourceMap[terminalName] = { totalScans: 0, present: 0, late: 0, students: new Set() };
+          sourceMap[terminalName].totalScans++;
+          if (r.status === 'Present') sourceMap[terminalName].present++;
+          if (r.status === 'Late') sourceMap[terminalName].late++;
+          sourceMap[terminalName].students.add(key);
         }
 
         dailyBreakdown.push({
@@ -290,11 +293,15 @@ async function handler(req, res) {
       };
     }).sort((a, b) => a.homeroom.localeCompare(b.homeroom));
 
-    // Source summary
+    // Source summary — keyed by human-readable terminal/source name
     const sourceSummary = Object.entries(sourceMap).map(([source, data]) => ({
       source,
       totalScans: data.totalScans,
+      present: data.present,
+      late: data.late,
       uniqueStudents: data.students.size,
+      presentRate: data.totalScans > 0 ? parseFloat(((data.present / data.totalScans) * 100).toFixed(1)) : 0,
+      lateRate: data.totalScans > 0 ? parseFloat(((data.late / data.totalScans) * 100).toFixed(1)) : 0,
     })).sort((a, b) => b.totalScans - a.totalScans);
 
     // Overall summary

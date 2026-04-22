@@ -16,7 +16,7 @@ const PUBLIC_PATHS = ['/login'];
 // Prefixes to skip (static assets, API routes, Next.js internals)
 const SKIP_PREFIXES = ['/_next', '/api/', '/favicon', '/models/', '/sw.js', '/manifest.json', '/binus-logo'];
 
-export function middleware(request) {
+export async function middleware(request) {
   const { pathname } = request.nextUrl;
 
   // Skip static assets, API routes, and Next.js internals
@@ -50,17 +50,19 @@ export function middleware(request) {
   // Session exists — validate it's not expired (cookie Max-Age handles this,
   // but double-check the embedded timestamp as a safety net)
   try {
-    // Verify HMAC signature on session cookie
-    const decoded = Buffer.from(session.value, 'base64').toString();
+    // Verify HMAC signature on session cookie (Edge-compatible base64 decode)
+    const decoded = atob(session.value);
     const lastColon = decoded.lastIndexOf(':');
     if (lastColon === -1) throw new Error('malformed');
     const payload = decoded.substring(0, lastColon);
     const sig = decoded.substring(lastColon + 1);
 
-    // Re-derive HMAC and compare
+    // Re-derive HMAC and compare (using Web Crypto API for Edge compatibility)
     const secret = process.env.SESSION_SECRET || process.env.DASHBOARD_API_KEY || 'fallback-change-me';
-    const { createHmac } = await import('node:crypto');
-    const expected = createHmac('sha256', secret).update(payload).digest('hex');
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sigBytes = await crypto.subtle.sign('HMAC', key, enc.encode(payload));
+    const expected = Array.from(new Uint8Array(sigBytes)).map(b => b.toString(16).padStart(2, '0')).join('');
 
     // Timing-safe comparison (Edge-compatible)
     if (sig.length !== expected.length || sig !== expected) {

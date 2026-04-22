@@ -49,7 +49,7 @@ async function handler(req, res) {
       db.collection('attendance').doc(date).get(),
     ]);
 
-    // Build metadata lookup: employeeNo → { homeroom, grade }
+    // Build metadata lookup: employeeNo → { homeroom, grade, linkedTo }
     const metaMap = {};
     const nameMap = {};
     metadataSnap.forEach((doc) => {
@@ -58,6 +58,7 @@ async function handler(req, res) {
         homeroom: d.homeroom || '',
         grade: d.grade || d.gradeCode || '',
         name: d.name || '',
+        linkedTo: d.linkedTo || '',
       };
       if (d.name && d.homeroom) {
         nameMap[d.name] = metaMap[doc.id];
@@ -73,19 +74,21 @@ async function handler(req, res) {
           homeroom: d.homeroom || '',
           grade: d.gradeCode || d.grade || '',
           name: d.name || '',
+          linkedTo: d.linkedTo || '',
         };
       } else {
         // Fill in missing fields from students collection
         if (!metaMap[id].homeroom && d.homeroom) metaMap[id].homeroom = d.homeroom;
         if (!metaMap[id].grade && (d.gradeCode || d.grade)) metaMap[id].grade = d.gradeCode || d.grade;
+        if (!metaMap[id].linkedTo && d.linkedTo) metaMap[id].linkedTo = d.linkedTo;
       }
       if (d.name && d.homeroom && !nameMap[d.name]) {
         nameMap[d.name] = { homeroom: d.homeroom, grade: d.gradeCode || d.grade || '', name: d.name };
       }
     });
 
-    // Enrich attendance records with class/grade
-    const records = [];
+    // Enrich attendance records with class/grade and collapse linked IDs.
+    const recordMap = new Map();
     attendanceSnap.forEach((doc) => {
       const data = { id: doc.id, ...doc.data() };
       const meta = metaMap[data.employeeNo] || metaMap[doc.id] || {};
@@ -96,8 +99,35 @@ async function handler(req, res) {
         data.homeroom = nameMap[data.name].homeroom;
         if (!data.grade) data.grade = nameMap[data.name].grade;
       }
-      records.push(data);
+
+      const canonicalEmployeeNo = meta.linkedTo || data.employeeNo || doc.id;
+      const existing = recordMap.get(canonicalEmployeeNo);
+
+      if (!existing) {
+        recordMap.set(canonicalEmployeeNo, {
+          ...data,
+          id: canonicalEmployeeNo,
+          employeeNo: canonicalEmployeeNo,
+          scannedEmployeeNo: data.scannedEmployeeNo || data.employeeNo || doc.id,
+        });
+        return;
+      }
+
+      // Keep the earliest check-in when the same student arrives via linked IDs.
+      const existingTs = existing.timestamp || '';
+      const nextTs = data.timestamp || '';
+      if (nextTs && (!existingTs || nextTs < existingTs)) {
+        recordMap.set(canonicalEmployeeNo, {
+          ...existing,
+          ...data,
+          id: canonicalEmployeeNo,
+          employeeNo: canonicalEmployeeNo,
+          scannedEmployeeNo: data.scannedEmployeeNo || data.employeeNo || doc.id,
+        });
+      }
     });
+
+    const records = [...recordMap.values()].sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
 
     const dayData = dayDoc.exists ? dayDoc.data() : {};
 

@@ -151,6 +151,7 @@ export default function ReportsPage() {
     { id: 'class', label: 'By Class', icon: 'ph-chalkboard-teacher' },
     { id: 'students', label: 'Students', icon: 'ph-users' },
     { id: 'daily', label: 'Daily', icon: 'ph-calendar-dots' },
+    { id: 'terminals', label: 'Terminals', icon: 'ph-fingerprint' },
   ];
 
   return (
@@ -350,28 +351,66 @@ export default function ReportsPage() {
                 {/* Terminal/Source breakdown */}
                 {data.sourceSummary.length > 0 && (
                   <div className="glass-panel rounded-2xl border border-slate-800 p-6">
-                    <h2 className="text-lg font-semibold text-white mb-4">Terminal Breakdown</h2>
+                    <div className="flex items-center justify-between mb-5">
+                      <div>
+                        <h2 className="text-lg font-semibold text-white">Terminal Breakdown</h2>
+                        <p className="text-xs text-slate-400 mt-0.5">Scan activity per terminal for the selected period</p>
+                      </div>
+                      <span className="text-xs text-slate-500">{data.sourceSummary.length} terminal{data.sourceSummary.length !== 1 ? 's' : ''}</span>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {data.sourceSummary.map((src) => (
-                        <div key={src.source} className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/50">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <i className="ph ph-fingerprint text-brand-400"></i>
-                              <span className="text-sm font-medium text-white">{src.source}</span>
+                      {data.sourceSummary.map((src) => {
+                        const isMobile = src.source.toLowerCase().includes('mobile');
+                        const icon = isMobile ? 'ph-device-mobile' : 'ph-fingerprint';
+                        const accentColor = isMobile ? 'text-violet-400' : 'text-brand-400';
+                        const borderColor = isMobile ? 'border-violet-500/30' : 'border-brand-500/30';
+                        const bgColor = isMobile ? 'bg-violet-500/10' : 'bg-brand-500/10';
+                        return (
+                          <div key={src.source} className={`rounded-xl p-4 border ${borderColor} ${bgColor}`}>
+                            {/* Header */}
+                            <div className="flex items-center gap-2 mb-3">
+                              <div className={`w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0`}>
+                                <i className={`ph ${icon} ${accentColor} text-base`}></i>
+                              </div>
+                              <span className="text-sm font-semibold text-white leading-tight">{src.source}</span>
+                            </div>
+
+                            {/* Big scan count */}
+                            <div className="mb-3">
+                              <span className="text-3xl font-bold text-white">{src.totalScans}</span>
+                              <span className="text-xs text-slate-400 ml-1.5">total scans</span>
+                            </div>
+
+                            {/* Present / Late pills */}
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-medium">
+                                <i className="ph-fill ph-check-circle text-xs"></i>
+                                {src.present ?? 0} on-time
+                              </span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-medium">
+                                <i className="ph-fill ph-clock text-xs"></i>
+                                {src.late ?? 0} late
+                              </span>
+                            </div>
+
+                            {/* Progress bar: on-time vs late */}
+                            {src.totalScans > 0 && (
+                              <div className="h-1.5 bg-slate-700/60 rounded-full overflow-hidden mb-3">
+                                <div
+                                  className="h-full bg-emerald-500 rounded-full"
+                                  style={{ width: `${src.presentRate}%` }}
+                                ></div>
+                              </div>
+                            )}
+
+                            {/* Footer stats */}
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                              <span><span className="text-white font-medium">{src.uniqueStudents}</span> unique students</span>
+                              <span className="text-emerald-400 font-medium">{src.presentRate ?? 0}% on-time</span>
                             </div>
                           </div>
-                          <div className="flex items-baseline gap-4">
-                            <div>
-                              <span className="text-2xl font-bold text-white">{src.totalScans}</span>
-                              <span className="text-xs text-slate-400 ml-1">scans</span>
-                            </div>
-                            <div>
-                              <span className="text-lg font-semibold text-slate-300">{src.uniqueStudents}</span>
-                              <span className="text-xs text-slate-400 ml-1">students</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -667,6 +706,123 @@ export default function ReportsPage() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {/* ═══ TERMINALS TAB ═══ */}
+            {activeTab === 'terminals' && (
+              <div className="space-y-6">
+                {data.sourceSummary.length === 0 ? (
+                  <div className="glass-panel rounded-2xl border border-slate-800 p-12 text-center">
+                    <i className="ph ph-fingerprint text-slate-600 text-4xl mb-3 block"></i>
+                    <p className="text-slate-500">No terminal data available for this date range.</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Cards row */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {data.sourceSummary.map((src) => {
+                        const isMobile = src.source.toLowerCase().includes('mobile');
+                        const icon = isMobile ? 'ph-device-mobile' : 'ph-fingerprint';
+                        const accentColor = isMobile ? 'text-violet-400' : 'text-brand-400';
+                        const borderColor = isMobile ? 'border-violet-500/30' : 'border-brand-500/30';
+                        const bgColor = isMobile ? 'bg-violet-500/10' : 'bg-brand-500/10';
+                        return (
+                          <div key={src.source} className={`rounded-xl p-5 border ${borderColor} ${bgColor}`}>
+                            <div className="flex items-center gap-2 mb-4">
+                              <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0">
+                                <i className={`ph ${icon} ${accentColor} text-lg`}></i>
+                              </div>
+                              <span className="text-sm font-semibold text-white leading-tight">{src.source}</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 mb-4">
+                              <div className="bg-slate-900/60 rounded-lg p-3 text-center">
+                                <div className="text-2xl font-bold text-white">{src.totalScans}</div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide">Total Scans</div>
+                              </div>
+                              <div className="bg-slate-900/60 rounded-lg p-3 text-center">
+                                <div className="text-2xl font-bold text-slate-300">{src.uniqueStudents}</div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide">Students</div>
+                              </div>
+                              <div className="bg-slate-900/60 rounded-lg p-3 text-center">
+                                <div className="text-2xl font-bold text-emerald-400">{src.present ?? 0}</div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide">On-Time</div>
+                              </div>
+                              <div className="bg-slate-900/60 rounded-lg p-3 text-center">
+                                <div className="text-2xl font-bold text-amber-400">{src.late ?? 0}</div>
+                                <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide">Late</div>
+                              </div>
+                            </div>
+                            {src.totalScans > 0 && (
+                              <>
+                                <div className="flex items-center justify-between text-xs mb-1">
+                                  <span className="text-slate-400">On-Time Rate</span>
+                                  <span className="text-emerald-400 font-semibold">{src.presentRate}%</span>
+                                </div>
+                                <div className="h-2 bg-slate-700/60 rounded-full overflow-hidden">
+                                  <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${src.presentRate}%` }}></div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Comparison table */}
+                    <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
+                      <div className="px-6 py-5 border-b border-slate-800">
+                        <h2 className="text-base font-semibold text-white">Terminal Comparison</h2>
+                        <p className="text-xs text-slate-400 mt-0.5">Side-by-side breakdown across all terminals</p>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-slate-800">
+                              <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Terminal</th>
+                              <th className="text-center px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Total Scans</th>
+                              <th className="text-center px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Students</th>
+                              <th className="text-center px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">On-Time</th>
+                              <th className="text-center px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">Late</th>
+                              <th className="text-center px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">On-Time Rate</th>
+                              <th className="px-4 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider w-40">Distribution</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.sourceSummary.map((src, i) => {
+                              const isMobile = src.source.toLowerCase().includes('mobile');
+                              return (
+                                <tr key={src.source} className={`border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors ${i % 2 === 0 ? '' : 'bg-slate-900/20'}`}>
+                                  <td className="px-6 py-4">
+                                    <div className="flex items-center gap-2">
+                                      <i className={`ph ${isMobile ? 'ph-device-mobile text-violet-400' : 'ph-fingerprint text-brand-400'} text-base`}></i>
+                                      <span className="font-medium text-white">{src.source}</span>
+                                    </div>
+                                  </td>
+                                  <td className="text-center px-4 py-4 text-white font-semibold">{src.totalScans}</td>
+                                  <td className="text-center px-4 py-4 text-slate-300">{src.uniqueStudents}</td>
+                                  <td className="text-center px-4 py-4 text-emerald-400">{src.present ?? 0}</td>
+                                  <td className="text-center px-4 py-4 text-amber-400">{src.late ?? 0}</td>
+                                  <td className="text-center px-4 py-4">
+                                    <span className={`font-mono font-medium ${rateColor(src.presentRate ?? 0)}`}>{src.presentRate ?? 0}%</span>
+                                  </td>
+                                  <td className="px-4 py-4">
+                                    {src.totalScans > 0 && (
+                                      <div className="h-4 bg-slate-800 rounded-full overflow-hidden flex">
+                                        <div className="bg-emerald-500/70 h-full" style={{ width: `${src.presentRate}%` }}></div>
+                                        <div className="bg-amber-500/70 h-full" style={{ width: `${src.lateRate}%` }}></div>
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

@@ -825,7 +825,7 @@ export default function Dashboard() {
                             </span>
                           ) : r.source === 'hikvision_terminal' ? (
                             <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-brand-500/10 text-brand-400 border border-brand-500/20 text-xs">
-                              <i className="ph ph-fingerprint"></i> Hikvision
+                              <i className="ph ph-fingerprint"></i> {r.deviceName || 'Hikvision'}
                             </span>
                           ) : (
                             <span className="text-slate-500 text-xs">{r.source || '—'}</span>

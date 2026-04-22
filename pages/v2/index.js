@@ -194,10 +194,12 @@ export default function DashboardV2() {
     return 'ph-monitor';
   };
 
-  const sourceLabel = (source) => {
+  const sourceLabel = (source, record = null) => {
     if (!source) return 'Unknown';
     if (source.includes('mobile')) return 'Mobile';
-    if (source.includes('hikvision') || source.includes('device')) return 'Basement 1 Terminal';
+    if (source.includes('hikvision') || source.includes('device')) {
+      return record?.deviceName || 'Hikvision Terminal';
+    }
     return source;
   };
 
@@ -461,7 +463,7 @@ export default function DashboardV2() {
                         <div className="flex items-center gap-2 mt-1.5">
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">Late</span>
                           <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                            <i className={`ph ${sourceIcon(s.source)}`}></i> {sourceLabel(s.source)}
+                            <i className={`ph ${sourceIcon(s.source)}`}></i> {sourceLabel(s.source, s)}
                           </span>
                         </div>
                       </div>
@@ -595,7 +597,7 @@ export default function DashboardV2() {
                       <td className="px-6 py-4">
                         <span className="inline-flex items-center gap-1.5 text-slate-400 text-xs">
                           <i className={`ph ${sourceIcon(r.source)} text-base`}></i>
-                          {sourceLabel(r.source)}
+                          {sourceLabel(r.source, r)}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
