@@ -20,6 +20,24 @@ const BINUS_BASE = 'http://binusian.ws';
 const BINUS_TOKEN_URL = `${BINUS_BASE}/binusschool/auth/token`;
 const BINUS_ATTENDANCE_URL = `${BINUS_BASE}/binusschool/bss-get-simprug-attendance-fr`;
 
+function buildBasicAuthHeader(apiKey) {
+  const trimmed = String(apiKey || '').trim();
+  if (!trimmed) return '';
+  // Accept both raw key and already-prefixed values from env
+  return /^Basic\s+/i.test(trimmed) ? trimmed : `Basic ${trimmed}`;
+}
+
+function extractToken(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  return payload?.data?.token
+    || payload?.data?.accessToken
+    || payload?.data?.access_token
+    || payload?.token
+    || payload?.accessToken
+    || payload?.access_token
+    || '';
+}
+
 // Sanitize optional ID fields
 function sanitizeOptionalId(input) {
   if (!input || typeof input !== 'string') return '';
@@ -46,6 +64,10 @@ async function handler(req, res) {
   if (!apiKey) {
     return res.status(500).json({ error: 'Server configuration error — API_KEY not set' });
   }
+  const basicAuthHeader = buildBasicAuthHeader(apiKey);
+  if (!basicAuthHeader) {
+    return res.status(500).json({ error: 'Server configuration error — invalid API_KEY' });
+  }
 
   const { startDate, endDate, idStudent, idBinusian } = req.body || {};
 
@@ -71,17 +93,17 @@ async function handler(req, res) {
     // Step 1: Get auth token
     const tokenTimer = trackExternalCall('binus-api', 'auth-token');
     let token;
+    let tokenPayload = null;
     try {
       const tokenRes = await axios.get(BINUS_TOKEN_URL, {
         headers: {
-          'Authorization': `Basic ${apiKey}`,
+          'Authorization': basicAuthHeader,
           'Content-Type': 'application/json',
         },
         timeout: 30000,
       });
-      token = tokenRes.data?.data?.token ||
-              tokenRes.data?.token ||
-              tokenRes.data?.access_token;
+      tokenPayload = tokenRes.data;
+      token = extractToken(tokenPayload);
       tokenTimer();
     } catch (err) {
       tokenTimer({ error: true });
@@ -90,7 +112,18 @@ async function handler(req, res) {
     }
 
     if (!token) {
-      return res.status(502).json({ error: 'No token received from BINUS API' });
+      const resultCode = tokenPayload?.resultCode;
+      const errorMessage = tokenPayload?.errorMessage || tokenPayload?.message;
+      console.error('BINUS token missing in response:', {
+        resultCode,
+        errorMessage,
+        keys: tokenPayload && typeof tokenPayload === 'object' ? Object.keys(tokenPayload) : [],
+      });
+      return res.status(502).json({
+        error: 'No token received from BINUS API',
+        resultCode,
+        errorMessage,
+      });
     }
 
     // Step 2: Call D.2 attendance log endpoint
