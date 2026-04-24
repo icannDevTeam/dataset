@@ -210,11 +210,63 @@ async function handler(req, res) {
           };
 
           // Track per-terminal (keyed by human-readable name)
-          if (!sourceMap[terminalName]) sourceMap[terminalName] = { totalScans: 0, present: 0, late: 0, students: new Set() };
-          sourceMap[terminalName].totalScans++;
-          if (r.status === 'Present') sourceMap[terminalName].present++;
-          if (r.status === 'Late') sourceMap[terminalName].late++;
-          sourceMap[terminalName].students.add(key);
+          if (!sourceMap[terminalName]) {
+            sourceMap[terminalName] = {
+              totalScans: 0,
+              present: 0,
+              late: 0,
+              students: new Set(),
+              deviceIp: '',
+              firstScan: '',
+              lastScan: '',
+              hourly: {},      // hour -> count
+              dayOfWeek: {},   // 0..6 -> count
+              dailyTrend: {},  // date -> { present, late }
+              classBreakdown: {}, // homeroom -> count
+              records: [],     // capped recent scans
+            };
+          }
+          const t = sourceMap[terminalName];
+          t.totalScans++;
+          if (r.status === 'Present') t.present++;
+          if (r.status === 'Late') t.late++;
+          t.students.add(key);
+          if (r.deviceIp && !t.deviceIp) t.deviceIp = r.deviceIp;
+
+          const ts = r.timestamp || '';
+          if (ts) {
+            if (!t.firstScan || ts < t.firstScan) t.firstScan = ts;
+            if (!t.lastScan || ts > t.lastScan) t.lastScan = ts;
+            // hourly bucket
+            const timePart = ts.includes(' ') ? ts.split(' ')[1] : ts;
+            const hour = parseInt((timePart || '').split(':')[0], 10);
+            if (!isNaN(hour)) t.hourly[hour] = (t.hourly[hour] || 0) + 1;
+            // day-of-week
+            try {
+              const d = new Date((ts.includes(' ') ? ts.replace(' ', 'T') : ts) + '+07:00');
+              if (!isNaN(d.getTime())) {
+                const dow = d.getUTCDay();
+                t.dayOfWeek[dow] = (t.dayOfWeek[dow] || 0) + 1;
+              }
+            } catch { /* ignore */ }
+          }
+          // daily trend
+          if (!t.dailyTrend[date]) t.dailyTrend[date] = { present: 0, late: 0 };
+          if (r.status === 'Present') t.dailyTrend[date].present++;
+          if (r.status === 'Late') t.dailyTrend[date].late++;
+          // class breakdown
+          const cls = r.homeroom || 'Unknown';
+          t.classBreakdown[cls] = (t.classBreakdown[cls] || 0) + 1;
+          // store record (cap later)
+          t.records.push({
+            name: r.name || key,
+            employeeNo: r.employeeNo || '',
+            homeroom: r.homeroom || '',
+            grade: r.grade || '',
+            timestamp: ts,
+            date,
+            status: r.status,
+          });
         }
 
         dailyBreakdown.push({
@@ -294,15 +346,43 @@ async function handler(req, res) {
     }).sort((a, b) => a.homeroom.localeCompare(b.homeroom));
 
     // Source summary — keyed by human-readable terminal/source name
-    const sourceSummary = Object.entries(sourceMap).map(([source, data]) => ({
-      source,
-      totalScans: data.totalScans,
-      present: data.present,
-      late: data.late,
-      uniqueStudents: data.students.size,
-      presentRate: data.totalScans > 0 ? parseFloat(((data.present / data.totalScans) * 100).toFixed(1)) : 0,
-      lateRate: data.totalScans > 0 ? parseFloat(((data.late / data.totalScans) * 100).toFixed(1)) : 0,
-    })).sort((a, b) => b.totalScans - a.totalScans);
+    const sourceSummary = Object.entries(sourceMap).map(([source, data]) => {
+      // Sort records newest-first and cap to 200 most recent
+      const sortedRecords = [...data.records].sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+      const capped = sortedRecords.slice(0, 200);
+      // Class breakdown sorted desc
+      const classBreakdown = Object.entries(data.classBreakdown)
+        .map(([homeroom, count]) => ({ homeroom, count }))
+        .sort((a, b) => b.count - a.count);
+      // Daily trend sorted asc
+      const dailyTrend = Object.entries(data.dailyTrend)
+        .map(([date, v]) => ({ date, present: v.present, late: v.late, total: v.present + v.late }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      // Peak hour
+      const hourlyEntries = Object.entries(data.hourly).map(([h, c]) => [parseInt(h, 10), c]);
+      const peakHour = hourlyEntries.length
+        ? hourlyEntries.reduce((best, cur) => (cur[1] > best[1] ? cur : best), hourlyEntries[0])[0]
+        : null;
+      return {
+        source,
+        deviceIp: data.deviceIp || '',
+        totalScans: data.totalScans,
+        present: data.present,
+        late: data.late,
+        uniqueStudents: data.students.size,
+        presentRate: data.totalScans > 0 ? parseFloat(((data.present / data.totalScans) * 100).toFixed(1)) : 0,
+        lateRate: data.totalScans > 0 ? parseFloat(((data.late / data.totalScans) * 100).toFixed(1)) : 0,
+        firstScan: data.firstScan,
+        lastScan: data.lastScan,
+        peakHour,
+        hourly: data.hourly,
+        dayOfWeek: data.dayOfWeek,
+        dailyTrend,
+        classBreakdown,
+        records: capped,
+        recordsTotal: data.records.length,
+      };
+    }).sort((a, b) => b.totalScans - a.totalScans);
 
     // Overall summary
     const totalScans = studentRecords.reduce((sum, s) => sum + s.daysPresent + s.daysLate, 0);

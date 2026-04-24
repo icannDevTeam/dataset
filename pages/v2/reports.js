@@ -49,6 +49,24 @@ export default function ReportsPage() {
   const [sortField, setSortField] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [expandedClass, setExpandedClass] = useState(null);
+  const [selectedTerminal, setSelectedTerminal] = useState(null);
+
+  // Parse model code from terminal name like "Basement 1 Terminal (DS-K1T341AMF)"
+  const parseModel = (name) => {
+    if (!name) return '';
+    const m = name.match(/\(([^)]+)\)/);
+    return m ? m[1] : '';
+  };
+  const stripModel = (name) => (name || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+  const fmtTs = (ts) => {
+    if (!ts) return '—';
+    return ts.includes(' ') ? ts.split(' ')[1].slice(0, 5) : ts.slice(0, 16).replace('T', ' ');
+  };
+  const fmtFullTs = (ts) => {
+    if (!ts) return '—';
+    return ts.replace('T', ' ').slice(0, 19);
+  };
+  const dowLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   const printRef = useRef(null);
 
@@ -728,12 +746,22 @@ export default function ReportsPage() {
                         const borderColor = isMobile ? 'border-violet-500/30' : 'border-brand-500/30';
                         const bgColor = isMobile ? 'bg-violet-500/10' : 'bg-brand-500/10';
                         return (
-                          <div key={src.source} className={`rounded-xl p-5 border ${borderColor} ${bgColor}`}>
-                            <div className="flex items-center gap-2 mb-4">
-                              <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0">
-                                <i className={`ph ${icon} ${accentColor} text-lg`}></i>
+                          <div
+                            key={src.source}
+                            onClick={() => setSelectedTerminal(src)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedTerminal(src); } }}
+                            className={`rounded-xl p-5 border ${borderColor} ${bgColor} cursor-pointer transition-all hover:scale-[1.01] hover:border-opacity-80 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-brand-500/40`}
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-4">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0">
+                                  <i className={`ph ${icon} ${accentColor} text-lg`}></i>
+                                </div>
+                                <span className="text-sm font-semibold text-white leading-tight">{src.source}</span>
                               </div>
-                              <span className="text-sm font-semibold text-white leading-tight">{src.source}</span>
+                              <i className="ph ph-arrow-square-out text-slate-500 text-base"></i>
                             </div>
                             <div className="grid grid-cols-2 gap-3 mb-4">
                               <div className="bg-slate-900/60 rounded-lg p-3 text-center">
@@ -792,11 +820,16 @@ export default function ReportsPage() {
                             {data.sourceSummary.map((src, i) => {
                               const isMobile = src.source.toLowerCase().includes('mobile');
                               return (
-                                <tr key={src.source} className={`border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors ${i % 2 === 0 ? '' : 'bg-slate-900/20'}`}>
+                                <tr
+                                  key={src.source}
+                                  onClick={() => setSelectedTerminal(src)}
+                                  className={`border-b border-slate-800/50 hover:bg-slate-800/40 transition-colors cursor-pointer ${i % 2 === 0 ? '' : 'bg-slate-900/20'}`}
+                                >
                                   <td className="px-6 py-4">
                                     <div className="flex items-center gap-2">
                                       <i className={`ph ${isMobile ? 'ph-device-mobile text-violet-400' : 'ph-fingerprint text-brand-400'} text-base`}></i>
                                       <span className="font-medium text-white">{src.source}</span>
+                                      <i className="ph ph-caret-right text-slate-500 text-xs ml-1"></i>
                                     </div>
                                   </td>
                                   <td className="text-center px-4 py-4 text-white font-semibold">{src.totalScans}</td>
@@ -867,6 +900,262 @@ export default function ReportsPage() {
           </>
         )}
       </div>
+
+      {/* ═══ TERMINAL DETAIL MODAL ═══ */}
+      {selectedTerminal && (() => {
+        const t = selectedTerminal;
+        const isMobile = t.source.toLowerCase().includes('mobile');
+        const accent = isMobile ? 'violet' : 'brand';
+        const accentText = isMobile ? 'text-violet-400' : 'text-brand-400';
+        const accentBg = isMobile ? 'bg-violet-500/10' : 'bg-brand-500/10';
+        const accentBorder = isMobile ? 'border-violet-500/30' : 'border-brand-500/30';
+        const model = parseModel(t.source);
+        const cleanName = stripModel(t.source);
+        const maxHourly = Math.max(...Object.values(t.hourly || {}), 1);
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm overflow-y-auto"
+            onClick={() => setSelectedTerminal(null)}
+          >
+            <div
+              className="relative w-full max-w-5xl my-8 glass-panel rounded-2xl border border-slate-700 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className={`px-6 py-5 border-b border-slate-800 ${accentBg} rounded-t-2xl`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center border ${accentBorder}`}>
+                      <i className={`ph ${isMobile ? 'ph-device-mobile' : 'ph-fingerprint'} ${accentText} text-2xl`}></i>
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-white">{cleanName || t.source}</h2>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {isMobile ? 'Mobile Attendance' : 'Hikvision Terminal'}
+                        {model && <span className="ml-2 px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">{model}</span>}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedTerminal(null)}
+                    className="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition-colors text-slate-400 hover:text-white"
+                    aria-label="Close"
+                  >
+                    <i className="ph ph-x text-lg"></i>
+                  </button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+                {/* Specs */}
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                    <i className="ph ph-cpu mr-1.5"></i>Machine Specs
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wide">Type</div>
+                      <div className="text-sm font-medium text-white mt-1">{isMobile ? 'Mobile (PWA)' : 'Hikvision'}</div>
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wide">Model</div>
+                      <div className="text-sm font-mono text-white mt-1">{model || '—'}</div>
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wide">IP Address</div>
+                      <div className="text-sm font-mono text-white mt-1">{t.deviceIp || '—'}</div>
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wide">Peak Hour</div>
+                      <div className="text-sm font-medium text-white mt-1">{t.peakHour != null ? `${String(t.peakHour).padStart(2, '0')}:00` : '—'}</div>
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wide">First Scan</div>
+                      <div className="text-sm font-medium text-white mt-1">{fmtFullTs(t.firstScan)}</div>
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
+                      <div className="text-[10px] text-slate-500 uppercase tracking-wide">Last Scan</div>
+                      <div className="text-sm font-medium text-white mt-1">{fmtFullTs(t.lastScan)}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stats */}
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                    <i className="ph ph-chart-bar mr-1.5"></i>Activity Summary
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-white">{t.totalScans}</div>
+                      <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wide">Total Scans</div>
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-slate-200">{t.uniqueStudents}</div>
+                      <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wide">Students</div>
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-emerald-400">{t.present ?? 0}</div>
+                      <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wide">On-Time ({t.presentRate}%)</div>
+                    </div>
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-4 text-center">
+                      <div className="text-2xl font-bold text-amber-400">{t.late ?? 0}</div>
+                      <div className="text-[10px] text-slate-400 mt-1 uppercase tracking-wide">Late ({t.lateRate}%)</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hourly distribution */}
+                {Object.keys(t.hourly || {}).length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                      <i className="ph ph-clock mr-1.5"></i>Hourly Distribution
+                    </h3>
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                      <div className="flex items-end gap-1 h-24">
+                        {Array.from({ length: 24 }).map((_, h) => {
+                          const c = t.hourly?.[h] || 0;
+                          const heightPct = (c / maxHourly) * 100;
+                          return (
+                            <div key={h} className="flex-1 flex flex-col items-center justify-end h-full group relative" title={`${String(h).padStart(2, '0')}:00 — ${c} scans`}>
+                              {c > 0 && (
+                                <div
+                                  className={`w-full rounded-t-sm ${isMobile ? 'bg-violet-500/70' : 'bg-brand-500/70'} hover:opacity-100`}
+                                  style={{ height: `${heightPct}%`, minHeight: '2px' }}
+                                ></div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex justify-between mt-2 text-[10px] text-slate-500 font-mono">
+                        <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Two-column: class breakdown + day of week */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {t.classBreakdown && t.classBreakdown.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                        <i className="ph ph-graduation-cap mr-1.5"></i>Class Breakdown
+                      </h3>
+                      <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-4 space-y-2 max-h-48 overflow-y-auto">
+                        {t.classBreakdown.map((cb) => {
+                          const pct = t.totalScans > 0 ? (cb.count / t.totalScans) * 100 : 0;
+                          return (
+                            <div key={cb.homeroom} className="flex items-center gap-3">
+                              <span className="text-xs font-medium text-slate-300 w-12 flex-shrink-0">{cb.homeroom}</span>
+                              <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                                <div className={`h-full ${isMobile ? 'bg-violet-500' : 'bg-brand-500'} rounded-full`} style={{ width: `${pct}%` }}></div>
+                              </div>
+                              <span className="text-xs font-mono text-white w-10 text-right">{cb.count}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {t.dayOfWeek && Object.keys(t.dayOfWeek).length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                        <i className="ph ph-calendar mr-1.5"></i>Day of Week
+                      </h3>
+                      <div className="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                        <div className="flex items-end gap-2 h-24">
+                          {[1, 2, 3, 4, 5, 6, 0].map((d) => {
+                            const c = t.dayOfWeek?.[d] || 0;
+                            const max = Math.max(...Object.values(t.dayOfWeek || {}), 1);
+                            const h = (c / max) * 100;
+                            return (
+                              <div key={d} className="flex-1 flex flex-col items-center gap-1 h-full justify-end" title={`${dowLabels[d]}: ${c}`}>
+                                {c > 0 && (
+                                  <div className={`w-full rounded-t ${isMobile ? 'bg-violet-500/70' : 'bg-brand-500/70'}`} style={{ height: `${h}%`, minHeight: '4px' }}></div>
+                                )}
+                                <span className="text-[10px] text-slate-500">{dowLabels[d]}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Scan details table */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                      <i className="ph ph-list-checks mr-1.5"></i>Scan Details
+                    </h3>
+                    <span className="text-[10px] text-slate-500">
+                      Showing {t.records?.length || 0} of {t.recordsTotal || 0} (most recent)
+                    </span>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-lg overflow-hidden">
+                    <div className="max-h-80 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-slate-900 z-10">
+                          <tr className="border-b border-slate-800">
+                            <th className="text-left px-4 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wider">Student</th>
+                            <th className="text-left px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wider">Class</th>
+                            <th className="text-left px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wider">Date</th>
+                            <th className="text-left px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wider">Time</th>
+                            <th className="text-center px-3 py-2 text-[10px] font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(t.records || []).map((r, i) => (
+                            <tr key={`${r.employeeNo}-${r.timestamp}-${i}`} className="border-b border-slate-800/50 hover:bg-slate-800/30">
+                              <td className="px-4 py-2">
+                                <div className="font-medium text-white text-xs">{r.name}</div>
+                                <div className="text-[10px] text-slate-500 font-mono">{r.employeeNo}</div>
+                              </td>
+                              <td className="px-3 py-2 text-xs text-slate-300">{r.homeroom || '—'}</td>
+                              <td className="px-3 py-2 text-xs text-slate-400 font-mono">{r.date}</td>
+                              <td className="px-3 py-2 text-xs text-slate-200 font-mono">{fmtTs(r.timestamp)}</td>
+                              <td className="text-center px-3 py-2">
+                                <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                                  r.status === 'Present'
+                                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                    : r.status === 'Late'
+                                      ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                                      : 'bg-slate-700/30 text-slate-400 border border-slate-600/30'
+                                }`}>
+                                  {r.status || '—'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                          {(!t.records || t.records.length === 0) && (
+                            <tr>
+                              <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-xs">No scans recorded for this terminal in the selected range.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-between rounded-b-2xl">
+                <span className="text-[11px] text-slate-500">Date range: {data?.range?.from} → {data?.range?.to}</span>
+                <button
+                  onClick={() => setSelectedTerminal(null)}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm text-white transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </V2Layout>
   );
 }
