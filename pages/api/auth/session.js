@@ -13,17 +13,25 @@ import crypto from 'crypto';
 
 const SESSION_MAX_AGE = 30 * 60; // 30 minutes in seconds
 
-// HMAC key for session cookie signing — falls back to a derived key from Firebase project ID
+// HMAC key for session cookie signing — MUST be set in env. No insecure fallback.
 const SESSION_SECRET = process.env.SESSION_SECRET
   || process.env.DASHBOARD_API_KEY
-  || 'fallback-change-me';
+  || null;
+
+function _assertSecret() {
+  if (!SESSION_SECRET) {
+    throw new Error('SESSION_SECRET (or DASHBOARD_API_KEY) is not set; refusing to sign cookies.');
+  }
+}
 
 function signCookie(payload) {
+  _assertSecret();
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('hex');
   return Buffer.from(`${payload}:${sig}`).toString('base64');
 }
 
 export function verifyCookie(cookie) {
+  if (!SESSION_SECRET) return null;
   try {
     const decoded = Buffer.from(cookie, 'base64').toString();
     const lastColon = decoded.lastIndexOf(':');

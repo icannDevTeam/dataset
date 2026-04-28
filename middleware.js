@@ -58,7 +58,16 @@ export async function middleware(request) {
     const sig = decoded.substring(lastColon + 1);
 
     // Re-derive HMAC and compare (using Web Crypto API for Edge compatibility)
-    const secret = process.env.SESSION_SECRET || process.env.DASHBOARD_API_KEY || 'fallback-change-me';
+    const secret = process.env.SESSION_SECRET || process.env.DASHBOARD_API_KEY;
+    if (!secret) {
+      // Fail-closed: refuse to authenticate with a guessable fallback secret.
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      url.searchParams.set('error', 'server-misconfigured');
+      const response = NextResponse.redirect(url);
+      response.cookies.delete('__session');
+      return response;
+    }
     const enc = new TextEncoder();
     const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
     const sigBytes = await crypto.subtle.sign('HMAC', key, enc.encode(payload));
