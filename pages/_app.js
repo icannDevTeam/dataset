@@ -11,6 +11,7 @@ const PUBLIC_PAGES = ['/login'];
 const PUBLIC_PATHNAME_PREFIXES = [
   '/pickup/onboarding/',
   '/pickup/tv',
+  '/pickup/gate',
   '/consent/',
 ];
 

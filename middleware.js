@@ -14,7 +14,7 @@ import { NextResponse } from 'next/server';
 const PUBLIC_PATHS = ['/login'];
 
 // Prefixes that don't require auth (whole subtrees)
-const PUBLIC_PREFIXES = ['/consent/', '/pickup/onboarding/', '/pickup/tv'];
+const PUBLIC_PREFIXES = ['/consent/', '/pickup/onboarding/', '/pickup/tv', '/pickup/gate'];
 
 // Prefixes to skip (static assets, API routes, Next.js internals)
 const SKIP_PREFIXES = ['/_next', '/api/', '/favicon', '/models/', '/sw.js', '/manifest.json', '/binus-logo'];

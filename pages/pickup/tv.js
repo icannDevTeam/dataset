@@ -1581,8 +1581,9 @@ function IdleSplash({ profile }) {
 }
 
 function GateClosed({ profile, gateStatus, clock }) {
-  // Compute friendly countdown until next opening, in WIB local time.
+  // Compute live countdown until next opening, in WIB local time.
   let countdown = null;
+  let countdownLabel = null;
   if (clock && gateStatus?.opensAt) {
     try {
       const [oh, om] = gateStatus.opensAt.split(':').map((x) => parseInt(x, 10));
@@ -1596,10 +1597,12 @@ function GateClosed({ profile, gateStatus, clock }) {
         wibOpen.setUTCDate(wibOpen.getUTCDate() + 1);
       }
       const diffMs = wibOpen.getTime() - wibNow.getTime();
-      const totalMin = Math.max(0, Math.round(diffMs / 60000));
-      const h = Math.floor(totalMin / 60);
-      const m = totalMin % 60;
-      countdown = h > 0 ? `${h}h ${m}m` : `${m}m`;
+      const totalSec = Math.max(0, Math.floor(diffMs / 1000));
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      countdown = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      countdownLabel = h >= 24 ? 'Pick-up opens in' : 'Gate opens in';
     } catch {}
   }
   return (
@@ -1624,8 +1627,8 @@ function GateClosed({ profile, gateStatus, clock }) {
         </div>
       </div>
       {countdown && (
-        <p className="gc-countdown">
-          Reopens in <b>{countdown}</b>
+        <p className="gc-countdown" aria-live="polite">
+          {countdownLabel || 'Gate opens in'} <b>{countdown}</b>
         </p>
       )}
     </div>

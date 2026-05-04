@@ -128,6 +128,10 @@ export default function PickupAdminPage() {
   // ─── Pickup settings state ──────────────────────────────────────────────
   const [pickupSettings, setPickupSettings] = useState(null);  // null = loading
   const [settingsBusy, setSettingsBusy] = useState(false);
+  const [kioskProfiles, setKioskProfiles] = useState([]);
+  const [kioskDrafts, setKioskDrafts] = useState({});
+  const [kiosksLoading, setKiosksLoading] = useState(false);
+  const [kioskBusy, setKioskBusy] = useState({});
 
   useEffect(() => {
     if (view !== 'settings') return;
@@ -135,6 +139,29 @@ export default function PickupAdminPage() {
       .then((r) => r.json())
       .then((j) => { if (j.ok) setPickupSettings(j.settings); })
       .catch(() => {});
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== 'settings') return;
+    setKiosksLoading(true);
+    fetch('/api/pickup/admin/kiosk-profiles', { credentials: 'include' })
+      .then((r) => r.json().then((j) => ({ r, j })))
+      .then(({ r, j }) => {
+        if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+        const profiles = Array.isArray(j.profiles) ? j.profiles : [];
+        setKioskProfiles(profiles);
+        const drafts = {};
+        profiles.forEach((p) => {
+          drafts[p.id] = {
+            windowOpen: p.windowOpen || '',
+            windowClose: p.windowClose || '',
+            suppressOutOfWindow: p.suppressOutOfWindow !== false,
+          };
+        });
+        setKioskDrafts(drafts);
+      })
+      .catch((e) => pushToast('error', e.message || 'Failed loading gate hours', 'Settings load failed'))
+      .finally(() => setKiosksLoading(false));
   }, [view]);
 
   async function toggleSetting(key, value) {
@@ -154,6 +181,61 @@ export default function PickupAdminPage() {
       pushToast('error', e.message);
     } finally {
       setSettingsBusy(false);
+    }
+  }
+
+  function updateKioskDraft(id, patch) {
+    setKioskDrafts((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || {}), ...patch },
+    }));
+  }
+
+  async function saveGateHours(profileId) {
+    const profile = kioskProfiles.find((p) => p.id === profileId);
+    const draft = kioskDrafts[profileId] || {};
+    if (!profile) return;
+
+    setKioskBusy((b) => ({ ...b, [profileId]: true }));
+    try {
+      const payload = {
+        name: profile.name,
+        kioskCode: profile.kioskCode || '',
+        gates: profile.gates || [],
+        homerooms: profile.homerooms || [],
+        showQueue: profile.showQueue !== false,
+        maxCards: profile.maxCards || 5,
+        beepEnabled: profile.beepEnabled !== false,
+        accent: profile.accent || '#8B1538',
+        windowOpen: draft.windowOpen || null,
+        windowClose: draft.windowClose || null,
+        suppressOutOfWindow: draft.suppressOutOfWindow !== false,
+      };
+
+      const r = await fetch(`/api/pickup/admin/kiosk-profiles?id=${encodeURIComponent(profileId)}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (!r.ok || !j?.ok) throw new Error(j?.message || j?.error || 'Failed saving gate hours');
+
+      const updated = j.profile;
+      setKioskProfiles((list) => list.map((p) => (p.id === profileId ? updated : p)));
+      setKioskDrafts((prev) => ({
+        ...prev,
+        [profileId]: {
+          windowOpen: updated.windowOpen || '',
+          windowClose: updated.windowClose || '',
+          suppressOutOfWindow: updated.suppressOutOfWindow !== false,
+        },
+      }));
+      pushToast('success', `Gate hours saved for ${updated.name}`);
+    } catch (e) {
+      pushToast('error', e.message || 'Failed saving gate hours');
+    } finally {
+      setKioskBusy((b) => ({ ...b, [profileId]: false }));
     }
   }
 
@@ -451,6 +533,87 @@ export default function PickupAdminPage() {
                         pickupSettings.allowSelfClaim ? 'translate-x-5' : 'translate-x-0'
                       }`} />
                     </button>
+                  </div>
+
+                  {/* Per-gate schedule controls */}
+                  <div className="rounded-xl bg-white/5 border border-slate-800 px-5 py-4">
+                    <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
+                      <div>
+                        <p className="text-sm font-medium text-white">Gate open/close windows (per gate profile)</p>
+                        <p className="text-xs text-slate-400 mt-0.5 max-w-xl">
+                          Configure each gate profile schedule here. Security override still works on top, but default gate behavior follows these times.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => router.push('/v2/pickup-admin?view=kiosks')}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-300 hover:bg-white/10"
+                      >
+                        Open TV Kiosks editor
+                      </button>
+                    </div>
+
+                    {kiosksLoading ? (
+                      <div className="text-xs text-slate-400">Loading gate profiles…</div>
+                    ) : kioskProfiles.length === 0 ? (
+                      <div className="text-xs text-slate-400">No kiosk profiles yet. Create one in TV Kiosks first.</div>
+                    ) : (
+                      <div className="space-y-3">
+                        {kioskProfiles.map((p) => {
+                          const d = kioskDrafts[p.id] || { windowOpen: '', windowClose: '', suppressOutOfWindow: true };
+                          const saving = !!kioskBusy[p.id];
+                          return (
+                            <div key={p.id} className="rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-3">
+                              <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
+                                <div>
+                                  <div className="text-sm font-semibold text-white">{p.name}</div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5">
+                                    Gates: {(p.gates || []).length ? p.gates.join(', ') : 'All gates'}
+                                  </div>
+                                </div>
+                                <button
+                                  disabled={saving}
+                                  onClick={() => saveGateHours(p.id)}
+                                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500/20 border border-brand-500/40 text-brand-200 hover:bg-brand-500/30 disabled:opacity-50"
+                                >
+                                  {saving ? 'Saving…' : 'Save'}
+                                </button>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Opens at</label>
+                                  <input
+                                    type="time"
+                                    value={d.windowOpen || ''}
+                                    onChange={(e) => updateKioskDraft(p.id, { windowOpen: e.target.value })}
+                                    className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Closes at</label>
+                                  <input
+                                    type="time"
+                                    value={d.windowClose || ''}
+                                    onChange={(e) => updateKioskDraft(p.id, { windowClose: e.target.value })}
+                                    className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
+                                  />
+                                </div>
+                              </div>
+
+                              <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={d.suppressOutOfWindow !== false}
+                                  onChange={(e) => updateKioskDraft(p.id, { suppressOutOfWindow: e.target.checked })}
+                                  className="accent-brand-500"
+                                />
+                                Suppress events outside window
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
