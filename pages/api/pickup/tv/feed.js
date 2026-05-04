@@ -192,7 +192,13 @@ export default async function handler(req, res) {
     let gateOverride = null;
     try {
       const settingsSnap = await db.doc(tenancy.pickupSettingsDoc(tid)).get();
-      gateOverride = settingsSnap.exists ? (settingsSnap.data()?.gateOverride || null) : null;
+      if (settingsSnap.exists) {
+        const settings = settingsSnap.data() || {};
+        const perProfile = settings.gateOverrides && profileId
+          ? settings.gateOverrides[profileId]
+          : null;
+        gateOverride = perProfile || settings.gateOverride || null;
+      }
     } catch {}
 
     const scheduledGate = profile ? kp.gateStatus(profile, new Date()) : { configured: false, open: true };
