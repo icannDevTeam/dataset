@@ -46,11 +46,6 @@ function fmtTime(iso) {
   } catch { return '—'; }
 }
 
-function ageSec(iso) {
-  if (!iso) return Infinity;
-  return (Date.now() - new Date(iso).getTime()) / 1000;
-}
-
 export default function PickupTV() {
   const router = useRouter();
   const { token, gate, tenant, profile: profileId } = router.query;
@@ -59,6 +54,7 @@ export default function PickupTV() {
   const [err, setErr] = useState(null);
   const [clock, setClock] = useState(null);
   const [online, setOnline] = useState(true);
+  const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const lastEventIdRef = useRef(null);
 
   // ─── Device session (per-TV pairing token) ─────────────────────────────────
@@ -136,6 +132,12 @@ export default function PickupTV() {
           return;
         }
         if (!r.ok) throw new Error(j.error || j.message || 'feed error');
+        if (j?.now) {
+          const serverTs = new Date(j.now).getTime();
+          if (!Number.isNaN(serverTs)) {
+            setServerOffsetMs(serverTs - Date.now());
+          }
+        }
         setFeed(j);
         setOnline(true);
         setErr(null);
@@ -150,10 +152,11 @@ export default function PickupTV() {
 
   // Clock tick — initialise on client only to avoid SSR hydration mismatch
   useEffect(() => {
-    setClock(new Date());
-    const t = setInterval(() => setClock(new Date()), 1000);
+    const syncClock = () => setClock(new Date(Date.now() + serverOffsetMs));
+    syncClock();
+    const t = setInterval(syncClock, 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [serverOffsetMs]);
 
   // Try to enter fullscreen on first explicit keyboard gesture (F or Enter).
   // We deliberately do NOT bind to `click` — clicking the Next.js dev error
@@ -275,17 +278,17 @@ export default function PickupTV() {
   // ─── #8 Idle screensaver after 10 min with no new events ───────────
   const SCREENSAVER_AFTER_MS = 10 * 60 * 1000;
   const [screensaverOn, setScreensaverOn] = useState(false);
-  const lastEventAtRef = useRef(Date.now());
+  const lastEventAtRef = useRef(Date.now() + serverOffsetMs);
   useEffect(() => {
-    if (events[0]) lastEventAtRef.current = Date.now();
-  }, [events]);
+    if (events[0]) lastEventAtRef.current = Date.now() + serverOffsetMs;
+  }, [events, serverOffsetMs]);
   useEffect(() => {
     const t = setInterval(() => {
-      const idle = Date.now() - lastEventAtRef.current;
+      const idle = (Date.now() + serverOffsetMs) - lastEventAtRef.current;
       setScreensaverOn(idle > SCREENSAVER_AFTER_MS && !gateClosed);
     }, 5000);
     return () => clearInterval(t);
-  }, [gateClosed]);
+  }, [gateClosed, serverOffsetMs]);
   // Wake screensaver if a new event arrives
   useEffect(() => {
     if (events[0]) setScreensaverOn(false);
@@ -353,7 +356,7 @@ export default function PickupTV() {
             ) : (
               <div className={`wall-grid count-${wall.length}`}>
                 {wall.map((e, i) => (
-                  <PickupCard key={e.id} ev={e} featured={i === 0} />
+                  <PickupCard key={e.id} ev={e} featured={i === 0} serverOffsetMs={serverOffsetMs} />
                 ))}
               </div>
             )}
@@ -1413,10 +1416,15 @@ function TvEntryScreen({ bootError, onAdopt }) {
   );
 }
 
-function PickupCard({ ev, featured }) {
+function PickupCard({ ev, featured, serverOffsetMs }) {
   const theme = STATE_THEME[ev.cardState] || STATE_THEME.yellow;
   const decisionLabel = DECISION_LABEL[ev.decision] || ev.decision;
-  const live = ageSec(ev.recordedAt) < 25;
+  const live = (() => {
+    if (!ev.recordedAt) return false;
+    const eventMs = new Date(ev.recordedAt).getTime();
+    const syncedNowMs = Date.now() + (serverOffsetMs || 0);
+    return Number.isFinite(eventMs) ? ((syncedNowMs - eventMs) / 1000) < 25 : false;
+  })();
   const studentLimit = featured ? 12 : 3;
   const studentSrc = ev.capturePath || ev.chaperone?.photoUrl;
   const students = ev.students || [];
@@ -1428,15 +1436,15 @@ function PickupCard({ ev, featured }) {
   const [holdProgress, setHoldProgress] = useState(0); // 0 → 1 over holdSec
   useEffect(() => {
     if (!featured) return;
-    const start = ev.recordedAt ? new Date(ev.recordedAt).getTime() : Date.now();
+    const start = ev.recordedAt ? new Date(ev.recordedAt).getTime() : (Date.now() + (serverOffsetMs || 0));
     const tick = () => {
-      const elapsed = (Date.now() - start) / 1000;
+      const elapsed = ((Date.now() + (serverOffsetMs || 0)) - start) / 1000;
       setHoldProgress(Math.min(1, Math.max(0, elapsed / holdSec)));
     };
     tick();
     const t = setInterval(tick, 250);
     return () => clearInterval(t);
-  }, [featured, ev.recordedAt, holdSec, ev.id]);
+  }, [featured, ev.recordedAt, holdSec, ev.id, serverOffsetMs]);
   const holdRemaining = Math.max(0, Math.ceil(holdSec * (1 - holdProgress)));
   const ringColor = ev.cardState === 'red' ? '#EF4444'
                   : ev.cardState === 'yellow' ? '#FCBF11'
