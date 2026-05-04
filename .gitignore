@@ -20,6 +20,7 @@ facial-attendance-*.json
 
 # Uploaded images / student data (sensitive PII)
 public/uploads/
+public/parent-photos/
 captured_faces/
 
 # Local capture server (not needed on Vercel)
@@ -32,6 +33,9 @@ DASHBOARD_SYSTEM.md
 DEPLOYMENT_CHECKLIST.md
 INTEGRATION.md
 QUICKSTART.md
+
+# Backup files
+*.bak
 
 # IDE / OS
 .DS_Store

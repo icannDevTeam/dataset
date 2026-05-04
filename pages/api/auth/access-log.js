@@ -36,7 +36,8 @@ async function handler(req, res) {
       // Parse user agent for device info
       const device = parseUserAgent(userAgent);
 
-      await db.collection('access_logs').add({
+      const tenancy = require('../../../lib/tenancy');
+      const logPayload = {
         email: email.toLowerCase(),
         name: decoded.name || email.split('@')[0],
         ip,
@@ -46,7 +47,16 @@ async function handler(req, res) {
         os: device.os,
         timestamp: admin.firestore.FieldValue.serverTimestamp(),
         action: 'login',
-      });
+      };
+      if (tenancy.legacyPathsEnabled()) {
+        await db.collection('access_logs').add(logPayload);
+      }
+      try {
+        await db.collection(`${tenancy.tenantDoc()}/access_logs`)
+          .add({ ...logPayload, tenantId: tenancy.getTenantId() });
+      } catch (te) {
+        console.warn('Tenant access_logs dual-write failed (non-fatal):', te.message);
+      }
 
       return res.status(200).json({ ok: true });
     } catch (err) {

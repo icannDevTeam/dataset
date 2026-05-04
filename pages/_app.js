@@ -6,6 +6,18 @@ import { canAccessPath } from '../lib/permissions';
 
 // Pages that don't require authentication
 const PUBLIC_PAGES = ['/login'];
+// Dynamic page-route prefixes (Next.js pathname form) that are fully public.
+// Keep these in sync with middleware.js PUBLIC_PREFIXES.
+const PUBLIC_PATHNAME_PREFIXES = [
+  '/pickup/onboarding/',
+  '/pickup/tv',
+  '/consent/',
+];
+
+function isPublicRoute(pathname) {
+  if (PUBLIC_PAGES.includes(pathname)) return true;
+  return PUBLIC_PATHNAME_PREFIXES.some((p) => pathname.startsWith(p));
+}
 
 function AuthGate({ Component, pageProps }) {
   const router = useRouter();
@@ -16,7 +28,7 @@ function AuthGate({ Component, pageProps }) {
     if (!loading && authorized && permissions) {
       const path = router.pathname;
       // Skip access check for index/dashboard and public pages
-      if (path === '/v2' || PUBLIC_PAGES.includes(path)) {
+      if (path === '/v2' || isPublicRoute(path)) {
         setAccessDenied(false);
       } else if (!canAccessPath(permissions, path)) {
         setAccessDenied(true);
@@ -28,7 +40,7 @@ function AuthGate({ Component, pageProps }) {
   }, [loading, authorized, permissions, router.pathname]);
 
   // Public pages: render without auth check
-  if (PUBLIC_PAGES.includes(router.pathname)) {
+  if (isPublicRoute(router.pathname)) {
     return <Component {...pageProps} />;
   }
 

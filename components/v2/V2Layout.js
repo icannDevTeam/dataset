@@ -32,6 +32,16 @@ const NAV_SECTIONS = [
       { href: '/v2/settings', icon: 'ph-gear-six', label: 'Settings' },
     ],
   },
+  {
+    label: 'PickupGuard',
+    items: [
+      { href: '/v2/pickup-admin', icon: 'ph-hand-waving', label: 'Onboarding Review', badgeKey: 'pickupPending' },
+      { href: '/v2/pickup-admin?view=kiosks', icon: 'ph-television-simple', label: 'TV Kiosks' },
+      { href: '/v2/chaperones', icon: 'ph-users-three', label: 'Chaperones' },
+      { href: '/v2/officer-overrides', icon: 'ph-shield-check', label: 'Officer Overrides' },
+      { href: '/v2/security', icon: 'ph-shield-warning', label: 'Security Heatmap' },
+    ],
+  },
 ];
 
 export default function V2Layout({ children }) {
@@ -41,8 +51,26 @@ export default function V2Layout({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expandedNav, setExpandedNav] = useState(null);
+  const [badges, setBadges] = useState({}); // badgeKey -> count
 
   const filteredNav = useMemo(() => filterNavForRole(NAV_SECTIONS, permissions), [permissions]);
+
+  // Poll pickup pending count every 15s
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const fetchPending = async () => {
+      try {
+        const r = await fetch('/api/pickup/admin/onboarding-list?status=pending&limit=1', { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!cancelled) setBadges((b) => ({ ...b, pickupPending: (j.records || []).length }));
+      } catch {}
+    };
+    fetchPending();
+    const t = setInterval(fetchPending, 15000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [user]);
 
   useEffect(() => {
     setClock(getWIBTime());
@@ -57,6 +85,20 @@ export default function V2Layout({ children }) {
 
   const isActive = (href) => {
     if (href === '/v2') return router.pathname === '/v2';
+    // Children that disambiguate via querystring (e.g. /v2/pickup-admin?view=kiosks)
+    if (href.includes('?')) {
+      const [path, qs] = href.split('?');
+      if (router.pathname !== path && !router.pathname.startsWith(path)) return false;
+      const params = new URLSearchParams(qs);
+      for (const [k, v] of params.entries()) {
+        if (String(router.query[k] ?? '') !== v) return false;
+      }
+      return true;
+    }
+    // Plain path: must match and NOT be the kiosks variant of pickup-admin
+    if (href === '/v2/pickup-admin') {
+      return router.pathname.startsWith(href) && String(router.query.view ?? '') !== 'kiosks';
+    }
     return router.pathname.startsWith(href);
   };
 
@@ -132,6 +174,11 @@ export default function V2Layout({ children }) {
                       >
                         <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
                         <span className="flex-1 text-left">{item.label}</span>
+                        {item.badgeKey && badges[item.badgeKey] > 0 && (
+                          <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-[10px] font-bold text-amber-950">
+                            {badges[item.badgeKey]}
+                          </span>
+                        )}
                         <i className={`ph ${isOpen ? 'ph-caret-up' : 'ph-caret-down'} text-xs text-slate-500`}></i>
                       </button>
                       {isOpen && (
@@ -170,7 +217,17 @@ export default function V2Layout({ children }) {
                     title={collapsed ? item.label : undefined}
                   >
                     <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
-                    {!collapsed && <span>{item.label}</span>}
+                    {!collapsed && <span className="flex-1">{item.label}</span>}
+                    {!collapsed && item.badgeKey && badges[item.badgeKey] > 0 && (
+                      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-[10px] font-bold text-amber-950">
+                        {badges[item.badgeKey]}
+                      </span>
+                    )}
+                    {collapsed && item.badgeKey && badges[item.badgeKey] > 0 && (
+                      <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-[10px] font-bold text-amber-950">
+                        {badges[item.badgeKey]}
+                      </span>
+                    )}
                     {collapsed && (
                       <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
                         {item.label}
@@ -251,7 +308,7 @@ export default function V2Layout({ children }) {
   );
 
   return (
-    <div className="aura-theme antialiased min-h-screen selection:bg-brand-500/30 selection:text-brand-400 overflow-x-hidden relative">
+    <div className="aura-theme v2-dark antialiased min-h-screen selection:bg-brand-500/30 selection:text-brand-400 overflow-x-hidden relative">
       <div className="noise-overlay"></div>
 
       {/* Mobile header */}

@@ -219,24 +219,36 @@ async function handler(req, res) {
     // Step 4: Upload to Firebase Storage as backup
     let firebaseUrl = null;
     try {
+      const tenancy = require('../../../lib/tenancy');
       initializeFirebase();
       const storage = getFirebaseStorage();
       const bucket = storage.bucket();
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
-      const blobPath = `face_dataset/${homeroom || 'unknown'}/${studentName}/${ts}_device_capture.jpg`;
-      const file = bucket.file(blobPath);
-      await file.save(imgBuffer, { metadata: { contentType: 'image/jpeg' } });
-      firebaseUrl = `gs://${process.env.FIREBASE_STORAGE_BUCKET}/${blobPath}`;
-      console.log(`☁️  Firebase backup: ${blobPath}`);
+      const rel = `${homeroom || 'unknown'}/${studentName}/${ts}_device_capture.jpg`;
+      const blobPath = `face_dataset/${rel}`;
+      const tenantPath = `${tenancy.storageFaceDatasetPrefix()}/${rel}`;
+      if (tenancy.legacyPathsEnabled()) {
+        await bucket.file(blobPath).save(imgBuffer, { metadata: { contentType: 'image/jpeg' } });
+        firebaseUrl = `gs://${process.env.FIREBASE_STORAGE_BUCKET}/${blobPath}`;
+        console.log(`☁️  Firebase backup: ${blobPath}`);
+      }
+      try {
+        await bucket.file(tenantPath).save(imgBuffer, { metadata: { contentType: 'image/jpeg' } });
+        if (!firebaseUrl) firebaseUrl = `gs://${process.env.FIREBASE_STORAGE_BUCKET}/${tenantPath}`;
+        console.log(`☁️  Tenant copy: ${tenantPath}`);
+      } catch (te) {
+        console.warn('Tenant storage dual-write failed (non-fatal):', te.message);
+      }
     } catch (fbErr) {
       console.warn('⚠️  Firebase backup failed (non-fatal):', fbErr.message);
     }
 
     // Step 5: Save to student_metadata so Device Manager can link back
     try {
+      const tenancy = require('../../../lib/tenancy');
       const admin = getFirebaseAdmin();
       const db = admin.firestore();
-      await db.collection('student_metadata').doc(employeeNo).set({
+      const metaDoc = {
         employeeNo,
         name: studentName,
         homeroom: homeroom || '',
@@ -247,7 +259,16 @@ async function handler(req, res) {
         enrolledAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         enrolledBy,
-      }, { merge: true });
+      };
+      if (tenancy.legacyPathsEnabled()) {
+        await db.collection('student_metadata').doc(employeeNo).set(metaDoc, { merge: true });
+      }
+      try {
+        await db.doc(`${tenancy.studentMetadataPath()}/${employeeNo}`)
+          .set({ ...metaDoc, tenantId: tenancy.getTenantId() }, { merge: true });
+      } catch (te) {
+        console.warn('Tenant student_metadata dual-write failed (non-fatal):', te.message);
+      }
       console.log(`📋 student_metadata/${employeeNo} saved`);
     } catch (metaErr) {
       console.warn('⚠️  student_metadata save failed (non-fatal):', metaErr.message);

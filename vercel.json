@@ -5,6 +5,10 @@
   "installCommand": "npm install",
   "framework": "nextjs",
   "functions": {
+    "pages/api/pickup/**/*.js": {
+      "maxDuration": 30,
+      "memory": 1024
+    },
     "pages/api/face/upload.js": {
       "maxDuration": 30,
       "memory": 1024

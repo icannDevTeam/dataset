@@ -211,8 +211,8 @@ async function handler(req, res) {
         const grade = meta.grade || '';
 
         try {
-          const docRef = db.collection('attendance').doc(dateStr).collection('records').doc(empNo);
-          await docRef.set({
+          const tenancy = require('../../../lib/tenancy');
+          const recordPayload = {
             name,
             employeeNo: empNo,
             timestamp,
@@ -222,12 +222,23 @@ async function handler(req, res) {
             grade,
             source: 'hikvision_catchup',
             updatedAt: getWIBNow().toISOString(),
-          });
-          // Update day summary
-          await db.collection('attendance').doc(dateStr).set(
-            { lastUpdated: getWIBNow().toISOString() },
-            { merge: true }
-          );
+          };
+          if (tenancy.legacyPathsEnabled()) {
+            await db.collection('attendance').doc(dateStr).collection('records').doc(empNo).set(recordPayload);
+            await db.collection('attendance').doc(dateStr).set(
+              { lastUpdated: getWIBNow().toISOString() },
+              { merge: true }
+            );
+          }
+          // Tenant-scoped dual-write
+          try {
+            await db.doc(tenancy.attendanceRecordPath(dateStr, empNo))
+              .set({ ...recordPayload, tenantId: tenancy.getTenantId() });
+            await db.doc(tenancy.attendanceDayDoc(dateStr))
+              .set({ lastUpdated: getWIBNow().toISOString(), tenantId: tenancy.getTenantId() }, { merge: true });
+          } catch (te) {
+            console.warn('Tenant attendance dual-write failed (non-fatal):', te.message);
+          }
           synced++;
           existingEmpNos.add(empNo);
         } catch (e) {

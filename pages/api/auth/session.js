@@ -11,7 +11,7 @@ import { initializeFirebase } from '../../../lib/firebase-admin';
 import admin from 'firebase-admin';
 import crypto from 'crypto';
 
-const SESSION_MAX_AGE = 30 * 60; // 30 minutes in seconds
+const SESSION_MAX_AGE = 60 * 60; // 60 minutes in seconds
 
 // HMAC key for session cookie signing — MUST be set in env. No insecure fallback.
 const SESSION_SECRET = process.env.SESSION_SECRET

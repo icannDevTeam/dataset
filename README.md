@@ -77,6 +77,21 @@ Your API_KEY should be the base64 encoded string from your Binus School API:
 
 ## 🌐 Deploy to Vercel
 
+### Recommended: Standalone PickupGuard Project
+
+Deploy this folder as its own Vercel project (same approach as the mobile app):
+
+1. In Vercel, create a new project from this repository.
+2. Set Root Directory to `web-dataset-collector`.
+3. Keep framework as `Next.js`.
+4. Add environment variables from `.env.example`.
+5. Deploy and test these routes:
+  - `/pickup/tv`
+  - `/v2/pickup-admin`
+  - `/api/pickup/tv/feed`
+
+For TV devices, pairing flow works from the deployed host directly (no localhost dependency).
+
 ### Option 1: Using Vercel CLI
 
 ```bash
@@ -116,6 +131,10 @@ In your Vercel project settings, add these environment variables:
 | `FIREBASE_PRIVATE_KEY` | `-----BEGIN PRIVATE KEY-----...` | Firebase private key |
 | `FIREBASE_CLIENT_EMAIL` | `firebase-adminsdk-xxx@appspot.gserviceaccount.com` | Firebase service account email |
 | `FIREBASE_STORAGE_BUCKET` | `binus-facial-attendance.appspot.com` | Firebase storage bucket |
+| `TENANT_ID` | `binus-simprug` | Tenant id for pickup collections |
+| `PICKUP_TV_TOKEN` | `random-long-token` | Shared token for legacy TV URL mode |
+| `SESSION_SECRET` | `random-long-secret` | Session signing secret for dashboard auth |
+| `CONSENT_SIGNING_SECRET` | `random-long-secret` | Signing key for pickup onboarding tokens |
 
 **⚠️ Important:** When copying `FIREBASE_PRIVATE_KEY`, make sure to replace all `\n` with actual newlines, or escape them properly.
 

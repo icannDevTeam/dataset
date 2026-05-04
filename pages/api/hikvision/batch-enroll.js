@@ -186,10 +186,11 @@ async function handler(req, res) {
 
       // Step 4: Save to student_metadata for Device Manager enrichment
       try {
+        const tenancy = require('../../../lib/tenancy');
         initializeFirebase();
         const admin = getFirebaseAdmin();
         const db = admin.firestore();
-        await db.collection('student_metadata').doc(employeeNo).set({
+        const metaDoc = {
           employeeNo,
           name: studentName,
           homeroom: className || '',
@@ -198,7 +199,16 @@ async function handler(req, res) {
           linkedTo: studentId || '',
           enrolledAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        }, { merge: true });
+        };
+        if (tenancy.legacyPathsEnabled()) {
+          await db.collection('student_metadata').doc(employeeNo).set(metaDoc, { merge: true });
+        }
+        try {
+          await db.doc(`${tenancy.studentMetadataPath()}/${employeeNo}`)
+            .set({ ...metaDoc, tenantId: tenancy.getTenantId() }, { merge: true });
+        } catch (te) {
+          console.warn(`  tenant student_metadata dual-write failed (non-fatal): ${te.message}`);
+        }
       } catch (metaErr) {
         console.warn(`  student_metadata save failed (non-fatal): ${metaErr.message}`);
       }

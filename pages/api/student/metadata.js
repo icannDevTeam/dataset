@@ -32,8 +32,17 @@ async function handler(req, res) {
 
     // Save to Firestore
     try {
+      const tenancy = require('../../../lib/tenancy');
       const db = getFirestoreDB();
-      await db.collection('students').doc(studentId).set(metadata, { merge: true });
+      if (tenancy.legacyPathsEnabled()) {
+        await db.collection('students').doc(studentId).set(metadata, { merge: true });
+      }
+      try {
+        await db.doc(`${tenancy.studentsPath()}/${studentId}`)
+          .set({ ...metadata, tenantId: tenancy.getTenantId() }, { merge: true });
+      } catch (te) {
+        console.warn('Tenant students dual-write failed (non-fatal):', te.message);
+      }
       console.log('✓ Metadata saved to Firestore:', studentId);
     } catch (fbError) {
       console.warn('Firestore save failed:', fbError.message);

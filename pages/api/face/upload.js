@@ -159,32 +159,35 @@ async function handler(req, res) {
     
     try {
       console.log('\n--- Uploading to Firebase Storage ---');
-      
+      const tenancy = require('../../../lib/tenancy');
+
       const storage = getFirebaseStorage();
       const bucket = storage.bucket();
       console.log('Storage bucket connected:', bucket.name);
-      
-      // Path: face_dataset/{ClassName}/{StudentName}/photo_{number}_{timestamp}.jpg
-      const fileName = `face_dataset/${safeClassName}/${safeStudentName}/photo_${photoNumber}_${Date.now()}.jpg`;
-      console.log('Uploading file:', fileName);
-      
-      const file = bucket.file(fileName);
-      await file.save(imageBuffer, {
+
+      const rel = `${safeClassName}/${safeStudentName}/photo_${photoNumber}_${Date.now()}.jpg`;
+      const fileName = `face_dataset/${rel}`;
+      const tenantFileName = `${tenancy.storageFaceDatasetPrefix()}/${rel}`;
+      const meta = {
+        contentType: 'image/jpeg',
         metadata: {
-          contentType: 'image/jpeg',
-          metadata: {
-            studentId,
-            studentName,
-            className,
-            gradeCode,
-            gradeName,
-            displayLabel,
-            photoNumber,
-            totalPhotos,
-            capturedAt: new Date().toISOString()
-          }
-        }
-      });
+          studentId, studentName, className, gradeCode, gradeName, displayLabel,
+          photoNumber, totalPhotos,
+          capturedAt: new Date().toISOString(),
+          tenantId: tenancy.getTenantId(),
+        },
+      };
+
+      if (tenancy.legacyPathsEnabled()) {
+        console.log('Uploading file:', fileName);
+        await bucket.file(fileName).save(imageBuffer, { metadata: meta });
+      }
+      try {
+        await bucket.file(tenantFileName).save(imageBuffer, { metadata: meta });
+        console.log(`Tenant copy: ${tenantFileName}`);
+      } catch (te) {
+        console.warn('Tenant storage dual-write failed (non-fatal):', te.message);
+      }
 
       storageUrl = `gs://${process.env.FIREBASE_STORAGE_BUCKET}/${fileName}`;
       uploadSuccess = true;
@@ -198,6 +201,7 @@ async function handler(req, res) {
 
     // Save image metadata to Firestore under the student document
     try {
+      const tenancy = require('../../../lib/tenancy');
       const db = getFirestoreDB();
       const imageMetadata = {
         fileName: imageFile.originalFilename || `photo_${photoNumber}.jpg`,
@@ -207,19 +211,9 @@ async function handler(req, res) {
         uploadedAt: new Date().toISOString(),
         storageUrl,
         uploadMethod,
-        // Full student context saved with each image
-        studentId,
-        studentName,
-        className,
-        gradeCode,
-        gradeName,
-        displayLabel, // "Albert Arthur 3B" - used for attendance display
+        studentId, studentName, className, gradeCode, gradeName, displayLabel,
       };
-
-      await db.collection('students').doc(studentId).collection('images').add(imageMetadata);
-      
-      // Also update the student document with latest capture info
-      await db.collection('students').doc(studentId).set({
+      const studentDoc = {
         id: studentId,
         name: studentName,
         homeroom: className,
@@ -228,7 +222,20 @@ async function handler(req, res) {
         displayLabel,
         lastCaptureAt: new Date().toISOString(),
         totalImages: parseInt(photoNumber),
-      }, { merge: true });
+      };
+
+      if (tenancy.legacyPathsEnabled()) {
+        await db.collection('students').doc(studentId).collection('images').add(imageMetadata);
+        await db.collection('students').doc(studentId).set(studentDoc, { merge: true });
+      }
+      // Tenant-scoped dual-write
+      try {
+        const tDoc = db.doc(`${tenancy.studentsPath()}/${studentId}`);
+        await tDoc.collection('images').add({ ...imageMetadata, tenantId: tenancy.getTenantId() });
+        await tDoc.set({ ...studentDoc, tenantId: tenancy.getTenantId() }, { merge: true });
+      } catch (te) {
+        console.warn('Tenant Firestore dual-write failed (non-fatal):', te.message);
+      }
 
       console.log(`Firestore metadata saved for ${displayLabel}`);
     } catch (fsError) {

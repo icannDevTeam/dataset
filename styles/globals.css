@@ -33,6 +33,37 @@ select {
   font-family: inherit;
 }
 
+/* ── Dark-mode form controls (v2 admin uses a slate palette) ─────────
+   Native <select> popups + date/time pickers ignore parent CSS in
+   Linux Chromium, falling back to white-on-white. Forcing color-scheme
+   and styling each <option> avoids the "blank/blending" dropdown look. */
+.v2-dark select,
+.v2-dark input[type="time"],
+.v2-dark input[type="date"],
+.v2-dark input[type="datetime-local"],
+.v2-dark input[type="month"],
+.v2-dark input[type="week"],
+.v2-dark input[type="number"],
+.v2-dark input[type="search"],
+.v2-dark input[type="text"],
+.v2-dark input[type="email"],
+.v2-dark input[type="password"],
+.v2-dark textarea {
+  color-scheme: dark;
+}
+.v2-dark select option,
+.v2-dark select optgroup {
+  background-color: #0f172a; /* slate-900 */
+  color: #f1f5f9;            /* slate-100 */
+}
+/* Webkit calendar/clock indicator on time/date inputs */
+.v2-dark input[type="time"]::-webkit-calendar-picker-indicator,
+.v2-dark input[type="date"]::-webkit-calendar-picker-indicator,
+.v2-dark input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.85) brightness(1.1);
+  cursor: pointer;
+}
+
 button {
   cursor: pointer;
 }

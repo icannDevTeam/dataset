@@ -13,6 +13,9 @@ import { NextResponse } from 'next/server';
 // Pages that don't require auth
 const PUBLIC_PATHS = ['/login'];
 
+// Prefixes that don't require auth (whole subtrees)
+const PUBLIC_PREFIXES = ['/consent/', '/pickup/onboarding/', '/pickup/tv'];
+
 // Prefixes to skip (static assets, API routes, Next.js internals)
 const SKIP_PREFIXES = ['/_next', '/api/', '/favicon', '/models/', '/sw.js', '/manifest.json', '/binus-logo'];
 
@@ -21,6 +24,11 @@ export async function middleware(request) {
 
   // Skip static assets, API routes, and Next.js internals
   if (SKIP_PREFIXES.some(p => pathname.startsWith(p))) {
+    return NextResponse.next();
+  }
+
+  // Skip public prefixes (e.g. guardian consent page)
+  if (PUBLIC_PREFIXES.some(p => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
@@ -81,7 +89,7 @@ export async function middleware(request) {
     // Check expiry from payload (email:timestamp)
     const parts = payload.split(':');
     const timestamp = parseInt(parts[parts.length - 1], 10);
-    const SESSION_MAX_AGE_MS = 30 * 60 * 1000;
+    const SESSION_MAX_AGE_MS = 60 * 60 * 1000;
 
     if (isNaN(timestamp) || Date.now() - timestamp > SESSION_MAX_AGE_MS) {
       const url = request.nextUrl.clone();
