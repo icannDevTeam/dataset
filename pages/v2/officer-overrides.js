@@ -15,6 +15,8 @@ import Head from 'next/head';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 
+const GATE_POLL_MS = 6000;
+
 const POLL_MS = 4000;
 const DECISION_LABEL = {
   unknown_chaperone: 'Unknown chaperone',
@@ -79,6 +81,39 @@ export default function OfficerOverridesPage() {
     return () => clearInterval(t);
   }, []);
 
+  // ─── Gate Control ───────────────────────────────────────────────────
+  const [gate, setGate] = useState(null);   // API response
+  const [gateBusy, setGateBusy] = useState(false);
+  const [gateErr, setGateErr] = useState(null);
+
+  const refreshGate = useCallback(() => {
+    fetch('/api/pickup/admin/gate-control', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((j) => { if (j.ok) setGate(j); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshGate();
+    const t = setInterval(refreshGate, GATE_POLL_MS);
+    return () => clearInterval(t);
+  }, [refreshGate]);
+
+  async function setGateOverride(val) {
+    setGateBusy(true); setGateErr(null);
+    try {
+      const r = await fetch('/api/pickup/admin/gate-control', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gateOverride: val }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'failed');
+      refreshGate();
+    } catch (e) { setGateErr(e.message); }
+    finally { setGateBusy(false); }
+  }
+
   return (
     <>
       <Head><title>Officer Overrides · BINUSFace</title></Head>
@@ -118,6 +153,9 @@ export default function OfficerOverridesPage() {
               {err}
             </div>
           )}
+
+          {/* ── Gate Control Panel ───────────────────────────────────────── */}
+          <GateControlPanel gate={gate} busy={gateBusy} err={gateErr} onSet={setGateOverride} />
 
           {/* Stat strip */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -444,5 +482,130 @@ function QuickOverridePad({ onSuccess }) {
         </div>
       )}
     </form>
+  );
+}
+
+// ─── Gate Control Panel ────────────────────────────────────────────────────
+function GateControlPanel({ gate, busy, err, onSet }) {
+  if (!gate) {
+    return (
+      <div className="mb-6 rounded-2xl border border-slate-800 bg-white/5 px-5 py-4 animate-pulse">
+        <div className="h-5 w-40 bg-slate-700 rounded" />
+      </div>
+    );
+  }
+
+  const override   = gate.gateOverride;               // 'open' | 'closed' | null
+  const profiles   = gate.profiles || [];
+  // Overall effective state: if override set, use it; else majority of profiles
+  const anyOpen    = override ? override === 'open'
+    : profiles.length === 0 ? true
+    : profiles.some((p) => p.effective.open);
+  const isManual   = !!override;
+
+  const BIG_OPEN   = 'bg-emerald-950/80 border-emerald-500/50';
+  const BIG_CLOSED = 'bg-red-950/80 border-red-500/50';
+  const bigClass   = anyOpen ? BIG_OPEN : BIG_CLOSED;
+  const dotClass   = anyOpen ? 'bg-emerald-400' : 'bg-red-400';
+  const label      = anyOpen ? 'GATE OPEN' : 'GATE CLOSED';
+  const labelColor = anyOpen ? 'text-emerald-300' : 'text-red-300';
+
+  return (
+    <div className={`mb-6 rounded-2xl border ${bigClass} px-5 py-4`}>
+      {/* Top row — status + controls */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        {/* Left: indicator */}
+        <div className="flex items-center gap-4">
+          <span className={`inline-block w-4 h-4 rounded-full ${dotClass} shadow-lg ${anyOpen ? 'shadow-emerald-500/40' : 'shadow-red-500/40'} animate-pulse`} />
+          <span className={`text-2xl font-black tracking-widest ${labelColor}`}>{label}</span>
+          {isManual && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              Manual override
+            </span>
+          )}
+          {!isManual && profiles.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-700 text-slate-400 border border-slate-700">
+              Schedule
+            </span>
+          )}
+        </div>
+
+        {/* Right: action buttons */}
+        <div className="flex items-center gap-2">
+          {/* Override open */}
+          <button
+            disabled={busy || (isManual && override === 'open')}
+            onClick={() => onSet('open')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm transition-all ${
+              isManual && override === 'open'
+                ? 'bg-emerald-500 text-white cursor-default shadow-lg shadow-emerald-900/40'
+                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/40'
+            } disabled:opacity-50`}
+          >
+            <i className="ph ph-door-open text-base" />
+            Force Open
+          </button>
+
+          {/* Override closed */}
+          <button
+            disabled={busy || (isManual && override === 'closed')}
+            onClick={() => onSet('closed')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm transition-all ${
+              isManual && override === 'closed'
+                ? 'bg-red-500 text-white cursor-default shadow-lg shadow-red-900/40'
+                : 'bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/40'
+            } disabled:opacity-50`}
+          >
+            <i className="ph ph-door text-base" />
+            Force Close
+          </button>
+
+          {/* Clear override → back to schedule */}
+          {isManual && (
+            <button
+              disabled={busy}
+              onClick={() => onSet(null)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm bg-white/5 border border-slate-700 text-slate-300 hover:bg-white/10 disabled:opacity-50"
+            >
+              <i className="ph ph-calendar-blank text-base" />
+              Back to Schedule
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Per-profile breakdown */}
+      {profiles.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-white/5 flex flex-wrap gap-3">
+          {profiles.map((p) => {
+            const effOpen = p.effective.open;
+            const sched   = p.scheduled;
+            return (
+              <div key={p.id}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border ${
+                  effOpen
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                    : 'bg-red-500/10 border-red-500/20 text-red-300'
+                }`}
+              >
+                <i className={`ph ${effOpen ? 'ph-door-open' : 'ph-door'} text-sm`} />
+                <span className="font-medium">{p.name}</span>
+                {sched.configured && (
+                  <span className="opacity-60 font-mono">{sched.opensAt}–{sched.closesAt}</span>
+                )}
+                {!sched.configured && (
+                  <span className="opacity-60">no schedule</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Error */}
+      {err && (
+        <p className="mt-2 text-xs text-red-400">{err}</p>
+      )}
+    </div>
   );
 }

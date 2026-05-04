@@ -187,7 +187,19 @@ export default async function handler(req, res) {
 
     // No-cache so kiosk always pulls fresh
     res.setHeader('Cache-Control', 'no-store, max-age=0');
-    const gateStatus = profile ? kp.gateStatus(profile, new Date()) : { configured: false, open: true };
+
+    // Read manual gate override from tenant settings (non-blocking: ignore errors)
+    let gateOverride = null;
+    try {
+      const settingsSnap = await db.doc(tenancy.pickupSettingsDoc(tid)).get();
+      gateOverride = settingsSnap.exists ? (settingsSnap.data()?.gateOverride || null) : null;
+    } catch {}
+
+    const scheduledGate = profile ? kp.gateStatus(profile, new Date()) : { configured: false, open: true };
+    const gateStatus = gateOverride
+      ? { ...scheduledGate, open: gateOverride === 'open', manualOverride: gateOverride }
+      : { ...scheduledGate, manualOverride: null };
+
     return res.status(200).json({
       ok: true,
       now: new Date().toISOString(),
