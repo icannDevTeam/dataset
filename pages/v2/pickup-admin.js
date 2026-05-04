@@ -122,8 +122,40 @@ export default function PickupAdminPage() {
   useEffect(() => {
     if (!router.isReady) return;
     const v = String(router.query.view || '').toLowerCase();
-    setView(v === 'kiosks' ? 'kiosks' : 'onboarding');
+    setView(v === 'kiosks' ? 'kiosks' : v === 'settings' ? 'settings' : 'onboarding');
   }, [router.isReady, router.query.view]);
+
+  // ─── Pickup settings state ──────────────────────────────────────────────
+  const [pickupSettings, setPickupSettings] = useState(null);  // null = loading
+  const [settingsBusy, setSettingsBusy] = useState(false);
+
+  useEffect(() => {
+    if (view !== 'settings') return;
+    fetch('/api/pickup/admin/settings', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((j) => { if (j.ok) setPickupSettings(j.settings); })
+      .catch(() => {});
+  }, [view]);
+
+  async function toggleSetting(key, value) {
+    setSettingsBusy(true);
+    try {
+      const r = await fetch('/api/pickup/admin/settings', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'update failed');
+      setPickupSettings((s) => ({ ...s, [key]: value }));
+      pushToast('success', `${key} set to ${value}`);
+    } catch (e) {
+      pushToast('error', e.message);
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
 
   // KioskManager toast adapter
   const kioskToast = useCallback((kind, msg) => {
@@ -388,6 +420,41 @@ export default function PickupAdminPage() {
 
           {view === 'kiosks' ? (
             <KioskManager showToast={kioskToast} />
+          ) : view === 'settings' ? (
+            <div className="max-w-2xl">
+              <h2 className="text-lg font-semibold text-white mb-1">Pickup Settings</h2>
+              <p className="text-sm text-slate-400 mb-6">Tenant-level configuration for PickupGuard behaviour.</p>
+
+              {pickupSettings === null ? (
+                <div className="text-slate-400 text-sm">Loading…</div>
+              ) : (
+                <div className="space-y-4">
+                  {/* allowSelfClaim toggle */}
+                  <div className="flex items-start justify-between gap-6 rounded-xl bg-white/5 border border-slate-800 px-5 py-4">
+                    <div>
+                      <p className="text-sm font-medium text-white">Allow TV self-claim</p>
+                      <p className="text-xs text-slate-400 mt-0.5 max-w-sm">
+                        When on, a TV can pair itself by entering a kiosk code — no admin step needed.
+                        Turn off to require an admin to approve every pairing from the dashboard.
+                      </p>
+                    </div>
+                    <button
+                      disabled={settingsBusy}
+                      onClick={() => toggleSetting('allowSelfClaim', !pickupSettings.allowSelfClaim)}
+                      className={`relative flex-shrink-0 mt-0.5 w-11 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 ${
+                        pickupSettings.allowSelfClaim ? 'bg-brand-500' : 'bg-slate-700'
+                      } ${settingsBusy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                      role="switch"
+                      aria-checked={pickupSettings.allowSelfClaim}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                        pickupSettings.allowSelfClaim ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           ) : (
           <>
 
