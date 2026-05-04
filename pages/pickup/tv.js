@@ -46,6 +46,61 @@ function fmtTime(iso) {
   } catch { return '—'; }
 }
 
+function computeGateTimer(clock, gateStatus) {
+  if (!clock || !gateStatus?.configured || !gateStatus?.opensAt || !gateStatus?.closesAt) return null;
+  try {
+    const [oh, om] = gateStatus.opensAt.split(':').map((x) => parseInt(x, 10));
+    const [ch, cm] = gateStatus.closesAt.split(':').map((x) => parseInt(x, 10));
+
+    // Schedule is defined in Asia/Jakarta local time (WIB, UTC+7).
+    const wibNow = new Date(clock.getTime() + 7 * 60 * 60 * 1000);
+    const y = wibNow.getUTCFullYear();
+    const m = wibNow.getUTCMonth();
+    const d = wibNow.getUTCDate();
+
+    let wibOpen = new Date(Date.UTC(y, m, d, oh, om, 0));
+    let wibClose = new Date(Date.UTC(y, m, d, ch, cm, 0));
+
+    // Overnight window support (e.g. 22:00 -> 05:00)
+    if (wibClose.getTime() <= wibOpen.getTime()) {
+      wibClose.setUTCDate(wibClose.getUTCDate() + 1);
+    }
+
+    let label = 'Pick-up opens in';
+    let target = wibOpen;
+    let tone = 'closed';
+
+    if (wibNow.getTime() < wibOpen.getTime()) {
+      // Before opening today -> count down to open.
+      label = 'Pick-up opens in';
+      target = wibOpen;
+      tone = 'closed';
+    } else if (wibNow.getTime() < wibClose.getTime()) {
+      // Inside active window -> count down to close.
+      label = 'Window closes in';
+      target = wibClose;
+      tone = 'open';
+    } else {
+      // Past close -> next opening is tomorrow.
+      label = 'Pick-up opens in';
+      wibOpen = new Date(Date.UTC(y, m, d, oh, om, 0));
+      wibOpen.setUTCDate(wibOpen.getUTCDate() + 1);
+      target = wibOpen;
+      tone = 'closed';
+    }
+
+    const totalSec = Math.max(0, Math.floor((target.getTime() - wibNow.getTime()) / 1000));
+    const h = Math.floor(totalSec / 3600);
+    const mm = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const value = `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+
+    return { label, value, tone };
+  } catch {
+    return null;
+  }
+}
+
 export default function PickupTV() {
   const router = useRouter();
   const { token, gate, tenant, profile: profileId } = router.query;
@@ -205,6 +260,7 @@ export default function PickupTV() {
   const queue = showQueue ? events.slice(wallSize, wallSize + 12) : [];
   const gateStatus = feed.gateStatus || null;
   const gateClosed = !!(gateStatus && gateStatus.configured && !gateStatus.open);
+  const gateTimer = useMemo(() => computeGateTimer(clock, gateStatus), [clock, gateStatus]);
 
   const todayCount = useMemo(() => events.length, [events]);
   const okCount    = useMemo(() => events.filter((e) => e.cardState === 'green').length, [events]);
@@ -337,6 +393,17 @@ export default function PickupTV() {
           <div className="tv-header-right">
             <div className="tv-stat"><span>{okCount}</span><label>Verified · last 30 min</label></div>
             <div className="tv-stat"><span>{todayCount}</span><label>Total events</label></div>
+            {gateTimer ? (
+              <div className={`tv-gate-timer ${gateTimer.tone}`}>
+                <div className="gtt-label">{gateTimer.label}</div>
+                <div className="gtt-value">{gateTimer.value}</div>
+              </div>
+            ) : gateStatus?.configured === false ? (
+              <div className="tv-gate-timer neutral">
+                <div className="gtt-label">Schedule</div>
+                <div className="gtt-value">Always open</div>
+              </div>
+            ) : null}
             <div className="tv-clock">
               <div className="tv-time">{clock ? clock.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '--:--'}</div>
               <div className="tv-date">{clock ? clock.toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short' }) : ''}</div>
@@ -449,10 +516,53 @@ export default function PickupTV() {
         .tv-stat { text-align: right; line-height: 1; }
         .tv-stat span { font-size: clamp(18px, 2vw, 28px); font-weight: 800; color: var(--binus-gold); }
         .tv-stat label { display: block; font-size: clamp(8px, 0.7vw, 10px); text-transform: uppercase; letter-spacing: 1.2px; opacity: 0.55; margin-top: 4px; white-space: nowrap; }
+        .tv-gate-timer {
+          text-align: right;
+          line-height: 1.05;
+          padding: 8px 12px;
+          border-radius: 10px;
+          border: 1px solid rgba(252,191,17,0.25);
+          background: rgba(0,0,0,0.22);
+          min-width: 185px;
+        }
+        .tv-gate-timer .gtt-label {
+          font-size: clamp(8px, 0.75vw, 10px);
+          text-transform: uppercase;
+          letter-spacing: 1.1px;
+          opacity: 0.78;
+          white-space: nowrap;
+        }
+        .tv-gate-timer .gtt-value {
+          margin-top: 4px;
+          font-size: clamp(15px, 1.45vw, 22px);
+          font-weight: 800;
+          font-family: 'JetBrains Mono', ui-monospace, monospace;
+          color: #FCBF11;
+          white-space: nowrap;
+        }
+        .tv-gate-timer.open {
+          border-color: rgba(34,197,94,0.4);
+          background: rgba(21,128,61,0.22);
+        }
+        .tv-gate-timer.open .gtt-value { color: #86EFAC; }
+        .tv-gate-timer.closed {
+          border-color: rgba(252,191,17,0.45);
+          background: rgba(252,191,17,0.12);
+        }
+        .tv-gate-timer.neutral {
+          border-color: rgba(148,163,184,0.32);
+          background: rgba(30,41,59,0.35);
+        }
+        .tv-gate-timer.neutral .gtt-value {
+          font-family: inherit;
+          color: #e2e8f0;
+          font-size: clamp(12px, 1.1vw, 14px);
+          font-weight: 700;
+        }
         .tv-clock { text-align: right; line-height: 1.05; padding-left: clamp(10px, 1.2vw, 18px); border-left: 1px solid rgba(252,191,17,0.25); }
         .tv-time { font-size: clamp(22px, 2.6vw, 36px); font-weight: 700; font-variant-numeric: tabular-nums; color: white; }
         .tv-date { font-size: clamp(9px, 0.9vw, 12px); opacity: 0.65; text-transform: uppercase; letter-spacing: 1px; white-space: nowrap; }
-        @media (max-width: 900px) { .tv-stat { display: none; } }
+        @media (max-width: 900px) { .tv-stat, .tv-gate-timer { display: none; } }
         .tv-dot {
           width: 14px; height: 14px; border-radius: 50%;
           background: #22C55E; box-shadow: 0 0 16px #22C55E;
@@ -1589,30 +1699,7 @@ function IdleSplash({ profile }) {
 }
 
 function GateClosed({ profile, gateStatus, clock }) {
-  // Compute live countdown until next opening, in WIB local time.
-  let countdown = null;
-  let countdownLabel = null;
-  if (clock && gateStatus?.opensAt) {
-    try {
-      const [oh, om] = gateStatus.opensAt.split(':').map((x) => parseInt(x, 10));
-      // local-now in Asia/Jakarta = utc + 7h
-      const wibNow = new Date(clock.getTime() + 7 * 60 * 60 * 1000);
-      const wibOpen = new Date(Date.UTC(
-        wibNow.getUTCFullYear(), wibNow.getUTCMonth(), wibNow.getUTCDate(), oh, om, 0
-      ));
-      // If we're already past today's open time, the next open is tomorrow.
-      if (wibOpen.getTime() <= wibNow.getTime()) {
-        wibOpen.setUTCDate(wibOpen.getUTCDate() + 1);
-      }
-      const diffMs = wibOpen.getTime() - wibNow.getTime();
-      const totalSec = Math.max(0, Math.floor(diffMs / 1000));
-      const h = Math.floor(totalSec / 3600);
-      const m = Math.floor((totalSec % 3600) / 60);
-      const s = totalSec % 60;
-      countdown = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-      countdownLabel = h >= 24 ? 'Pick-up opens in' : 'Gate opens in';
-    } catch {}
-  }
+  const timer = computeGateTimer(clock, gateStatus);
   return (
     <div className="tv-gate-closed">
       <div className="gc-badge">
@@ -1634,9 +1721,9 @@ function GateClosed({ profile, gateStatus, clock }) {
           <span className="gc-time">{gateStatus?.closesAt || '—'}</span>
         </div>
       </div>
-      {countdown && (
+      {timer?.value && (
         <p className="gc-countdown" aria-live="polite">
-          {countdownLabel || 'Gate opens in'} <b>{countdown}</b>
+          {timer.label || 'Gate opens in'} <b>{timer.value}</b>
         </p>
       )}
     </div>
