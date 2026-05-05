@@ -46,6 +46,13 @@ export default function SettingsPage() {
   const [editClassScopesSaving, setEditClassScopesSaving] = useState(false);
   const [teacherActionConfirm, setTeacherActionConfirm] = useState(null);
 
+  // Bulk import state (shared for both user + teacher tabs)
+  const [bulkImportTarget, setBulkImportTarget] = useState(null); // null | 'users' | 'teachers'
+  const [bulkImportRows, setBulkImportRows] = useState([]);
+  const [bulkImportLoading, setBulkImportLoading] = useState(false);
+  const [bulkImportResults, setBulkImportResults] = useState(null);
+  const [bulkImportError, setBulkImportError] = useState('');
+
   const filteredLogs = useMemo(() => {
     if (!logFilter.trim()) return accessLogs;
     const q = logFilter.toLowerCase().trim();
@@ -283,6 +290,114 @@ export default function SettingsPage() {
       }
     } catch {}
     setEditClassScopesSaving(false);
+  }
+
+  // ── Bulk import helpers ──────────────────────────────────────────────────
+
+  function downloadTemplate(type) {
+    const isTeacher = type === 'teachers';
+    const header = 'email,name,password,role,classScopes';
+    const sample = isTeacher
+      ? `teacher.example@binus.edu,Ms. Example,Pass@123,teacher,"4C,5A"`
+      : `user@school.edu,John Doe,Pass@123,viewer,`;
+    const csv = `${header}\n${sample}\n`;
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = isTeacher ? 'teacher-import-template.csv' : 'user-import-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleBulkImportFile(e, target) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target.result;
+        const lines = text.split(/\r?\n/).filter((l) => l.trim());
+        if (lines.length < 2) { setBulkImportError('CSV must have a header row and at least one data row.'); return; }
+        const header = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+        const emailIdx = header.indexOf('email');
+        const nameIdx = header.indexOf('name');
+        const passIdx = header.indexOf('password');
+        const roleIdx = header.indexOf('role');
+        const scopesIdx = header.indexOf('classscopes');
+        if (emailIdx === -1 || passIdx === -1) {
+          setBulkImportError('CSV must have at least "email" and "password" columns.');
+          return;
+        }
+        const rows = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cells = parseCSVLine(lines[i]);
+          if (!cells[emailIdx]?.trim()) continue;
+          // Force role to 'teacher' when importing into teacher tab
+          const rawRole = roleIdx >= 0 ? cells[roleIdx]?.trim() : '';
+          const role = target === 'teachers' ? 'teacher' : (rawRole || 'viewer');
+          const scopesRaw = scopesIdx >= 0 ? (cells[scopesIdx] || '') : '';
+          const classScopes = scopesRaw.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
+          rows.push({
+            email: cells[emailIdx]?.trim() || '',
+            name: nameIdx >= 0 ? cells[nameIdx]?.trim() : '',
+            password: cells[passIdx]?.trim() || '',
+            role,
+            classScopes,
+          });
+        }
+        if (rows.length === 0) { setBulkImportError('No data rows found in CSV.'); return; }
+        if (rows.length > 50) { setBulkImportError('Max 50 rows per import. Please split your file.'); return; }
+        setBulkImportError('');
+        setBulkImportResults(null);
+        setBulkImportRows(rows);
+        setBulkImportTarget(target);
+      } catch {
+        setBulkImportError('Failed to parse CSV. Ensure it is a valid UTF-8 comma-separated file.');
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+    // Reset input so same file can be re-selected after fix
+    e.target.value = '';
+  }
+
+  function parseCSVLine(line) {
+    const result = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = !inQuotes;
+      } else if (ch === ',' && !inQuotes) {
+        result.push(cur); cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    result.push(cur);
+    return result;
+  }
+
+  async function handleBulkImportConfirm() {
+    if (!bulkImportRows.length) return;
+    setBulkImportLoading(true);
+    setBulkImportError('');
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/auth/bulk-import', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ users: bulkImportRows }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setBulkImportError(data.error || 'Import failed.'); return; }
+      setBulkImportResults(data);
+      setBulkImportRows([]);
+      fetchUsers();
+    } catch { setBulkImportError('Network error. Please try again.'); }
+    setBulkImportLoading(false);
   }
 
   function openPermEditor(u) {
@@ -569,11 +684,22 @@ export default function SettingsPage() {
                         <p className="text-sm text-slate-400 mt-1">Manage who can sign in to this dashboard.</p>
                       </div>
                       {isAdmin && (
-                        <button onClick={() => setShowInvite(true)}
-                          className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-all border border-slate-700">
-                          <i className="ph ph-user-plus text-lg text-brand-400"></i>
-                          Add User
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-all border border-slate-700 cursor-pointer">
+                            <i className="ph ph-file-csv text-lg text-emerald-400"></i>
+                            Import CSV
+                            <input type="file" accept=".csv" className="hidden" onChange={(e) => handleBulkImportFile(e, 'users')} />
+                          </label>
+                          <button onClick={() => downloadTemplate('users')}
+                            className="flex items-center gap-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm border border-slate-700" title="Download CSV template">
+                            <i className="ph ph-download-simple"></i>
+                          </button>
+                          <button onClick={() => setShowInvite(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-all border border-slate-700">
+                            <i className="ph ph-user-plus text-lg text-brand-400"></i>
+                            Add User
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -615,6 +741,7 @@ export default function SettingsPage() {
                               <select value={inviteRole} onChange={e => setInviteRole(e.target.value)}
                                 className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white appearance-none focus:outline-none focus:border-brand-500 cursor-pointer">
                                 <option value="viewer">Viewer</option>
+                                <option value="guard">Guard (PickupGuard)</option>
                                 <option value="teacher">Teacher</option>
                                 <option value="admin">Admin</option>
                                 {role === 'owner' && <option value="owner">Owner</option>}
@@ -639,6 +766,29 @@ export default function SettingsPage() {
                               className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
                           </div>
                         </form>
+                      </div>
+                    )}
+
+                    {/* Bulk import preview panel (users) */}
+                    {bulkImportTarget === 'users' && bulkImportRows.length > 0 && (
+                      <BulkImportPreview
+                        rows={bulkImportRows}
+                        loading={bulkImportLoading}
+                        error={bulkImportError}
+                        results={bulkImportResults}
+                        onConfirm={handleBulkImportConfirm}
+                        onDismiss={() => { setBulkImportTarget(null); setBulkImportRows([]); setBulkImportResults(null); setBulkImportError(''); }}
+                      />
+                    )}
+                    {bulkImportTarget === 'users' && bulkImportResults && (
+                      <BulkImportResults
+                        results={bulkImportResults}
+                        onDismiss={() => { setBulkImportTarget(null); setBulkImportResults(null); }}
+                      />
+                    )}
+                    {bulkImportError && bulkImportTarget === 'users' && bulkImportRows.length === 0 && (
+                      <div className="mx-6 my-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs">
+                        <i className="ph ph-warning mr-2"></i>{bulkImportError}
                       </div>
                     )}
 
@@ -919,11 +1069,22 @@ export default function SettingsPage() {
                         <p className="text-sm text-slate-400 mt-1">Manage teacher accounts, class assignments, and credentials.</p>
                       </div>
                       {isAdmin && (
-                        <button onClick={() => { setAddTeacherOpen(true); setAddTeacherError(''); }}
-                          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-all">
-                          <i className="ph ph-user-plus text-lg"></i>
-                          Add Teacher
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-all border border-slate-700 cursor-pointer">
+                            <i className="ph ph-file-csv text-lg text-emerald-400"></i>
+                            Import CSV
+                            <input type="file" accept=".csv" className="hidden" onChange={(e) => handleBulkImportFile(e, 'teachers')} />
+                          </label>
+                          <button onClick={() => downloadTemplate('teachers')}
+                            className="flex items-center gap-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm border border-slate-700" title="Download CSV template">
+                            <i className="ph ph-download-simple"></i>
+                          </button>
+                          <button onClick={() => { setAddTeacherOpen(true); setAddTeacherError(''); }}
+                            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-all">
+                            <i className="ph ph-user-plus text-lg"></i>
+                            Add Teacher
+                          </button>
+                        </div>
                       )}
                     </div>
 
@@ -974,6 +1135,29 @@ export default function SettingsPage() {
                               className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
                           </div>
                         </form>
+                      </div>
+                    )}
+
+                    {/* Bulk import preview panel (teachers) */}
+                    {bulkImportTarget === 'teachers' && bulkImportRows.length > 0 && (
+                      <BulkImportPreview
+                        rows={bulkImportRows}
+                        loading={bulkImportLoading}
+                        error={bulkImportError}
+                        results={bulkImportResults}
+                        onConfirm={handleBulkImportConfirm}
+                        onDismiss={() => { setBulkImportTarget(null); setBulkImportRows([]); setBulkImportResults(null); setBulkImportError(''); }}
+                      />
+                    )}
+                    {bulkImportTarget === 'teachers' && bulkImportResults && !bulkImportRows.length && (
+                      <BulkImportResults
+                        results={bulkImportResults}
+                        onDismiss={() => { setBulkImportTarget(null); setBulkImportResults(null); }}
+                      />
+                    )}
+                    {bulkImportError && bulkImportTarget === 'teachers' && bulkImportRows.length === 0 && !bulkImportResults && (
+                      <div className="mx-6 my-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs">
+                        <i className="ph ph-warning mr-2"></i>{bulkImportError}
                       </div>
                     )}
 
@@ -1354,4 +1538,138 @@ export default function SettingsPage() {
     </footer>
     </V2Layout>
     );
+}
+
+// ── Bulk Import Components ────────────────────────────────────────────────────
+
+function BulkImportPreview({ rows, loading, error, results, onConfirm, onDismiss }) {
+  if (results) return null; // show BulkImportResults instead
+  const ROLE_COLOR = {
+    owner: 'text-red-300 bg-red-500/15 border-red-500/30',
+    admin: 'text-amber-300 bg-amber-500/15 border-amber-500/30',
+    teacher: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30',
+    guard: 'text-sky-300 bg-sky-500/15 border-sky-500/30',
+    viewer: 'text-slate-300 bg-slate-500/15 border-slate-600/40',
+  };
+  return (
+    <div className="border-b border-slate-800 bg-slate-900/50 px-6 py-5">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+            <i className="ph ph-file-csv text-emerald-400"></i>
+            CSV Preview — {rows.length} row{rows.length !== 1 ? 's' : ''}
+          </h3>
+          <p className="text-xs text-slate-400 mt-0.5">Review before importing. Duplicates and validation errors will be reported per row.</p>
+        </div>
+        <button onClick={onDismiss} className="text-slate-500 hover:text-white"><i className="ph ph-x"></i></button>
+      </div>
+      {error && (
+        <div className="mb-3 px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
+          <i className="ph ph-warning mr-1"></i>{error}
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-lg border border-slate-800 mb-4 max-h-64 overflow-y-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[10px]">
+            <tr>
+              <th className="px-3 py-2 text-left">#</th>
+              <th className="px-3 py-2 text-left">Email</th>
+              <th className="px-3 py-2 text-left">Name</th>
+              <th className="px-3 py-2 text-left">Role</th>
+              <th className="px-3 py-2 text-left">Classes</th>
+              <th className="px-3 py-2 text-left">Password</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/50">
+            {rows.map((r, i) => (
+              <tr key={i} className="hover:bg-white/5">
+                <td className="px-3 py-2 text-slate-500">{i + 1}</td>
+                <td className="px-3 py-2 text-slate-200 font-mono">{r.email}</td>
+                <td className="px-3 py-2 text-slate-300">{r.name || <span className="text-slate-600">—</span>}</td>
+                <td className="px-3 py-2">
+                  <span className={`inline-block px-2 py-0.5 rounded border text-[10px] font-semibold uppercase tracking-wide ${ROLE_COLOR[r.role] || ROLE_COLOR.viewer}`}>
+                    {r.role}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-slate-400">
+                  {(r.classScopes || []).length > 0
+                    ? r.classScopes.join(', ')
+                    : <span className="text-slate-600">—</span>}
+                </td>
+                <td className="px-3 py-2 text-slate-600 font-mono">{'•'.repeat(Math.min(r.password?.length || 0, 8))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center gap-3">
+        <button onClick={onConfirm} disabled={loading}
+          className="px-5 py-2 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold transition-all disabled:opacity-50">
+          {loading ? <><i className="ph ph-spinner-gap animate-spin mr-1"></i>Importing…</> : <><i className="ph ph-upload-simple mr-1"></i>Import {rows.length} users</>}
+        </button>
+        <button onClick={onDismiss} disabled={loading} className="px-4 py-2 text-slate-400 hover:text-white text-sm">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function BulkImportResults({ results, onDismiss }) {
+  if (!results) return null;
+  const { total, succeeded, failed } = results;
+  return (
+    <div className="border-b border-slate-800 bg-slate-900/50 px-6 py-5">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <div className="flex items-center gap-3">
+          {failed === 0 ? (
+            <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center">
+              <i className="ph ph-check-circle text-emerald-400 text-lg"></i>
+            </div>
+          ) : succeeded === 0 ? (
+            <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center">
+              <i className="ph ph-x-circle text-red-400 text-lg"></i>
+            </div>
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center">
+              <i className="ph ph-warning text-amber-400 text-lg"></i>
+            </div>
+          )}
+          <div>
+            <p className="text-sm font-semibold text-white">Import complete</p>
+            <p className="text-xs text-slate-400">
+              {succeeded} of {total} imported successfully{failed > 0 ? `, ${failed} failed` : ''}
+            </p>
+          </div>
+        </div>
+        <button onClick={onDismiss} className="text-slate-500 hover:text-white"><i className="ph ph-x"></i></button>
+      </div>
+      {failed > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-slate-800 max-h-48 overflow-y-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[10px]">
+              <tr>
+                <th className="px-3 py-2 text-left">#</th>
+                <th className="px-3 py-2 text-left">Email</th>
+                <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left">Error</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/50">
+              {results.results.map((r, i) => (
+                <tr key={i} className={r.ok ? '' : 'bg-red-500/5'}>
+                  <td className="px-3 py-2 text-slate-500">{r.row}</td>
+                  <td className="px-3 py-2 text-slate-200 font-mono">{r.email}</td>
+                  <td className="px-3 py-2">
+                    {r.ok
+                      ? <span className="text-emerald-400"><i className="ph ph-check-circle mr-1"></i>OK</span>
+                      : <span className="text-red-300"><i className="ph ph-x-circle mr-1"></i>Failed</span>}
+                  </td>
+                  <td className="px-3 py-2 text-red-300">{r.error || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }

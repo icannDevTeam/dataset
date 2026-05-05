@@ -107,7 +107,7 @@ async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid email format.' });
     }
 
-    const validRoles = ['owner', 'admin', 'teacher', 'viewer'];
+    const validRoles = ['owner', 'admin', 'teacher', 'guard', 'viewer'];
     const assignedRole = validRoles.includes(role) ? role : 'viewer';
     const cleanClassScopes = sanitizeClassScopes(classScopes);
 
