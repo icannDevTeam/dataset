@@ -1,274 +1,405 @@
-/**
- * /pickup/teacher — Teacher iPad Pickup Validation Screen
- *
- * Auth-gated: teacher (or admin) must be signed in.
- * Shows pickup events filtered to the teacher's assigned classes.
- * Approve button uses the 6-digit override code → officer-override API.
- *
- * Design: full-screen, mobile-first, large touch targets for iPad.
- * BINUS maroon (#8B1538) + gold (#FCBF11) + slate palette.
- */
 import Head from 'next/head';
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { signOut as fbSignOut } from '../../lib/firebase-client';
 
-const POLL_MS = 3000;
+const POLL_MS = 2000;
+const AUTO_RELEASE_MS = 3000;
 const BINUS_MAROON = '#8B1538';
 const BINUS_GOLD = '#FCBF11';
 
-// ─── Decision band colours ────────────────────────────────────────────────────
-const CARD_THEME = {
-  green:  { border: '#22C55E', bg: 'rgba(34,197,94,0.08)',  label: 'AUTHORISED',  icon: '✓', labelColor: '#22C55E' },
-  yellow: { border: '#FCBF11', bg: 'rgba(252,191,17,0.08)', label: 'NEEDS CHECK', icon: '⚠', labelColor: '#FCBF11' },
-  red:    { border: '#EF4444', bg: 'rgba(239,68,68,0.08)',  label: 'BLOCKED',     icon: '✕', labelColor: '#EF4444' },
+const STATE_THEME = {
+  green: {
+    border: '#22C55E',
+    bg: 'rgba(34,197,94,0.08)',
+    label: 'AUTHORIZED BY SYSTEM',
+    icon: '✓',
+  },
+  yellow: {
+    border: '#FCBF11',
+    bg: 'rgba(252,191,17,0.08)',
+    label: 'VERIFY IDENTITY',
+    icon: '⚠',
+  },
+  red: {
+    border: '#EF4444',
+    bg: 'rgba(239,68,68,0.08)',
+    label: 'BLOCKED - IDENTITY UNVERIFIED',
+    icon: '✕',
+  },
 };
 
-function theme(cardState) {
-  return CARD_THEME[cardState] || CARD_THEME.yellow;
-}
-
 function fmtTime(iso) {
-  if (!iso) return '—';
+  if (!iso) return '--';
   try {
     return new Date(iso).toLocaleTimeString('en-GB', {
       hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
     });
-  } catch { return '—'; }
+  } catch {
+    return '--';
+  }
 }
 
-function elapsed(iso) {
+function timeAgo(iso) {
   if (!iso) return '';
-  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
-  if (s < 5)  return 'just now';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms)) return '';
+  const s = Math.max(0, Math.floor(ms / 1000));
   if (s < 60) return `${s}s ago`;
-  return `${Math.floor(s / 60)}m ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
 }
 
-// ─── Avatar ───────────────────────────────────────────────────────────────────
-function Avatar({ src, name, size = 72, ring }) {
-  const [err, setErr] = useState(false);
-  const initials = (name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+function normalizeCard(cardState) {
+  const c = String(cardState || 'yellow').toLowerCase();
+  return c === 'green' || c === 'yellow' || c === 'red' ? c : 'yellow';
+}
+
+function eventPriority(ev) {
+  const c = normalizeCard(ev.cardState);
+  if (c === 'red') return 0;
+  if (c === 'yellow') return 1;
+  return 2;
+}
+
+function byUrgency(a, b) {
+  const pa = eventPriority(a);
+  const pb = eventPriority(b);
+  if (pa !== pb) return pa - pb;
+  return String(b.recordedAt || '').localeCompare(String(a.recordedAt || ''));
+}
+
+function Avatar({ src, name, size = 72, ring = '#334155' }) {
+  const [imgErr, setImgErr] = useState(false);
+  const initials = (name || '?')
+    .split(' ')
+    .map((w) => w[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
   return (
-    <div style={{
-      width: size, height: size, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
-      border: `3px solid ${ring || '#334155'}`,
-      background: '#1E293B',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      boxShadow: ring ? `0 0 16px ${ring}44` : 'none',
-    }}>
-      {src && !err
-        ? <img src={src} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={() => setErr(true)} />
-        : <span style={{ fontSize: size * 0.36, fontWeight: 800, color: '#94A3B8' }}>{initials}</span>}
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        overflow: 'hidden',
+        border: `3px solid ${ring}`,
+        background: '#1E293B',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxShadow: `0 0 18px ${ring}44`,
+        flexShrink: 0,
+      }}
+    >
+      {src && !imgErr ? (
+        <img
+          src={src}
+          alt={name || 'avatar'}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          onError={() => setImgErr(true)}
+        />
+      ) : (
+        <span style={{ fontSize: Math.round(size * 0.36), fontWeight: 800, color: '#94A3B8' }}>{initials}</span>
+      )}
     </div>
   );
 }
 
-// ─── Student chip ─────────────────────────────────────────────────────────────
-function StudentChip({ student }) {
+function StudentCard({ student, tone }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8,
-      background: 'rgba(255,255,255,0.05)', borderRadius: 10,
-      padding: '6px 10px', border: '1px solid rgba(255,255,255,0.08)',
-    }}>
-      <Avatar src={student.photoUrl} name={student.name} size={36} />
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#E2E8F0' }}>{student.name}</div>
-        <div style={{ fontSize: 11, color: BINUS_GOLD, fontWeight: 600 }}>{student.homeroom}</div>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        borderRadius: 12,
+        border: '1px solid rgba(255,255,255,0.1)',
+        background: 'rgba(255,255,255,0.04)',
+        padding: '8px 10px',
+      }}
+    >
+      <Avatar src={student.photoUrl} name={student.name} size={44} ring={tone.border} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#E2E8F0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {student.name || '--'}
+        </div>
+        <div style={{ fontSize: 11, color: BINUS_GOLD, fontWeight: 700, letterSpacing: 0.5 }}>
+          {student.homeroom || student.class || '--'}
+        </div>
       </div>
     </div>
   );
 }
 
-// ─── Approve panel (shown when event needs override) ─────────────────────────
-function ApprovePanel({ event, onApproved }) {
-  const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState(null);
+function QueueItem({ ev, active, onPick }) {
+  const c = normalizeCard(ev.cardState);
+  const tone = STATE_THEME[c];
+  return (
+    <button
+      onClick={() => onPick(ev.id)}
+      style={{
+        width: '100%',
+        textAlign: 'left',
+        borderRadius: 12,
+        border: `1px solid ${active ? tone.border : 'rgba(255,255,255,0.1)'}`,
+        background: active ? `${tone.bg}` : 'rgba(255,255,255,0.03)',
+        padding: '10px 12px',
+        color: '#E2E8F0',
+        cursor: 'pointer',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: tone.border, flexShrink: 0 }} />
+        <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {ev.chaperone?.name || '--'}
+        </span>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94A3B8' }}>{timeAgo(ev.recordedAt)}</span>
+      </div>
+      <div style={{ marginTop: 5, fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {(ev.students || []).map((s) => s.name).filter(Boolean).join(', ') || ev.gate || '--'}
+      </div>
+    </button>
+  );
+}
 
-  const submit = useCallback(async (finalCode) => {
-    if (busy) return;
-    setBusy(true);
-    setErr(null);
+function CaptureModal({ open, event, onClose, onConfirm, busy, error }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const [captured, setCaptured] = useState(null);
+  const [cameraErr, setCameraErr] = useState('');
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    setCameraErr('');
     try {
-      const r = await fetch('/api/pickup/admin/officer-override', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',   // sends __session cookie
-        body: JSON.stringify({ code: finalCode }),
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
       });
-      const j = await r.json();
-      if (!r.ok) {
-        setErr(j.error || 'Failed to approve');
-      } else {
-        onApproved(event.id);
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
       }
     } catch (e) {
-      setErr(e.message || 'Network error');
-    } finally {
-      setBusy(false);
+      setCameraErr(e.message || 'Camera unavailable');
     }
-  }, [busy, event.id, onApproved]);
+  }, []);
 
-  const tap = (digit) => {
-    if (code.length >= 6) return;
-    const next = code + digit;
-    setCode(next);
-    if (next.length === 6) submit(next);
+  useEffect(() => {
+    if (!open) {
+      stopCamera();
+      setCaptured(null);
+      setCameraErr('');
+      return;
+    }
+    startCamera();
+    return () => stopCamera();
+  }, [open, startCamera, stopCamera]);
+
+  const capture = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    const w = video.videoWidth || 1280;
+    const h = video.videoHeight || 720;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, w, h);
+    const data = canvas.toDataURL('image/jpeg', 0.85);
+    setCaptured(data);
   };
 
-  const clear = () => { setCode(''); setErr(null); };
+  const retake = async () => {
+    setCaptured(null);
+    stopCamera();
+    await startCamera();
+  };
+
+  if (!open || !event) return null;
 
   return (
-    <div style={{ marginTop: 16, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 16 }}>
-      <div style={{ fontSize: 13, color: '#94A3B8', marginBottom: 10, fontWeight: 600 }}>
-        Enter 6-digit override code shown on the TV screen
-      </div>
-
-      {/* Code display */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, justifyContent: 'center' }}>
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} style={{
-            width: 40, height: 48, borderRadius: 10,
-            border: `2px solid ${i < code.length ? BINUS_GOLD : 'rgba(255,255,255,0.15)'}`,
-            background: i < code.length ? 'rgba(252,191,17,0.1)' : 'rgba(255,255,255,0.04)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 22, fontWeight: 800, color: BINUS_GOLD,
-            transition: 'border-color 0.15s, background 0.15s',
-          }}>
-            {code[i] ? '•' : ''}
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 80,
+        background: 'rgba(2,6,23,0.88)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          width: 'min(840px, 100%)',
+          borderRadius: 16,
+          border: '1px solid rgba(239,68,68,0.45)',
+          background: '#0f172a',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#FCA5A5', letterSpacing: 0.6 }}>RED CARD CAPTURE REQUIRED</div>
+            <div style={{ fontSize: 12, color: '#94A3B8' }}>{event.chaperone?.name || '--'} · {fmtTime(event.recordedAt)}</div>
           </div>
-        ))}
-      </div>
-
-      {err && (
-        <div style={{
-          margin: '0 0 12px', padding: '8px 12px', borderRadius: 8,
-          background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
-          color: '#FCA5A5', fontSize: 13, textAlign: 'center',
-        }}>
-          {err}
-        </div>
-      )}
-
-      {/* NumPad */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, maxWidth: 240, margin: '0 auto' }}>
-        {['1','2','3','4','5','6','7','8','9','','0','⌫'].map((d) => (
-          <button key={d} disabled={busy || (!d && d !== '0')}
-            onClick={() => {
-              if (!d) return;
-              if (d === '⌫') clear();
-              else tap(d);
-            }}
-            style={{
-              height: 56, borderRadius: 12, fontWeight: 800, fontSize: 22,
-              background: d === '⌫' ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.07)',
-              border: `1px solid ${d === '⌫' ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.1)'}`,
-              color: d === '⌫' ? '#FCA5A5' : '#E2E8F0',
-              cursor: d || d === '0' ? 'pointer' : 'default',
-              opacity: (busy || !d) && d !== '0' ? 0.4 : 1,
-              transition: 'opacity 0.1s, background 0.1s',
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-            {busy && code.length === 6 && d === '0' ? '…' : d}
+          <button
+            onClick={onClose}
+            disabled={busy}
+            style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#94A3B8', fontSize: 22, cursor: 'pointer' }}
+          >
+            ×
           </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Event card ───────────────────────────────────────────────────────────────
-function EventCard({ event, onApproved }) {
-  const t = theme(event.cardState);
-  const approved = !!event.officerOverride;
-  const needsApproval = !approved && (event.cardState === 'yellow' || event.cardState === 'red');
-
-  return (
-    <div style={{
-      borderRadius: 16, border: `2px solid ${t.border}`,
-      background: t.bg, padding: 20, marginBottom: 14,
-      boxShadow: `0 0 24px ${t.border}22`,
-    }}>
-      {/* Status banner */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: '50%',
-          background: `${t.border}22`, border: `2px solid ${t.border}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 18, fontWeight: 900, color: t.labelColor,
-        }}>
-          {approved ? '✓' : t.icon}
         </div>
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: t.labelColor, letterSpacing: 1 }}>
-            {approved ? 'APPROVED' : t.label}
-          </div>
-          {approved && (
-            <div style={{ fontSize: 11, color: '#94A3B8', fontWeight: 500 }}>
-              by {event.officerOverride.by} · {fmtTime(event.officerOverride.at)}
-            </div>
+
+        <div style={{ padding: 14 }}>
+          {!captured ? (
+            <>
+              <div style={{ borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', background: '#020617' }}>
+                <video ref={videoRef} playsInline muted style={{ width: '100%', maxHeight: 460, objectFit: 'cover' }} />
+              </div>
+              {cameraErr && <div style={{ marginTop: 10, fontSize: 12, color: '#FCA5A5' }}>{cameraErr}</div>}
+              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'center' }}>
+                <button
+                  onClick={capture}
+                  disabled={!!cameraErr || busy}
+                  style={{
+                    width: 88,
+                    height: 88,
+                    borderRadius: '50%',
+                    border: '4px solid #fff',
+                    background: '#ef4444',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 18px rgba(239,68,68,0.5)',
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ borderRadius: 14, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <img src={captured} alt="capture" style={{ width: '100%', maxHeight: 460, objectFit: 'cover' }} />
+              </div>
+              {(error || cameraErr) && <div style={{ marginTop: 10, fontSize: 12, color: '#FCA5A5' }}>{error || cameraErr}</div>}
+              <div style={{ marginTop: 12, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={retake} disabled={busy}
+                  style={{
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: 'rgba(255,255,255,0.06)',
+                    color: '#E2E8F0',
+                    borderRadius: 10,
+                    padding: '11px 14px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Retake
+                </button>
+                <button onClick={() => onConfirm(captured)} disabled={busy}
+                  style={{
+                    border: '1px solid rgba(239,68,68,0.45)',
+                    background: busy ? 'rgba(239,68,68,0.2)' : '#ef4444',
+                    color: '#fff',
+                    borderRadius: 10,
+                    padding: '11px 14px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {busy ? 'Submitting...' : 'Confirm Release'}
+                </button>
+              </div>
+            </>
           )}
-        </div>
-        <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-          <div style={{ fontSize: 12, color: '#64748B', fontWeight: 500 }}>
-            {fmtTime(event.scannedAt || event.recordedAt)}
-          </div>
-          <div style={{ fontSize: 11, color: '#475569' }}>
-            {elapsed(event.scannedAt || event.recordedAt)} · {event.gate || '—'}
-          </div>
+          <canvas ref={canvasRef} style={{ display: 'none' }} />
         </div>
       </div>
-
-      {/* Chaperone */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <Avatar src={event.chaperone?.photoUrl} name={event.chaperone?.name} size={56} ring={t.border} />
-        <div>
-          <div style={{ fontSize: 11, color: '#64748B', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>Chaperone</div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: '#E2E8F0' }}>{event.chaperone?.name || '—'}</div>
-        </div>
-        {event.overrideCode && !approved && (
-          <div style={{
-            marginLeft: 'auto', background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 10, padding: '6px 12px', textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 10, color: '#64748B', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600 }}>Code</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: BINUS_GOLD, letterSpacing: 3, fontVariantNumeric: 'tabular-nums' }}>
-              {event.overrideCode}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Students */}
-      {event.students && event.students.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: needsApproval ? 0 : 4 }}>
-          {event.students.map((s, i) => <StudentChip key={i} student={s} />)}
-        </div>
-      )}
-
-      {/* Approve panel */}
-      {needsApproval && <ApprovePanel event={event} onApproved={onApproved} />}
     </div>
   );
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
-function EmptyState({ classScopes }) {
+function HistoryDrawer({ open, items, onClose }) {
   return (
-    <div style={{ textAlign: 'center', padding: '60px 24px' }}>
-      <div style={{ fontSize: 56, marginBottom: 16 }}>✅</div>
-      <div style={{ fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginBottom: 8 }}>All clear</div>
-      <div style={{ fontSize: 14, color: '#64748B' }}>
-        No pending pickup events for {classScopes.length > 0 ? classScopes.join(', ') : 'your classes'}
+    <>
+      {open && (
+        <div
+          onClick={onClose}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.5)', zIndex: 61 }}
+        />
+      )}
+      <div
+        style={{
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 'min(360px, 92vw)',
+          background: '#0f172a',
+          borderRight: '1px solid rgba(255,255,255,0.1)',
+          transform: open ? 'translateX(0)' : 'translateX(-105%)',
+          transition: 'transform 0.2s ease-out',
+          zIndex: 70,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div style={{ padding: 14, borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center' }}>
+          <div>
+            <div style={{ color: '#fff', fontWeight: 800, fontSize: 15 }}>Recent Actions</div>
+            <div style={{ color: '#94A3B8', fontSize: 11 }}>Latest {items.length} events</div>
+          </div>
+          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#94A3B8', fontSize: 22, cursor: 'pointer' }}>×</button>
+        </div>
+        <div style={{ padding: 10, overflowY: 'auto', flex: 1 }}>
+          {items.length === 0 && (
+            <div style={{ color: '#64748B', fontSize: 13, textAlign: 'center', paddingTop: 40 }}>No actions yet.</div>
+          )}
+          {items.map((it, idx) => {
+            const tone = it.flagged ? '#ef4444' : it.action === 'hold' ? '#f59e0b' : '#22c55e';
+            return (
+              <div key={`${it.eventId}-${idx}`}
+                style={{
+                  borderRadius: 12,
+                  border: `1px solid ${tone}55`,
+                  background: `${tone}12`,
+                  padding: 10,
+                  marginBottom: 8,
+                }}
+              >
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 99, background: tone }} />
+                  <span style={{ color: '#E2E8F0', fontWeight: 700, fontSize: 13 }}>{it.chaperone || '--'}</span>
+                  <span style={{ marginLeft: 'auto', color: '#94A3B8', fontSize: 11 }}>{fmtTime(it.at)}</span>
+                </div>
+                <div style={{ color: '#94A3B8', fontSize: 11, marginTop: 4 }}>{it.students || '--'}</div>
+                <div style={{ color: tone, fontSize: 11, marginTop: 4, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  {it.flagged ? 'Released (Flagged)' : it.action}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
 export default function TeacherPickup() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -276,28 +407,39 @@ export default function TeacherPickup() {
   const [online, setOnline] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [err, setErr] = useState(null);
-  const [approvedIds, setApprovedIds] = useState(new Set());
+  const [activeId, setActiveId] = useState(null);
+  const [busyAction, setBusyAction] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [captureErr, setCaptureErr] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [recentActions, setRecentActions] = useState([]);
+  const [autoReleaseCountdown, setAutoReleaseCountdown] = useState(AUTO_RELEASE_MS / 1000);
+
   const pollRef = useRef(null);
+  const autoTimerRef = useRef(null);
+  const autoTickRef = useRef(null);
+  const autoReleasedRef = useRef(new Set());
+  const touchStartXRef = useRef(null);
 
   useEffect(() => { setMounted(true); }, []);
 
   const fetchFeed = useCallback(async () => {
     try {
-      const r = await fetch('/api/pickup/teacher/feed', {
-        credentials: 'include',
-        cache: 'no-store',
-      });
+      const r = await fetch('/api/pickup/teacher/feed', { credentials: 'include', cache: 'no-store' });
       if (r.status === 401) { router.replace('/login'); return; }
-      if (r.status === 403) { setErr('Access denied. Check your account permissions.'); return; }
+      if (r.status === 403) {
+        setErr('Access denied. Check teacher permissions/class scopes.');
+        return;
+      }
       const j = await r.json();
-      if (!r.ok) { setErr(j.error || 'Feed error'); return; }
+      if (!r.ok) throw new Error(j.error || 'Feed error');
       setFeed(j);
-      setLastUpdated(new Date());
       setOnline(true);
+      setLastUpdated(new Date());
       setErr(null);
     } catch (e) {
       setOnline(false);
-      setErr(e.message);
+      setErr(e.message || 'Network error');
     }
   }, [router]);
 
@@ -308,11 +450,147 @@ export default function TeacherPickup() {
     return () => clearInterval(pollRef.current);
   }, [mounted, fetchFeed]);
 
-  const handleApproved = useCallback((id) => {
-    setApprovedIds((prev) => new Set([...prev, id]));
-    // Refresh immediately to pick up updated event state
-    fetchFeed();
-  }, [fetchFeed]);
+  const pendingEvents = useMemo(() => {
+    return (feed.events || [])
+      .filter((ev) => {
+        if (ev.teacherRelease || ev.officerOverride) return false;
+        const c = normalizeCard(ev.cardState);
+        return c === 'green' || c === 'yellow' || c === 'red';
+      })
+      .sort(byUrgency);
+  }, [feed.events]);
+
+  const releasedTodayCount = useMemo(() => {
+    return (feed.events || []).filter((ev) => {
+      const c = normalizeCard(ev.cardState);
+      if (c === 'green') return true;
+      return ev.teacherRelease?.action === 'release' || !!ev.officerOverride;
+    }).length;
+  }, [feed.events]);
+
+  const activeEvent = useMemo(() => {
+    if (!pendingEvents.length) return null;
+    const selected = pendingEvents.find((ev) => ev.id === activeId);
+    return selected || pendingEvents[0];
+  }, [pendingEvents, activeId]);
+
+  useEffect(() => {
+    if (activeEvent && activeEvent.id !== activeId) {
+      setActiveId(activeEvent.id);
+    }
+  }, [activeEvent, activeId]);
+
+  const pushHistory = useCallback((ev, action, flagged) => {
+    const students = (ev.students || []).map((s) => s.name).filter(Boolean).join(', ');
+    setRecentActions((prev) => [
+      {
+        eventId: ev.id,
+        chaperone: ev.chaperone?.name || '--',
+        students,
+        at: new Date().toISOString(),
+        action,
+        flagged: !!flagged,
+      },
+      ...prev,
+    ].slice(0, 20));
+  }, []);
+
+  const releaseAction = useCallback(async (ev, action, captureStoragePath = null) => {
+    if (!ev || busyAction) return false;
+    setBusyAction(true);
+    setCaptureErr('');
+    try {
+      const r = await fetch('/api/pickup/teacher/release', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId: ev.id,
+          action,
+          captureStoragePath,
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      pushHistory(ev, action, !!j.flagged);
+      await fetchFeed();
+      return true;
+    } catch (e) {
+      setCaptureErr(e.message || 'Failed action');
+      return false;
+    } finally {
+      setBusyAction(false);
+    }
+  }, [busyAction, fetchFeed, pushHistory]);
+
+  const onHold = useCallback(async () => {
+    if (!activeEvent) return;
+    await releaseAction(activeEvent, 'hold');
+  }, [activeEvent, releaseAction]);
+
+  const onReleaseYellow = useCallback(async () => {
+    if (!activeEvent) return;
+    await releaseAction(activeEvent, 'release');
+  }, [activeEvent, releaseAction]);
+
+  const onConfirmCapture = useCallback(async (imageData) => {
+    if (!activeEvent) return;
+    setBusyAction(true);
+    setCaptureErr('');
+    try {
+      const up = await fetch('/api/pickup/teacher/upload-capture', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: activeEvent.id, imageData }),
+      });
+      const uj = await up.json();
+      if (!up.ok) throw new Error(uj.error || 'Capture upload failed');
+
+      const ok = await releaseAction(activeEvent, 'release', uj.storagePath);
+      if (ok) {
+        setCaptureOpen(false);
+      }
+    } catch (e) {
+      setCaptureErr(e.message || 'Capture flow failed');
+      setBusyAction(false);
+    }
+  }, [activeEvent, releaseAction]);
+
+  useEffect(() => {
+    if (!activeEvent) return;
+    const c = normalizeCard(activeEvent.cardState);
+    if (c !== 'green') {
+      if (autoTimerRef.current) clearTimeout(autoTimerRef.current);
+      if (autoTickRef.current) clearInterval(autoTickRef.current);
+      setAutoReleaseCountdown(AUTO_RELEASE_MS / 1000);
+      return;
+    }
+    if (busyAction) return;
+    if (autoReleasedRef.current.has(activeEvent.id)) return;
+
+    setAutoReleaseCountdown(AUTO_RELEASE_MS / 1000);
+    autoTickRef.current = setInterval(() => {
+      setAutoReleaseCountdown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+
+    autoTimerRef.current = setTimeout(async () => {
+      autoReleasedRef.current.add(activeEvent.id);
+      await releaseAction(activeEvent, 'release');
+    }, AUTO_RELEASE_MS);
+
+    return () => {
+      if (autoTimerRef.current) clearTimeout(autoTimerRef.current);
+      if (autoTickRef.current) clearInterval(autoTickRef.current);
+    };
+  }, [activeEvent, busyAction, releaseAction]);
+
+  useEffect(() => {
+    return () => {
+      if (autoTimerRef.current) clearTimeout(autoTimerRef.current);
+      if (autoTickRef.current) clearInterval(autoTickRef.current);
+    };
+  }, []);
 
   const handleSignOut = async () => {
     try {
@@ -322,138 +600,250 @@ export default function TeacherPickup() {
     router.replace('/login');
   };
 
+  const onTouchStart = (e) => {
+    touchStartXRef.current = e.touches?.[0]?.clientX ?? null;
+  };
+
+  const onTouchEnd = (e) => {
+    const startX = touchStartXRef.current;
+    const endX = e.changedTouches?.[0]?.clientX;
+    if (startX == null || endX == null) return;
+    const delta = endX - startX;
+    if (!historyOpen && startX < 28 && delta > 70) {
+      setHistoryOpen(true);
+    } else if (historyOpen && delta < -70) {
+      setHistoryOpen(false);
+    }
+  };
+
   if (!mounted) return null;
 
-  // Filter events: only pending (no override, yellow/red) for the main queue
-  // Show recently resolved (override exists) in a separate list below
-  const pending = feed.events.filter((e) =>
-    !e.officerOverride && (e.cardState === 'yellow' || e.cardState === 'red')
-  );
-  const resolved = feed.events.filter((e) => e.officerOverride || e.cardState === 'green');
+  const activeCardState = activeEvent ? normalizeCard(activeEvent.cardState) : 'yellow';
+  const tone = STATE_THEME[activeCardState] || STATE_THEME.yellow;
 
   return (
     <>
       <Head>
-        <title>Teacher · Pickup Validation</title>
+        <title>Teacher Device · Pickup Release</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         <meta name="theme-color" content={BINUS_MAROON} />
       </Head>
 
-      <div style={{
-        minHeight: '100dvh',
-        background: 'linear-gradient(160deg, #0A0A14 0%, #0D1117 100%)',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-        color: 'white',
-        overscrollBehavior: 'none',
-      }}>
+      <div
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        style={{
+          minHeight: '100dvh',
+          background: 'linear-gradient(165deg, #070B14 0%, #0B1120 55%, #0A0F1C 100%)',
+          color: '#fff',
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+        }}
+      >
+        <HistoryDrawer open={historyOpen} items={recentActions} onClose={() => setHistoryOpen(false)} />
 
-        {/* ── Header ─────────────────────────────────────────────────── */}
-        <div style={{
-          position: 'sticky', top: 0, zIndex: 50,
-          background: 'rgba(10,10,20,0.92)', backdropFilter: 'blur(20px)',
-          borderBottom: `2px solid ${BINUS_MAROON}`,
-          padding: '14px 20px',
-          display: 'flex', alignItems: 'center', gap: 12,
-        }}>
-          {/* Logo mark */}
-          <div style={{
-            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-            background: BINUS_MAROON,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 18,
-          }}>🏫</div>
+        <CaptureModal
+          open={captureOpen}
+          event={activeEvent}
+          onClose={() => setCaptureOpen(false)}
+          onConfirm={onConfirmCapture}
+          busy={busyAction}
+          error={captureErr}
+        />
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: '#E2E8F0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {feed.displayName || 'Teacher'} · Pickup
+        <div
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 50,
+            background: 'rgba(10,10,20,0.92)',
+            backdropFilter: 'blur(16px)',
+            borderBottom: `2px solid ${BINUS_MAROON}`,
+            padding: '12px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <button
+            onClick={() => setHistoryOpen(true)}
+            style={{
+              border: '1px solid rgba(255,255,255,0.18)',
+              background: 'rgba(255,255,255,0.06)',
+              color: '#E2E8F0',
+              borderRadius: 10,
+              padding: '6px 10px',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            History
+          </button>
+
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: '#E2E8F0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {feed.displayName || 'Teacher'} · Release Desk
             </div>
-            {feed.classScopes && feed.classScopes.length > 0 && (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
-                {feed.classScopes.map((c) => (
-                  <span key={c} style={{
-                    fontSize: 10, fontWeight: 700, letterSpacing: 1,
-                    padding: '2px 7px', borderRadius: 20,
-                    background: `${BINUS_GOLD}22`, color: BINUS_GOLD,
-                    border: `1px solid ${BINUS_GOLD}44`,
-                  }}>{c}</span>
-                ))}
-              </div>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
+              {(feed.classScopes || []).map((c) => (
+                <span key={c} style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: 0.8,
+                  borderRadius: 99,
+                  border: `1px solid ${BINUS_GOLD}55`,
+                  background: `${BINUS_GOLD}22`,
+                  color: BINUS_GOLD,
+                  padding: '2px 7px',
+                }}>{c}</span>
+              ))}
+            </div>
           </div>
 
-          {/* Status dot */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{
-              width: 8, height: 8, borderRadius: '50%',
-              background: online ? '#22C55E' : '#EF4444',
-              boxShadow: online ? '0 0 6px #22C55E' : '0 0 6px #EF4444',
-            }} />
-            {pending.length > 0 && (
-              <span style={{
-                fontSize: 11, fontWeight: 800, letterSpacing: 0.5,
-                padding: '2px 8px', borderRadius: 20,
-                background: '#FCBF11', color: '#000',
-              }}>
-                {pending.length} pending
-              </span>
-            )}
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: online ? '#22C55E' : '#EF4444', boxShadow: online ? '0 0 8px #22C55E' : '0 0 8px #EF4444' }} />
+              <span style={{ fontSize: 11, color: '#94A3B8' }}>{pendingEvents.length} pending</span>
+            </div>
+            <div style={{ fontSize: 11, color: '#FDE68A', marginTop: 3, fontWeight: 700 }}>{releasedTodayCount} released today</div>
           </div>
 
-          <button onClick={handleSignOut} style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: '#64748B', fontSize: 22, lineHeight: 1, padding: '4px 2px',
-            WebkitTapHighlightColor: 'transparent',
-          }} title="Sign out">⏻</button>
+          <button
+            onClick={handleSignOut}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: '#94A3B8',
+              fontSize: 22,
+              cursor: 'pointer',
+              lineHeight: 1,
+            }}
+            title="Sign out"
+          >
+            ⏻
+          </button>
         </div>
 
-        {/* ── Error banner ─────────────────────────────────────────── */}
         {err && (
-          <div style={{
-            margin: '12px 16px 0', padding: '10px 14px', borderRadius: 10,
-            background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
-            color: '#FCA5A5', fontSize: 13,
-          }}>
+          <div style={{ margin: '12px 14px 0', padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.12)', color: '#FCA5A5', fontSize: 12 }}>
             {err}
           </div>
         )}
 
-        {/* ── Event list ───────────────────────────────────────────── */}
-        <div style={{ padding: '16px 16px 32px' }}>
-
-          {/* Pending section */}
-          {pending.length > 0 ? (
-            <>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 10 }}>
-                Needs your approval ({pending.length})
-              </div>
-              {pending.map((ev) => (
-                <EventCard key={ev.id} event={ev} onApproved={handleApproved} />
-              ))}
-            </>
+        <div style={{ padding: 14, display: 'grid', gap: 12 }}>
+          {!activeEvent ? (
+            <div style={{ border: '1px solid rgba(34,197,94,0.35)', background: 'rgba(34,197,94,0.1)', borderRadius: 16, padding: 22, textAlign: 'center' }}>
+              <div style={{ fontSize: 44, marginBottom: 8 }}>✓</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#DCFCE7' }}>All clear</div>
+              <div style={{ marginTop: 6, fontSize: 13, color: '#86EFAC' }}>No pending pickup events in your classes.</div>
+            </div>
           ) : (
-            <EmptyState classScopes={feed.classScopes || []} />
-          )}
-
-          {/* Resolved section */}
-          {resolved.length > 0 && (
-            <>
+            <div
+              style={{
+                borderRadius: 16,
+                border: `2px solid ${tone.border}`,
+                background: tone.bg,
+                boxShadow: `0 0 22px ${tone.border}22`,
+                overflow: 'hidden',
+              }}
+            >
               <div style={{
-                fontSize: 11, fontWeight: 700, color: '#334155',
-                letterSpacing: 2, textTransform: 'uppercase',
-                margin: '20px 0 10px',
+                padding: '11px 12px',
+                background: `${tone.border}22`,
+                borderBottom: `1px solid ${tone.border}66`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
               }}>
-                Recent · resolved ({resolved.length})
+                <div style={{ width: 26, height: 26, borderRadius: 99, border: `2px solid ${tone.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: tone.border }}>
+                  {tone.icon}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: tone.border, letterSpacing: 0.8, textTransform: 'uppercase' }}>{tone.label}</div>
+                <div style={{ marginLeft: 'auto', fontSize: 11, color: '#CBD5E1' }}>
+                  {fmtTime(activeEvent.recordedAt)} · {timeAgo(activeEvent.recordedAt)} · {activeEvent.gate || '--'}
+                </div>
               </div>
-              {resolved.map((ev) => (
-                <EventCard key={ev.id} event={ev} onApproved={handleApproved} />
-              ))}
-            </>
+
+              <div style={{ padding: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Avatar src={activeEvent.chaperone?.photoUrl} name={activeEvent.chaperone?.name} size={72} ring={tone.border} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 11, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Chaperone</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: '#E2E8F0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {activeEvent.chaperone?.name || '--'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                  {(activeEvent.students || []).map((s, idx) => (
+                    <StudentCard key={idx} student={s} tone={tone} />
+                  ))}
+                </div>
+
+                {activeCardState === 'green' && (
+                  <div style={{ marginTop: 12, borderRadius: 12, border: '1px solid rgba(34,197,94,0.45)', background: 'rgba(34,197,94,0.14)', padding: '10px 12px', color: '#BBF7D0', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>Auto-releasing in {autoReleaseCountdown}s...</span>
+                    <button onClick={onHold} disabled={busyAction}
+                      style={{ border: '1px solid rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.18)', color: '#FDE68A', borderRadius: 10, padding: '8px 12px', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      Hold
+                    </button>
+                  </div>
+                )}
+
+                {activeCardState === 'yellow' && (
+                  <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <button onClick={onReleaseYellow} disabled={busyAction}
+                      style={{ height: 62, borderRadius: 12, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.2)', color: '#DCFCE7', fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
+                      {busyAction ? 'Working...' : 'Release'}
+                    </button>
+                    <button onClick={onHold} disabled={busyAction}
+                      style={{ height: 62, borderRadius: 12, border: '1px solid rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.2)', color: '#FDE68A', fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
+                      Hold
+                    </button>
+                  </div>
+                )}
+
+                {activeCardState === 'red' && (
+                  <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <button onClick={() => { setCaptureErr(''); setCaptureOpen(true); }} disabled={busyAction}
+                      style={{ height: 62, borderRadius: 12, border: '1px solid rgba(239,68,68,0.55)', background: 'rgba(239,68,68,0.24)', color: '#FECACA', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                      Capture & Release
+                    </button>
+                    <button onClick={onHold} disabled={busyAction}
+                      style={{ height: 62, borderRadius: 12, border: '1px solid rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.2)', color: '#FDE68A', fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
+                      Hold
+                    </button>
+                  </div>
+                )}
+
+                {captureErr && (
+                  <div style={{ marginTop: 10, fontSize: 12, color: '#FCA5A5' }}>{captureErr}</div>
+                )}
+              </div>
+            </div>
           )}
 
-          {/* Last updated */}
+          {pendingEvents.length > 1 && (
+            <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', padding: 10 }}>
+              <div style={{ color: '#94A3B8', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                Queue
+              </div>
+              <div style={{ display: 'grid', gap: 7 }}>
+                {pendingEvents
+                  .filter((ev) => ev.id !== activeEvent?.id)
+                  .slice(0, 8)
+                  .map((ev) => (
+                    <QueueItem key={ev.id} ev={ev} active={ev.id === activeEvent?.id} onPick={setActiveId} />
+                  ))}
+              </div>
+            </div>
+          )}
+
           {lastUpdated && (
-            <div style={{ textAlign: 'center', marginTop: 24, fontSize: 11, color: '#1E293B' }}>
-              Last updated {lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            <div style={{ textAlign: 'center', color: '#475569', fontSize: 11, paddingBottom: 12 }}>
+              Last updated {fmtTime(lastUpdated.toISOString())}
             </div>
           )}
         </div>

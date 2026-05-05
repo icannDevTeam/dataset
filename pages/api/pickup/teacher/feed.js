@@ -27,6 +27,15 @@ const STUDENT_PHOTO_TTL_MS = 30 * 60 * 1000;
 const _urlCache = new Map();
 const _studentPathCache = new Map();
 
+function toIso(v) {
+  if (!v) return null;
+  if (typeof v === 'string') return v;
+  if (v?.toDate) {
+    try { return v.toDate().toISOString(); } catch { return null; }
+  }
+  try { return new Date(v).toISOString(); } catch { return null; }
+}
+
 async function signed(bucket, path) {
   if (!path) return null;
   const cached = _urlCache.get(path);
@@ -149,6 +158,9 @@ export default async function handler(req, res) {
       ? chapPhotoPath
       : await signed(bucket, chapPhotoPath);
     const capture = e.capturePath ? await signed(bucket, e.capturePath) : null;
+    const teacherCapture = e.teacherRelease?.captureStoragePath
+      ? await signed(bucket, e.teacherRelease.captureStoragePath)
+      : null;
 
     const students = await Promise.all((e.students || []).map(async (s) => {
       let url = null;
@@ -173,10 +185,16 @@ export default async function handler(req, res) {
       cardState: e.cardState,
       overrideCode: e.overrideCode || null,
       holdSeconds: e.holdSeconds || 60,
+      status: e.status || null,
       chaperone: { ...chap, photoUrl: chapPhoto },
       students,
       capturePath: capture,
       officerOverride: e.officerOverride || null,
+      teacherRelease: e.teacherRelease ? {
+        ...e.teacherRelease,
+        at: toIso(e.teacherRelease.at),
+        captureUrl: teacherCapture,
+      } : null,
     });
   }
 

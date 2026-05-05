@@ -9,6 +9,7 @@
  *   tenant   tenant id (default: env tenant)
  *   profile  kiosk profile id  (loads gates + homerooms filter from Firestore)
  *   gate     additional/override gate filter (exact match on event.gate)
+ *   mode     released|all (default: released)
  *   limit    max events to return (default 30, max 60)
  *
  * Response:
@@ -89,6 +90,7 @@ export default async function handler(req, res) {
 
   const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
   const gateOverride = req.query.gate ? String(req.query.gate) : null;
+  const mode = String(req.query.mode || 'released').toLowerCase();
   let profileId = req.query.profile ? String(req.query.profile) : null;
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit, 10) || DEFAULT_LIMIT));
 
@@ -140,6 +142,12 @@ export default async function handler(req, res) {
     const events = [];
     for (const doc of snap.docs) {
       const e = doc.data();
+      if (mode !== 'all') {
+        const cardState = String(e.cardState || '').toLowerCase();
+        const isAutoGreen = cardState === 'green';
+        const isTeacherReleased = e.teacherRelease?.action === 'release';
+        if (!isAutoGreen && !isTeacherReleased) continue;
+      }
       // gate URL override (legacy)
       if (gateOverride && e.gate !== gateOverride) continue;
       // profile filter (gates + homerooms)
@@ -180,6 +188,8 @@ export default async function handler(req, res) {
         students,
         capturePath: capture,
         officerOverride: e.officerOverride || null,
+        teacherRelease: e.teacherRelease || null,
+        flagged: !!e.teacherRelease?.flagged,
         overrideCode: e.overrideCode || null,
         holdSeconds: e.holdSeconds || 60,
       });

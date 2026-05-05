@@ -103,7 +103,7 @@ function computeGateTimer(clock, gateStatus) {
 
 export default function PickupTV() {
   const router = useRouter();
-  const { token, gate, tenant, profile: profileId } = router.query;
+  const { token, gate, tenant, profile: profileId, mode: modeQuery } = router.query;
   const [mounted, setMounted] = useState(false);
   const [feed, setFeed] = useState({ events: [], now: null, profile: null });
   const [err, setErr] = useState(null);
@@ -174,6 +174,7 @@ export default function PickupTV() {
         if (gate) params.set('gate', String(gate));
         if (tenant) params.set('tenant', String(tenant));
         if (profileId) params.set('profile', String(profileId));
+        params.set('mode', modeQuery ? String(modeQuery) : 'released');
         const r = await fetch(`/api/pickup/tv/feed?${params.toString()}`, {
           cache: 'no-store',
           headers: deviceToken ? { 'x-tv-device-token': deviceToken } : {},
@@ -203,7 +204,7 @@ export default function PickupTV() {
     tick();
     const t = setInterval(tick, 2000);
     return () => { cancelled = true; clearInterval(t); };
-  }, [router.isReady, token, deviceToken, gate, tenant, profileId]);
+  }, [router.isReady, token, deviceToken, gate, tenant, profileId, modeQuery]);
 
   // Clock tick — initialise on client only to avoid SSR hydration mismatch
   useEffect(() => {
