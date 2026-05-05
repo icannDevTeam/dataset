@@ -27,6 +27,25 @@ export default function SettingsPage() {
   const [savingPerms, setSavingPerms] = useState(false);
   const [logFilter, setLogFilter] = useState('');
 
+  // Teacher Management tab state
+  const [teacherSearch, setTeacherSearch] = useState('');
+  const [addTeacherOpen, setAddTeacherOpen] = useState(false);
+  const [addTeacherEmail, setAddTeacherEmail] = useState('');
+  const [addTeacherName, setAddTeacherName] = useState('');
+  const [addTeacherPassword, setAddTeacherPassword] = useState('');
+  const [addTeacherClassScopes, setAddTeacherClassScopes] = useState('');
+  const [addTeacherError, setAddTeacherError] = useState('');
+  const [addTeacherLoading, setAddTeacherLoading] = useState(false);
+  const [resetPasswordFor, setResetPasswordFor] = useState(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetPasswordError, setResetPasswordError] = useState('');
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+  const [resetPasswordSuccess, setResetPasswordSuccess] = useState(null);
+  const [editClassScopesFor, setEditClassScopesFor] = useState(null);
+  const [editClassScopesValue, setEditClassScopesValue] = useState('');
+  const [editClassScopesSaving, setEditClassScopesSaving] = useState(false);
+  const [teacherActionConfirm, setTeacherActionConfirm] = useState(null);
+
   const filteredLogs = useMemo(() => {
     if (!logFilter.trim()) return accessLogs;
     const q = logFilter.toLowerCase().trim();
@@ -39,6 +58,17 @@ export default function SettingsPage() {
       (l.device || '').toLowerCase().includes(q)
     );
   }, [accessLogs, logFilter]);
+
+  const filteredTeachers = useMemo(() => {
+    const teachers = users.filter(u => u.role === 'teacher');
+    if (!teacherSearch.trim()) return teachers;
+    const q = teacherSearch.toLowerCase().trim();
+    return teachers.filter(u =>
+      (u.name || '').toLowerCase().includes(q) ||
+      (u.email || '').toLowerCase().includes(q) ||
+      (u.classScopes || []).some(c => c.toLowerCase().includes(q))
+    );
+  }, [users, teacherSearch]);
 
   const getAuthHeaders = useCallback(async () => {
     if (!user) return {};
@@ -157,6 +187,104 @@ export default function SettingsPage() {
     } catch {}
   }
 
+  async function handleAddTeacher(e) {
+    e.preventDefault();
+    if (!addTeacherEmail.trim() || !addTeacherPassword) return;
+    if (addTeacherPassword.length < 6) {
+      setAddTeacherError('Password must be at least 6 characters.');
+      return;
+    }
+    const classScopes = addTeacherClassScopes
+      .split(',')
+      .map((x) => x.trim().toUpperCase())
+      .filter(Boolean);
+    if (classScopes.length === 0) {
+      setAddTeacherError('At least one class scope is required (e.g. 4C).');
+      return;
+    }
+    setAddTeacherLoading(true);
+    setAddTeacherError('');
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/auth/users', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          email: addTeacherEmail.trim(),
+          name: addTeacherName.trim(),
+          password: addTeacherPassword,
+          role: 'teacher',
+          classScopes,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAddTeacherOpen(false);
+        setAddTeacherEmail('');
+        setAddTeacherName('');
+        setAddTeacherPassword('');
+        setAddTeacherClassScopes('');
+        fetchUsers();
+      } else {
+        setAddTeacherError(data.error || 'Failed to add teacher.');
+      }
+    } catch {
+      setAddTeacherError('Network error. Please try again.');
+    }
+    setAddTeacherLoading(false);
+  }
+
+  async function handleResetPassword(email) {
+    if (!resetPasswordValue || resetPasswordValue.length < 6) {
+      setResetPasswordError('Password must be at least 6 characters.');
+      return;
+    }
+    setResetPasswordLoading(true);
+    setResetPasswordError('');
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/auth/users', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ email, action: 'reset-password', newPassword: resetPasswordValue }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResetPasswordFor(null);
+        setResetPasswordValue('');
+        setResetPasswordSuccess(email);
+        setTimeout(() => setResetPasswordSuccess(null), 3000);
+      } else {
+        setResetPasswordError(data.error || 'Failed to reset password.');
+      }
+    } catch {
+      setResetPasswordError('Network error.');
+    }
+    setResetPasswordLoading(false);
+  }
+
+  async function handleUpdateClassScopes(email) {
+    setEditClassScopesSaving(true);
+    const scopes = editClassScopesValue
+      .split(',')
+      .map((x) => x.trim().toUpperCase())
+      .filter(Boolean);
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/auth/users', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ email, classScopes: scopes }),
+      });
+      if (res.ok) {
+        setEditClassScopesFor(null);
+        setEditClassScopesValue('');
+        fetchUsers();
+      }
+    } catch {}
+    setEditClassScopesSaving(false);
+  }
+
   function openPermEditor(u) {
     setEditingPerms({
       email: u.email,
@@ -247,6 +375,7 @@ export default function SettingsPage() {
   const allTabs = [
     { id: 'security', icon: 'ph-shield-check', label: 'Security & Audit' },
     { id: 'user-management', icon: 'ph-users', label: 'User Management' },
+    { id: 'teacher-management', icon: 'ph-chalkboard-teacher', label: 'Teacher Management' },
     { id: 'ai-parameters', icon: 'ph-bounding-box', label: 'AI Parameters' },
     { id: 'notifications', icon: 'ph-bell-ringing', label: 'Notifications' },
     { id: 'integrations', icon: 'ph-plugs', label: 'Integrations' },
@@ -448,6 +577,12 @@ export default function SettingsPage() {
                       )}
                     </div>
 
+                    {/* Teacher accounts callout */}
+                    <div className="mx-6 mt-5 mb-1 flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-emerald-400">
+                      <i className="ph ph-chalkboard-teacher text-lg flex-shrink-0"></i>
+                      <p className="text-xs">Teacher accounts are managed in the <button onClick={() => setActiveTab('teacher-management')} className="font-semibold underline hover:text-emerald-300 transition-colors">Teacher Management</button> tab.</p>
+                    </div>
+
                     {/* Invite modal */}
                     {showInvite && (
                       <div className="border-b border-slate-800 bg-slate-900/60 p-6">
@@ -523,7 +658,7 @@ export default function SettingsPage() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/50">
-                            {users.map((u) => {
+                            {users.filter(u => u.role !== 'teacher').map((u) => {
                               const isMe = u.email === user?.email?.toLowerCase();
                               return (
                                 <tr key={u.email} className="hover:bg-slate-800/30 transition-colors group">
@@ -766,6 +901,271 @@ export default function SettingsPage() {
                           <button onClick={() => setEditingPerms(null)}
                             className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
                         </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* ─── Teacher Management Tab ─── */}
+                {activeTab === 'teacher-management' && (
+                  <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden shadow-lg shadow-black/20">
+
+                    {/* Header */}
+                    <div className="px-6 py-5 border-b border-slate-800 bg-slate-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                          <i className="ph ph-chalkboard-teacher text-emerald-400"></i>
+                          Teacher Management
+                        </h2>
+                        <p className="text-sm text-slate-400 mt-1">Manage teacher accounts, class assignments, and credentials.</p>
+                      </div>
+                      {isAdmin && (
+                        <button onClick={() => { setAddTeacherOpen(true); setAddTeacherError(''); }}
+                          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium transition-all">
+                          <i className="ph ph-user-plus text-lg"></i>
+                          Add Teacher
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Add Teacher inline form */}
+                    {addTeacherOpen && (
+                      <div className="border-b border-slate-800 bg-slate-900/60 p-6">
+                        <form onSubmit={handleAddTeacher} className="max-w-lg space-y-4">
+                          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                            <i className="ph ph-chalkboard-teacher text-emerald-400"></i>
+                            New Teacher Account
+                          </h3>
+                          {addTeacherError && (
+                            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">{addTeacherError}</div>
+                          )}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-xs text-slate-400 block mb-1">Email Address</label>
+                              <input type="email" value={addTeacherEmail} onChange={e => setAddTeacherEmail(e.target.value)}
+                                placeholder="teacher@binus.edu" required
+                                className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" />
+                            </div>
+                            <div>
+                              <label className="text-xs text-slate-400 block mb-1">Display Name (optional)</label>
+                              <input type="text" value={addTeacherName} onChange={e => setAddTeacherName(e.target.value)}
+                                placeholder="Ms. Anita"
+                                className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-emerald-500" />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-400 block mb-1">Password</label>
+                            <input type="password" value={addTeacherPassword} onChange={e => setAddTeacherPassword(e.target.value)}
+                              placeholder="Min. 6 characters" required minLength={6}
+                              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-400 block mb-1">Assigned Classes</label>
+                            <input type="text" value={addTeacherClassScopes} onChange={e => setAddTeacherClassScopes(e.target.value)}
+                              placeholder="4C, 4B" required
+                              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-emerald-500" />
+                            <p className="text-[10px] text-slate-500 mt-1">Comma-separated homeroom classes this teacher can validate pickups for.</p>
+                          </div>
+                          <div className="flex items-center gap-3 pt-2">
+                            <button type="submit" disabled={addTeacherLoading}
+                              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold transition-all disabled:opacity-50">
+                              {addTeacherLoading ? 'Creating...' : 'Create Teacher Account'}
+                            </button>
+                            <button type="button" onClick={() => { setAddTeacherOpen(false); setAddTeacherError(''); }}
+                              className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
+                          </div>
+                        </form>
+                      </div>
+                    )}
+
+                    {/* Search bar */}
+                    <div className="px-6 py-3 border-b border-slate-800/50 bg-slate-950/30">
+                      <div className="relative max-w-sm">
+                        <i className="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"></i>
+                        <input type="text" value={teacherSearch} onChange={e => setTeacherSearch(e.target.value)}
+                          placeholder="Search by name, email, or class..."
+                          className="w-full bg-slate-900/50 border border-slate-700/50 rounded-lg py-2 pl-9 pr-8 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors" />
+                        {teacherSearch && (
+                          <button onClick={() => setTeacherSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition-colors">
+                            <i className="ph ph-x text-sm"></i>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Password reset success toast */}
+                    {resetPasswordSuccess && (
+                      <div className="mx-6 mt-4 flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+                        <i className="ph ph-check-circle text-base"></i>
+                        Password reset successfully for {resetPasswordSuccess}
+                      </div>
+                    )}
+
+                    {/* Teacher cards */}
+                    {loadingUsers ? (
+                      <div className="p-12 text-center"><div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div></div>
+                    ) : filteredTeachers.length === 0 ? (
+                      <div className="p-16 text-center">
+                        <i className="ph ph-chalkboard-teacher text-4xl text-slate-700 block mb-3"></i>
+                        <p className="text-slate-400 font-medium">No teacher accounts yet</p>
+                        <p className="text-slate-600 text-sm mt-1">Use &ldquo;Add Teacher&rdquo; to create the first teacher account.</p>
+                      </div>
+                    ) : (
+                      <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {filteredTeachers.map((t) => (
+                          <div key={t.email} className="rounded-xl border border-slate-700/60 bg-slate-900/40 hover:bg-slate-900/70 transition-colors overflow-hidden">
+
+                            {/* Card header: avatar + info + status */}
+                            <div className="flex items-center gap-3 px-4 py-4">
+                              <div className="w-10 h-10 rounded-full bg-emerald-500/15 text-emerald-400 flex items-center justify-center font-bold border border-emerald-500/25 text-sm flex-shrink-0">
+                                {(t.name || t.email).slice(0, 2).toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-white text-sm truncate">{t.name || '—'}</div>
+                                <div className="text-[11px] text-slate-500 truncate">{t.email}</div>
+                                <div className="text-[10px] text-slate-600 mt-0.5">Last active: {t.lastLogin ? timeAgo(t.lastLogin) : 'Never'}</div>
+                              </div>
+                              <span className={`flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] uppercase font-bold border ${
+                                t.disabled
+                                  ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                  : t.lastLogin
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                  : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                              }`}>
+                                {t.disabled ? 'Suspended' : t.lastLogin ? 'Active' : 'Invited'}
+                              </span>
+                            </div>
+
+                            {/* Class scopes row */}
+                            <div className="px-4 pb-3">
+                              <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-2">Assigned Classes</div>
+                              {editClassScopesFor === t.email ? (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={editClassScopesValue}
+                                    onChange={e => setEditClassScopesValue(e.target.value)}
+                                    placeholder="4C, 4B, 6A"
+                                    autoFocus
+                                    className="flex-1 bg-slate-800 border border-emerald-500/50 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-400"
+                                  />
+                                  <button
+                                    onClick={() => handleUpdateClassScopes(t.email)}
+                                    disabled={editClassScopesSaving}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold disabled:opacity-50 transition-colors">
+                                    {editClassScopesSaving ? '...' : 'Save'}
+                                  </button>
+                                  <button
+                                    onClick={() => { setEditClassScopesFor(null); setEditClassScopesValue(''); }}
+                                    className="px-2 py-1.5 text-slate-500 hover:text-white text-xs transition-colors">✕</button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {(t.classScopes || []).length > 0 ? (
+                                    (t.classScopes || []).map(c => (
+                                      <span key={c} className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25">
+                                        {c}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="text-xs text-slate-600 italic">No classes assigned</span>
+                                  )}
+                                  {isAdmin && (
+                                    <button
+                                      onClick={() => { setEditClassScopesFor(t.email); setEditClassScopesValue((t.classScopes || []).join(', ')); }}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] text-slate-500 hover:text-emerald-400 border border-transparent hover:border-emerald-500/20 transition-all">
+                                      <i className="ph ph-pencil-simple text-xs"></i>Edit
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Password reset inline */}
+                            {resetPasswordFor === t.email && (
+                              <div className="mx-4 mb-3 p-3 rounded-lg bg-slate-800/80 border border-slate-700">
+                                <div className="text-[11px] text-slate-400 font-medium mb-2">Set new password for {t.name || t.email}</div>
+                                {resetPasswordError && (
+                                  <div className="mb-2 text-[11px] text-red-400">{resetPasswordError}</div>
+                                )}
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="password"
+                                    value={resetPasswordValue}
+                                    onChange={e => setResetPasswordValue(e.target.value)}
+                                    placeholder="New password (min. 6 chars)"
+                                    autoFocus
+                                    className="flex-1 bg-slate-950/50 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-brand-500"
+                                  />
+                                  <button
+                                    onClick={() => handleResetPassword(t.email)}
+                                    disabled={resetPasswordLoading}
+                                    className="px-3 py-1.5 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-xs font-semibold disabled:opacity-50 transition-colors">
+                                    {resetPasswordLoading ? '...' : 'Reset'}
+                                  </button>
+                                  <button
+                                    onClick={() => { setResetPasswordFor(null); setResetPasswordValue(''); setResetPasswordError(''); }}
+                                    className="px-2 py-1.5 text-slate-500 hover:text-white text-xs transition-colors">✕</button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Action buttons */}
+                            {isAdmin && (
+                              <div className="px-4 pb-4 flex items-center gap-1.5 flex-wrap border-t border-slate-800/60 pt-3">
+                                {/* Reset password */}
+                                <button
+                                  onClick={() => {
+                                    setResetPasswordFor(t.email);
+                                    setResetPasswordValue('');
+                                    setResetPasswordError('');
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-sky-400 border border-sky-500/20 rounded-lg hover:bg-sky-500/10 transition-all">
+                                  <i className="ph ph-key text-xs"></i>
+                                  Reset Password
+                                </button>
+
+                                {/* Suspend / Activate */}
+                                {teacherActionConfirm?.email === t.email && teacherActionConfirm?.action === 'suspend' ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <button onClick={() => { handleUserAction(t.email, 'suspend'); setTeacherActionConfirm(null); }}
+                                      className="px-2.5 py-1.5 text-[10px] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg hover:bg-amber-500/20">Confirm</button>
+                                    <button onClick={() => setTeacherActionConfirm(null)} className="text-[10px] text-slate-500 hover:text-white">Cancel</button>
+                                  </div>
+                                ) : teacherActionConfirm?.email === t.email && teacherActionConfirm?.action === 'unsuspend' ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <button onClick={() => { handleUserAction(t.email, 'unsuspend'); setTeacherActionConfirm(null); }}
+                                      className="px-2.5 py-1.5 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/20">Confirm</button>
+                                    <button onClick={() => setTeacherActionConfirm(null)} className="text-[10px] text-slate-500 hover:text-white">Cancel</button>
+                                  </div>
+                                ) : t.disabled ? (
+                                  <button onClick={() => setTeacherActionConfirm({ email: t.email, action: 'unsuspend' })}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500/10 transition-all">
+                                    <i className="ph ph-play text-xs"></i>Activate
+                                  </button>
+                                ) : (
+                                  <button onClick={() => setTeacherActionConfirm({ email: t.email, action: 'suspend' })}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-amber-400 border border-amber-500/20 rounded-lg hover:bg-amber-500/10 transition-all">
+                                    <i className="ph ph-pause text-xs"></i>Suspend
+                                  </button>
+                                )}
+
+                                {/* Remove */}
+                                {deleteConfirm === t.email ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <button onClick={() => handleDelete(t.email)}
+                                      className="px-2.5 py-1.5 text-[10px] font-semibold text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20">Confirm</button>
+                                    <button onClick={() => setDeleteConfirm(null)} className="text-[10px] text-slate-500 hover:text-white">Cancel</button>
+                                  </div>
+                                ) : (
+                                  <button onClick={() => setDeleteConfirm(t.email)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-semibold text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/10 transition-all">
+                                    <i className="ph ph-trash text-xs"></i>Remove
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>

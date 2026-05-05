@@ -266,6 +266,21 @@ async function handler(req, res) {
         return res.status(200).json({ ok: true, email: cleanEmail, disabled: false });
       }
 
+      // Handle password reset
+      if (patchAction === 'reset-password') {
+        const { newPassword } = req.body;
+        if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+          return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+        }
+        try {
+          const authUser = await admin.auth().getUserByEmail(cleanEmail);
+          await admin.auth().updateUser(authUser.uid, { password: newPassword });
+        } catch (err) {
+          return res.status(500).json({ error: 'Failed to reset password.' });
+        }
+        return res.status(200).json({ ok: true, email: cleanEmail });
+      }
+
       // Handle revoke — strip all custom permissions, reset to viewer
       if (patchAction === 'revoke') {
         await usersRef.doc(cleanEmail).update({ role: 'viewer', permissions: {}, classScopes: [] });
