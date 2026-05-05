@@ -17,6 +17,15 @@ const tenancy = require('../../../../lib/tenancy');
 const PENDING_WINDOW_MS = 10 * 60 * 1000;
 const MAX_DAYS = 30;
 
+function toIso(v) {
+  if (!v) return null;
+  if (typeof v === 'string') return v;
+  if (v?.toDate) {
+    try { return v.toDate().toISOString(); } catch { return null; }
+  }
+  try { return new Date(v).toISOString(); } catch { return null; }
+}
+
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
   const days = Math.max(1, Math.min(MAX_DAYS, parseInt(req.query.days || '7', 10)));
@@ -105,16 +114,59 @@ async function handler(req, res) {
     } catch {}
   }
 
+  // ── flagged releases (red card released by teacher/officer, last N days) ─
+  let flaggedReleases = [];
+  try {
+    const sinceTs = admin.firestore.Timestamp.fromMillis(sinceMs);
+    const snap = await db.collection(tenancy.pickupEventsPath(tid))
+      .where('recordedAt', '>=', sinceTs)
+      .orderBy('recordedAt', 'desc')
+      .limit(500)
+      .get();
+
+    snap.forEach((d) => {
+      const e = d.data() || {};
+      const cardState = String(e.cardState || '').toLowerCase();
+      if (cardState !== 'red') return;
+
+      const teacherRel = e.teacherRelease || null;
+      const officerRel = e.officerOverride || null;
+      if (!teacherRel && !officerRel) return;
+
+      const releasedAt = toIso(teacherRel?.at) || toIso(officerRel?.at) || toIso(e.recordedAt);
+      flaggedReleases.push({
+        id: d.id,
+        eventId: e.eventId || d.id,
+        gate: e.gate || null,
+        chaperoneName: e.chaperone?.name || null,
+        students: (e.students || []).map((s) => s.name).filter(Boolean),
+        releasedBy: teacherRel?.by || officerRel?.by || null,
+        releaseSource: teacherRel ? 'teacher' : 'officer',
+        flagged: true,
+        captureStoragePath: teacherRel?.captureStoragePath || null,
+        reviewedAt: toIso(e.reviewedAt),
+        releasedAt,
+        recordedAt: toIso(e.recordedAt),
+      });
+    });
+  } catch {
+    flaggedReleases = [];
+  }
+
+  flaggedReleases.sort((a, b) => String(b.releasedAt || '').localeCompare(String(a.releasedAt || '')));
+
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   return res.status(200).json({
     ok: true,
     tenant: tid,
     pending,
     history,
+    flaggedReleases,
     days,
     counts: {
       pending: pending.length,
       history: history.length,
+      flaggedReleases: flaggedReleases.length,
     },
   });
 }

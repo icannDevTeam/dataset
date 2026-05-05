@@ -47,6 +47,7 @@ export default function DashboardV2() {
   const [pickupData, setPickupData] = useState(null);
   const [pickupLoading, setPickupLoading] = useState(false);
   const [pickupError, setPickupError] = useState(null);
+  const [pickupAlerts, setPickupAlerts] = useState({ pending: 0, flaggedReleases: 0 });
 
   // Thumbnails
   const [thumbnails, setThumbnails] = useState({});
@@ -110,6 +111,28 @@ export default function DashboardV2() {
   useEffect(() => {
     if (module === 'pickup') fetchPickup();
   }, [module, fetchPickup]);
+
+  // Keep dashboard-level pickup alerts hot so admins see warnings even when
+  // they are on the attendance module.
+  const fetchPickupAlerts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/pickup/admin/officer-overrides-list?days=1', { credentials: 'include' });
+      if (!res.ok) return;
+      const data = await res.json();
+      setPickupAlerts({
+        pending: data?.counts?.pending || 0,
+        flaggedReleases: data?.counts?.flaggedReleases || 0,
+      });
+    } catch {
+      // Silently ignore alert polling errors; this is non-blocking UI.
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPickupAlerts();
+    const t = setInterval(fetchPickupAlerts, 15000);
+    return () => clearInterval(t);
+  }, [fetchPickupAlerts]);
 
   // Fetch student face thumbnails (once)
   useEffect(() => {
@@ -255,6 +278,38 @@ export default function DashboardV2() {
             PickupGuard
           </button>
         </div>
+
+        {(pickupAlerts.pending > 0 || pickupAlerts.flaggedReleases > 0) && (
+          <div className="relative overflow-hidden rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 animate-pulse">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <i className="ph ph-warning-diamond text-red-300 text-xl mt-0.5"></i>
+                <div>
+                  <p className="text-sm font-semibold text-red-200 tracking-wide uppercase">PickupGuard Attention Needed</p>
+                  <p className="text-sm text-red-100/90 mt-0.5">
+                    {pickupAlerts.pending > 0 && <span>{pickupAlerts.pending} waiting for release/override</span>}
+                    {pickupAlerts.pending > 0 && pickupAlerts.flaggedReleases > 0 && <span> · </span>}
+                    {pickupAlerts.flaggedReleases > 0 && <span>{pickupAlerts.flaggedReleases} red-card release{pickupAlerts.flaggedReleases > 1 ? 's' : ''} flagged for review</span>}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href="/v2/officer-overrides"
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500/20 border border-red-400/40 text-red-100 hover:bg-red-500/30"
+                >
+                  Open Review Desk
+                </a>
+                <a
+                  href="/v2/pickup-admin"
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 border border-white/20 text-slate-100 hover:bg-white/20"
+                >
+                  Open Pickup Admin
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ══ PICKUP MODULE ══ */}
         {module === 'pickup' && (

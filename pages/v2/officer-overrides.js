@@ -160,9 +160,10 @@ export default function OfficerOverridesPage() {
           <GateControlPanel gate={gate} busy={gateBusy} err={gateErr} onSet={setGateOverride} />
 
           {/* Stat strip */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
             <Stat label="Awaiting officer" value={data?.pending?.length ?? '—'} tone="amber" icon="ph-hourglass-medium" />
             <Stat label="Approved (window)" value={data?.history?.length ?? '—'} tone="emerald" icon="ph-check-circle" />
+            <Stat label="Flagged releases" value={data?.flaggedReleases?.length ?? '—'} tone="red" icon="ph-flag" />
             <Stat label="History window" value={`${days} days`} tone="slate" icon="ph-clock-counter-clockwise" />
             <Stat label="Live refresh" value={`${POLL_MS / 1000}s`} tone="brand" icon="ph-broadcast" />
           </div>
@@ -232,6 +233,66 @@ export default function OfficerOverridesPage() {
                         <td className="py-2 pr-3 text-emerald-300">{h.override?.by || '—'}</td>
                         <td className="py-2 pr-3 text-slate-400 italic max-w-md truncate">
                           {h.override?.note || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Section>
+
+          {/* Flagged releases */}
+          <Section
+            title={`Flagged Red-Card Releases (last ${days} days)`}
+            icon="ph-flag"
+            tone="red"
+            count={data?.flaggedReleases?.length ?? 0}>
+            {data?.flaggedReleases?.length === 0 && (
+              <div className="text-slate-400 text-sm py-6 text-center">
+                No flagged red-card releases in this window.
+              </div>
+            )}
+            {data?.flaggedReleases?.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-slate-400 uppercase tracking-wider">
+                    <tr className="border-b border-slate-800">
+                      <th className="text-left font-semibold py-2 pr-3">Released at</th>
+                      <th className="text-left font-semibold py-2 pr-3">Chaperone</th>
+                      <th className="text-left font-semibold py-2 pr-3">Students</th>
+                      <th className="text-left font-semibold py-2 pr-3">Gate</th>
+                      <th className="text-left font-semibold py-2 pr-3">Released by</th>
+                      <th className="text-left font-semibold py-2 pr-3">Capture</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {data.flaggedReleases.map((f) => (
+                      <tr key={f.id} className="text-slate-200">
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          <div>{fmtDateTime(f.releasedAt || f.recordedAt)}</div>
+                          <div className="text-xs text-slate-500">{fmtAge(f.releasedAt || f.recordedAt)}</div>
+                        </td>
+                        <td className="py-2 pr-3">
+                          <div className="font-medium text-red-300">{f.chaperoneName || '—'}</div>
+                        </td>
+                        <td className="py-2 pr-3 text-slate-400 max-w-sm truncate">
+                          {Array.isArray(f.students) && f.students.length > 0 ? f.students.join(', ') : '—'}
+                        </td>
+                        <td className="py-2 pr-3 text-slate-300">{f.gate || '—'}</td>
+                        <td className="py-2 pr-3">
+                          <div className="text-red-200">{f.releasedBy || '—'}</div>
+                          <div className="text-xs text-slate-500 uppercase tracking-wide">{f.releaseSource || 'unknown'}</div>
+                        </td>
+                        <td className="py-2 pr-3">
+                          {f.captureStoragePath ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-300 text-xs font-medium">
+                              <i className="ph ph-camera"></i>
+                              Captured
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-500">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
