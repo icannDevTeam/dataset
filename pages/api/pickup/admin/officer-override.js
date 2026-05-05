@@ -14,10 +14,9 @@ import admin from 'firebase-admin';
 import { withAuth } from '../../../../lib/auth-middleware';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { verifyCookie } from '../../auth/session';
-const { isTeacherEmail, classesIntersect } = require('../../../../lib/teacher-auth');
+const { runOfficerOverride } = require('../../../../lib/officer-override-core.cjs');
 const tenancy = require('../../../../lib/tenancy');
 
-const WINDOW_MS = 10 * 60 * 1000;
 const TEACHER_EMAIL_DOMAIN = (process.env.TEACHER_EMAIL_DOMAIN || 'binus.edu').toLowerCase();
 
 function readCookie(req, name) {
@@ -40,114 +39,24 @@ async function handler(req, res) {
   const db = admin.firestore();
   const tid = tenant || tenancy.getTenantId();
 
-  // Require authenticated user session for accountability.
   const sessionMarker = readCookie(req, '__session');
   const session = sessionMarker ? verifyCookie(sessionMarker) : null;
-  if (!session?.email) {
-    return res.status(401).json({ error: 'login required' });
-  }
-  const actorEmail = String(session.email).toLowerCase();
-  const userSnap = await db.collection('dashboard_users').doc(actorEmail).get();
-  if (!userSnap.exists) {
-    return res.status(403).json({ error: 'account not authorized' });
-  }
-  const user = userSnap.data() || {};
-  const actorRole = user.role || 'viewer';
-  if (!['owner', 'admin', 'teacher'].includes(actorRole)) {
-    return res.status(403).json({ error: 'insufficient role for pickup approval' });
-  }
-  if (user.disabled) {
-    return res.status(403).json({ error: 'account disabled' });
-  }
-  if (actorRole === 'teacher' && !isTeacherEmail(actorEmail, TEACHER_EMAIL_DOMAIN)) {
-    return res.status(403).json({ error: `teacher login must use @${TEACHER_EMAIL_DOMAIN}` });
-  }
 
-  // Query by overrideCode only (single-field index — no composite index needed).
-  // Filter the time window in JS to avoid requiring a composite Firestore index.
-  const cutoffMs = Date.now() - WINDOW_MS;
-  const snap = await db.collection(tenancy.pickupEventsPath(tid))
-    .where('overrideCode', '==', String(code))
-    .limit(10).get();
-
-  const recentDocs = snap.docs.filter((d) => {
-    const ts = d.data().recordedAt;
-    const ms = ts?.toMillis ? ts.toMillis() : (ts?.seconds ? ts.seconds * 1000 : 0);
-    return ms > cutoffMs;
-  });
-  if (recentDocs.length === 0) {
-    return res.status(404).json({
-      error: 'no matching event in the last 10 minutes',
-    });
-  }
-  // Pick the most recent match
-  recentDocs.sort((a, b) => {
-    const ta = a.data().recordedAt;
-    const tb = b.data().recordedAt;
-    const ma = ta?.toMillis ? ta.toMillis() : (ta?.seconds ? ta.seconds * 1000 : 0);
-    const mb = tb?.toMillis ? tb.toMillis() : (tb?.seconds ? tb.seconds * 1000 : 0);
-    return mb - ma;
+  const result = await runOfficerOverride({
+    session,
+    code,
+    officer,
+    note,
+    db,
+    tid,
+    pickupEventsPath: tenancy.pickupEventsPath,
+    securityIncidentsPath: tenancy.securityIncidentsPath,
+    teacherDomain: TEACHER_EMAIL_DOMAIN,
   });
 
-  const doc = recentDocs[0];
-  const ev = doc.data();
-
-  // Teacher can only validate events for their assigned classes.
-  if (actorRole === 'teacher') {
-    const teacherClasses = Array.isArray(user.classScopes) ? user.classScopes : [];
-    if (teacherClasses.length === 0) {
-      return res.status(403).json({ error: 'teacher has no class scope assigned' });
-    }
-    const eventClasses = (ev.students || []).map((s) => s.homeroom);
-    const allowed = classesIntersect(teacherClasses, eventClasses);
-    if (!allowed) {
-      return res.status(403).json({ error: 'event not in your assigned class scope' });
-    }
-  }
-
-  if (ev.officerOverride) {
-    return res.status(409).json({
-      error: 'event already overridden',
-      by: ev.officerOverride.by,
-    });
-  }
-
-  const actorDisplay = actorRole === 'teacher'
-    ? (user.name || actorEmail)
-    : (officer && String(officer).trim().length >= 2 ? String(officer).trim() : (user.name || actorEmail));
-
-  const override = {
-    by: actorDisplay,
-    byEmail: actorEmail,
-    byRole: actorRole,
-    classScopes: Array.isArray(user.classScopes) ? user.classScopes : [],
-    note: note ? String(note).slice(0, 200) : null,
-    decision: 'approved',
-    at: new Date().toISOString(),
-  };
-  await doc.ref.set({ officerOverride: override }, { merge: true });
-
-  // Append a security_incidents resolution note for audit
-  try {
-    await db.collection(tenancy.securityIncidentsPath(tid)).add({
-      kind: 'officer_override',
-      eventId: ev.eventId || doc.id,
-      employeeNo: ev.employeeNo,
-      gate: ev.gate,
-      chaperoneName: ev.chaperone?.name,
-      override,
-      createdAt: new Date().toISOString(),
-      resolved: true,
-    });
-  } catch {}
-
-  return res.status(200).json({
-    ok: true,
-    eventId: ev.eventId || doc.id,
-    chaperone: ev.chaperone?.name,
-    gate: ev.gate,
-    decision: ev.decision,
-  });
+  // Strip internal test field before sending
+  const { _override: _, ...responseBody } = result.body;
+  return res.status(result.statusCode).json(responseBody);
 }
 
 export default withAuth(handler, { methods: ['POST'] });
