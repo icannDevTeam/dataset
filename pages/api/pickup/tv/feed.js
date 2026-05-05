@@ -199,7 +199,7 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
 
     // Read manual gate override from tenant settings (non-blocking: ignore errors)
-    let gateOverride = null;
+    let manualGateOverride = null;
     try {
       const settingsSnap = await db.doc(tenancy.pickupSettingsDoc(tid)).get();
       if (settingsSnap.exists) {
@@ -207,13 +207,13 @@ export default async function handler(req, res) {
         const perProfile = settings.gateOverrides && profileId
           ? settings.gateOverrides[profileId]
           : null;
-        gateOverride = perProfile || settings.gateOverride || null;
+        manualGateOverride = perProfile || settings.gateOverride || null;
       }
     } catch {}
 
     const scheduledGate = profile ? kp.gateStatus(profile, new Date()) : { configured: false, open: true };
-    const gateStatus = gateOverride
-      ? { ...scheduledGate, open: gateOverride === 'open', manualOverride: gateOverride }
+    const gateStatus = manualGateOverride
+      ? { ...scheduledGate, open: manualGateOverride === 'open', manualOverride: manualGateOverride }
       : { ...scheduledGate, manualOverride: null };
 
     return res.status(200).json({
