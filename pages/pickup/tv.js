@@ -103,7 +103,7 @@ function computeGateTimer(clock, gateStatus) {
 
 export default function PickupTV() {
   const router = useRouter();
-  const { token, gate, tenant, profile: profileId, mode: modeQuery } = router.query;
+  const { token, gate, tenant, profile: profileId, mode: modeQuery, dt: dtParam } = router.query;
   const [mounted, setMounted] = useState(false);
   const [feed, setFeed] = useState({ events: [], now: null, profile: null });
   const [err, setErr] = useState(null);
@@ -130,11 +130,17 @@ export default function PickupTV() {
     // Legacy compat — explicit ?token= URL still works (skip device flow)
     if (token) { setBootChecked(true); return; }
     const stored = window.localStorage.getItem(LS_TOKEN);
-    if (!stored) { setBootChecked(true); return; }
+    // ?dt=<deviceToken> seeds the device token from URL (for dedicated TV provisioning)
+    const seedToken = dtParam || null;
+    if (seedToken && seedToken !== stored) {
+      window.localStorage.setItem(LS_TOKEN, seedToken);
+    }
+    const effective = seedToken || stored;
+    if (!effective) { setBootChecked(true); return; }
     (async () => {
       try {
         const r = await fetch('/api/pickup/tv/whoami', {
-          headers: { 'x-tv-device-token': stored },
+          headers: { 'x-tv-device-token': effective },
         });
         const j = await r.json();
         if (!r.ok) {
@@ -142,7 +148,7 @@ export default function PickupTV() {
           window.localStorage.removeItem(LS_TOKEN);
           setBootError(j.error || 'token rejected');
         } else {
-          setDeviceToken(stored);
+          setDeviceToken(effective);
         }
       } catch (e) {
         setBootError(e.message);
