@@ -1,6 +1,6 @@
 import '../styles/globals.css';
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
 import { canAccessPath } from '../lib/permissions';
 
@@ -20,10 +20,19 @@ function isPublicRoute(pathname) {
   return PUBLIC_PATHNAME_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
+function normalizeRedirectPath(path) {
+  const value = String(path || '').trim();
+  if (!value.startsWith('/')) return '/v2';
+  const [pathname] = value.split('?');
+  if (!pathname || pathname === '/login') return '/v2';
+  return pathname;
+}
+
 function AuthGate({ Component, pageProps }) {
   const router = useRouter();
-  const { authorized, role, permissions, loading, sessionWarning, extendSession } = useAuth();
+  const { authorized, permissions, loading, sessionWarning, extendSession } = useAuth();
   const [accessDenied, setAccessDenied] = useState(false);
+  const denyRedirectTimerRef = useRef(null);
 
   useEffect(() => {
     if (!loading && authorized && permissions) {
@@ -33,12 +42,40 @@ function AuthGate({ Component, pageProps }) {
         setAccessDenied(false);
       } else if (!canAccessPath(permissions, path)) {
         setAccessDenied(true);
-        setTimeout(() => router.replace('/v2'), 2000);
+        if (!denyRedirectTimerRef.current) {
+          denyRedirectTimerRef.current = setTimeout(() => {
+            denyRedirectTimerRef.current = null;
+            router.replace('/v2');
+          }, 2000);
+        }
       } else {
         setAccessDenied(false);
       }
     }
-  }, [loading, authorized, permissions, router.pathname]);
+  }, [loading, authorized, permissions, router.pathname, router]);
+
+  useEffect(() => {
+    return () => {
+      if (denyRedirectTimerRef.current) {
+        clearTimeout(denyRedirectTimerRef.current);
+        denyRedirectTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    // Redirect unauthenticated users once from an effect (never during render),
+    // preventing history.replaceState flooding in strict/dev render cycles.
+    if (loading) return;
+    if (authorized) return;
+    if (isPublicRoute(router.pathname)) return;
+
+    const from = normalizeRedirectPath(router.pathname || router.asPath);
+    const target = `/login?from=${encodeURIComponent(from)}`;
+    if (router.asPath !== target) {
+      router.replace(target);
+    }
+  }, [loading, authorized, router]);
 
   // Public pages: render without auth check
   if (isPublicRoute(router.pathname)) {
@@ -60,9 +97,6 @@ function AuthGate({ Component, pageProps }) {
 
   // Not authorized → redirect to login
   if (!authorized) {
-    if (typeof window !== 'undefined') {
-      router.replace('/login');
-    }
     return null;
   }
 

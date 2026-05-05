@@ -3,6 +3,14 @@ import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/AuthContext';
 
+function normalizeRedirectTarget(path) {
+  const value = String(path || '').trim();
+  if (!value.startsWith('/')) return '/v2';
+  const [pathname] = value.split('?');
+  if (!pathname || pathname === '/login') return '/v2';
+  return pathname;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { user, authorized, loading, error, signIn } = useAuth();
@@ -11,7 +19,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const redirectTo = router.query.from || '/v2';
+  const redirectTo = normalizeRedirectTarget(router.query.from || '/v2');
   const fromPath = String(router.query.from || '');
   const teacherMode = fromPath.startsWith('/pickup/teacher') || String(router.query.mode || '').toLowerCase() === 'teacher';
   const sessionExpired = router.query.expired === '1';

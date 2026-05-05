@@ -4,7 +4,6 @@ import { useRouter } from 'next/router';
 import { signOut as fbSignOut } from '../../lib/firebase-client';
 
 const POLL_MS = 2000;
-const AUTO_RELEASE_MS = 3000;
 const BINUS_MAROON = '#8B1538';
 const BINUS_GOLD = '#FCBF11';
 
@@ -110,57 +109,70 @@ function Avatar({ src, name, size = 72, ring = '#334155' }) {
   );
 }
 
-function StudentCard({ student, tone }) {
+function StudentTile({ s }) {
+  const [imgErr, setImgErr] = useState(false);
+  const initials = (s.name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        borderRadius: 12,
-        border: '1px solid rgba(255,255,255,0.1)',
-        background: 'rgba(255,255,255,0.04)',
-        padding: '8px 10px',
-      }}
-    >
-      <Avatar src={student.photoUrl} name={student.name} size={44} ring={tone.border} />
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      background: '#fff7ea', border: '1.5px solid #FFD86A',
+      borderRadius: 14, padding: '7px 14px 7px 12px',
+      position: 'relative', overflow: 'hidden',
+    }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 5, background: '#22C55E' }} />
+      <div style={{
+        width: 50, height: 50, borderRadius: '50%', flexShrink: 0,
+        background: '#fde68a', overflow: 'hidden',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        border: '2.5px solid white', boxShadow: '0 2px 6px rgba(139,21,56,0.18)',
+        color: '#8B1538', fontWeight: 800, fontSize: 16, marginLeft: 4,
+      }}>
+        {s.photoUrl && !imgErr
+          ? <img src={s.photoUrl} alt={s.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={() => setImgErr(true)} />
+          : initials}
+      </div>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#E2E8F0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {student.name || '--'}
-        </div>
-        <div style={{ fontSize: 11, color: BINUS_GOLD, fontWeight: 700, letterSpacing: 0.5 }}>
-          {student.homeroom || student.class || '--'}
-        </div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#1a0710', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{s.name || '--'}</div>
+        <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>{s.homeroom || '--'}</div>
       </div>
     </div>
   );
 }
 
-function QueueItem({ ev, active, onPick }) {
+function QueueRailCard({ ev, onPick }) {
   const c = normalizeCard(ev.cardState);
   const tone = STATE_THEME[c];
+  const bandBg = c === 'green'
+    ? 'linear-gradient(90deg, #15803d, #22c55e)'
+    : c === 'red'
+      ? 'linear-gradient(90deg, #991b1b, #ef4444)'
+      : 'linear-gradient(90deg, #b45309, #fbbf24)';
+  const bandColor = c === 'yellow' ? '#2a1500' : 'white';
   return (
     <button
       onClick={() => onPick(ev.id)}
       style={{
-        width: '100%',
+        width: 220,
+        minWidth: 220,
         textAlign: 'left',
-        borderRadius: 12,
-        border: `1px solid ${active ? tone.border : 'rgba(255,255,255,0.1)'}`,
-        background: active ? `${tone.bg}` : 'rgba(255,255,255,0.03)',
-        padding: '10px 12px',
-        color: '#E2E8F0',
+        borderRadius: 14,
+        border: '2px solid #f1e7d7',
+        background: '#fffaf2',
+        padding: 0,
         cursor: 'pointer',
+        overflow: 'hidden',
+        boxShadow: '0 3px 12px rgba(0,0,0,0.12)',
+        flexShrink: 0,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ width: 8, height: 8, borderRadius: 999, background: tone.border, flexShrink: 0 }} />
-        <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <div style={{ padding: '7px 12px', background: bandBg, color: bandColor, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 14 }}>{tone.icon}</span>
+        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.8, textTransform: 'uppercase', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {ev.chaperone?.name || '--'}
         </span>
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94A3B8' }}>{timeAgo(ev.recordedAt)}</span>
+        <span style={{ fontSize: 10, opacity: 0.9, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{timeAgo(ev.recordedAt)}</span>
       </div>
-      <div style={{ marginTop: 5, fontSize: 11, color: '#94A3B8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <div style={{ padding: '8px 12px', fontSize: 11, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {(ev.students || []).map((s) => s.name).filter(Boolean).join(', ') || ev.gate || '--'}
       </div>
     </button>
@@ -409,16 +421,11 @@ export default function TeacherPickup() {
   const [err, setErr] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [busyAction, setBusyAction] = useState(false);
-  const [captureOpen, setCaptureOpen] = useState(false);
   const [captureErr, setCaptureErr] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [recentActions, setRecentActions] = useState([]);
-  const [autoReleaseCountdown, setAutoReleaseCountdown] = useState(AUTO_RELEASE_MS / 1000);
 
   const pollRef = useRef(null);
-  const autoTimerRef = useRef(null);
-  const autoTickRef = useRef(null);
-  const autoReleasedRef = useRef(new Set());
   const touchStartXRef = useRef(null);
 
   useEffect(() => { setMounted(true); }, []);
@@ -453,11 +460,19 @@ export default function TeacherPickup() {
   const pendingEvents = useMemo(() => {
     return (feed.events || [])
       .filter((ev) => {
-        if (ev.teacherRelease || ev.officerOverride) return false;
+        if (ev.officerOverride) return false;
+        if (ev.teacherRelease?.action === 'hold') return false; // goes to hold tray
+        if (ev.teacherRelease) return false;
         const c = normalizeCard(ev.cardState);
         return c === 'green' || c === 'yellow' || c === 'red';
       })
       .sort(byUrgency);
+  }, [feed.events]);
+
+  const heldEvents = useMemo(() => {
+    return (feed.events || [])
+      .filter((ev) => ev.teacherRelease?.action === 'hold' && !ev.officerOverride)
+      .sort((a, b) => new Date(b.recordedAt || 0) - new Date(a.recordedAt || 0));
   }, [feed.events]);
 
   const releasedTodayCount = useMemo(() => {
@@ -473,6 +488,24 @@ export default function TeacherPickup() {
     const selected = pendingEvents.find((ev) => ev.id === activeId);
     return selected || pendingEvents[0];
   }, [pendingEvents, activeId]);
+
+  const spotlightCards = useMemo(() => {
+    if (!pendingEvents.length) return [];
+    const list = [...pendingEvents];
+    if (activeEvent) {
+      const idx = list.findIndex((ev) => ev.id === activeEvent.id);
+      if (idx > 0) {
+        const [picked] = list.splice(idx, 1);
+        list.unshift(picked);
+      }
+    }
+    return list.slice(0, 4);
+  }, [pendingEvents, activeEvent]);
+
+  const queueEvents = useMemo(() => {
+    const spotlightIds = new Set(spotlightCards.map((ev) => ev.id));
+    return pendingEvents.filter((ev) => !spotlightIds.has(ev.id)).slice(0, 12);
+  }, [pendingEvents, spotlightCards]);
 
   useEffect(() => {
     if (activeEvent && activeEvent.id !== activeId) {
@@ -523,75 +556,6 @@ export default function TeacherPickup() {
     }
   }, [busyAction, fetchFeed, pushHistory]);
 
-  const onHold = useCallback(async () => {
-    if (!activeEvent) return;
-    await releaseAction(activeEvent, 'hold');
-  }, [activeEvent, releaseAction]);
-
-  const onReleaseYellow = useCallback(async () => {
-    if (!activeEvent) return;
-    await releaseAction(activeEvent, 'release');
-  }, [activeEvent, releaseAction]);
-
-  const onConfirmCapture = useCallback(async (imageData) => {
-    if (!activeEvent) return;
-    setBusyAction(true);
-    setCaptureErr('');
-    try {
-      const up = await fetch('/api/pickup/teacher/upload-capture', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId: activeEvent.id, imageData }),
-      });
-      const uj = await up.json();
-      if (!up.ok) throw new Error(uj.error || 'Capture upload failed');
-
-      const ok = await releaseAction(activeEvent, 'release', uj.storagePath);
-      if (ok) {
-        setCaptureOpen(false);
-      }
-    } catch (e) {
-      setCaptureErr(e.message || 'Capture flow failed');
-      setBusyAction(false);
-    }
-  }, [activeEvent, releaseAction]);
-
-  useEffect(() => {
-    if (!activeEvent) return;
-    const c = normalizeCard(activeEvent.cardState);
-    if (c !== 'green') {
-      if (autoTimerRef.current) clearTimeout(autoTimerRef.current);
-      if (autoTickRef.current) clearInterval(autoTickRef.current);
-      setAutoReleaseCountdown(AUTO_RELEASE_MS / 1000);
-      return;
-    }
-    if (busyAction) return;
-    if (autoReleasedRef.current.has(activeEvent.id)) return;
-
-    setAutoReleaseCountdown(AUTO_RELEASE_MS / 1000);
-    autoTickRef.current = setInterval(() => {
-      setAutoReleaseCountdown((prev) => Math.max(0, prev - 1));
-    }, 1000);
-
-    autoTimerRef.current = setTimeout(async () => {
-      autoReleasedRef.current.add(activeEvent.id);
-      await releaseAction(activeEvent, 'release');
-    }, AUTO_RELEASE_MS);
-
-    return () => {
-      if (autoTimerRef.current) clearTimeout(autoTimerRef.current);
-      if (autoTickRef.current) clearInterval(autoTickRef.current);
-    };
-  }, [activeEvent, busyAction, releaseAction]);
-
-  useEffect(() => {
-    return () => {
-      if (autoTimerRef.current) clearTimeout(autoTimerRef.current);
-      if (autoTickRef.current) clearInterval(autoTickRef.current);
-    };
-  }, []);
-
   const handleSignOut = async () => {
     try {
       await fetch('/api/auth/session', { method: 'DELETE', credentials: 'include' });
@@ -618,9 +582,6 @@ export default function TeacherPickup() {
 
   if (!mounted) return null;
 
-  const activeCardState = activeEvent ? normalizeCard(activeEvent.cardState) : 'yellow';
-  const tone = STATE_THEME[activeCardState] || STATE_THEME.yellow;
-
   return (
     <>
       <Head>
@@ -642,10 +603,10 @@ export default function TeacherPickup() {
         <HistoryDrawer open={historyOpen} items={recentActions} onClose={() => setHistoryOpen(false)} />
 
         <CaptureModal
-          open={captureOpen}
+          open={false}
           event={activeEvent}
-          onClose={() => setCaptureOpen(false)}
-          onConfirm={onConfirmCapture}
+          onClose={() => {}}
+          onConfirm={() => {}}
           busy={busyAction}
           error={captureErr}
         />
@@ -738,107 +699,282 @@ export default function TeacherPickup() {
               <div style={{ marginTop: 6, fontSize: 13, color: '#86EFAC' }}>No pending pickup events in your classes.</div>
             </div>
           ) : (
-            <div
-              style={{
-                borderRadius: 16,
-                border: `2px solid ${tone.border}`,
-                background: tone.bg,
-                boxShadow: `0 0 22px ${tone.border}22`,
-                overflow: 'hidden',
-              }}
-            >
-              <div style={{
-                padding: '11px 12px',
-                background: `${tone.border}22`,
-                borderBottom: `1px solid ${tone.border}66`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-              }}>
-                <div style={{ width: 26, height: 26, borderRadius: 99, border: `2px solid ${tone.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: tone.border }}>
-                  {tone.icon}
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 800, color: tone.border, letterSpacing: 0.8, textTransform: 'uppercase' }}>{tone.label}</div>
-                <div style={{ marginLeft: 'auto', fontSize: 11, color: '#CBD5E1' }}>
-                  {fmtTime(activeEvent.recordedAt)} · {timeAgo(activeEvent.recordedAt)} · {activeEvent.gate || '--'}
-                </div>
+            <>
+              <div
+                style={{
+                  borderRadius: 14,
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'linear-gradient(170deg, rgba(15,23,42,0.9), rgba(2,6,23,0.82))',
+                  padding: '10px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div style={{ fontSize: 11, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Live Decision Desk</div>
+                <div style={{ fontSize: 12, color: '#E2E8F0', fontWeight: 700 }}>{pendingEvents.length} pending</div>
+                <div style={{ marginLeft: 'auto', fontSize: 11, color: '#94A3B8' }}>Tap any card to focus and act</div>
               </div>
 
-              <div style={{ padding: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Avatar src={activeEvent.chaperone?.photoUrl} name={activeEvent.chaperone?.name} size={72} ring={tone.border} />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 11, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>Chaperone</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: '#E2E8F0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {activeEvent.chaperone?.name || '--'}
-                    </div>
-                  </div>
-                </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, alignItems: 'stretch' }}>
+                {spotlightCards.map((ev) => {
+                  const cardState = normalizeCard(ev.cardState);
+                  const cardTone = STATE_THEME[cardState] || STATE_THEME.yellow;
+                  const isActive = ev.id === activeEvent?.id;
+                  const students = ev.students || [];
+                  const bandBg = cardState === 'green'
+                    ? 'linear-gradient(90deg, #15803d, #22c55e)'
+                    : cardState === 'red'
+                      ? 'linear-gradient(90deg, #991b1b, #ef4444)'
+                      : 'linear-gradient(90deg, #b45309, #fbbf24)';
+                  const bandColor = cardState === 'yellow' ? '#2a1500' : 'white';
 
-                <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
-                  {(activeEvent.students || []).map((s, idx) => (
-                    <StudentCard key={idx} student={s} tone={tone} />
-                  ))}
-                </div>
-
-                {activeCardState === 'green' && (
-                  <div style={{ marginTop: 12, borderRadius: 12, border: '1px solid rgba(34,197,94,0.45)', background: 'rgba(34,197,94,0.14)', padding: '10px 12px', color: '#BBF7D0', fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span>Auto-releasing in {autoReleaseCountdown}s...</span>
-                    <button onClick={onHold} disabled={busyAction}
-                      style={{ border: '1px solid rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.18)', color: '#FDE68A', borderRadius: 10, padding: '8px 12px', fontWeight: 700, cursor: 'pointer' }}
+                  return (
+                    <button
+                      key={ev.id}
+                      onClick={() => setActiveId(ev.id)}
+                      style={{
+                        textAlign: 'left',
+                        borderRadius: 18,
+                        border: `2.5px solid ${isActive ? cardTone.border : '#f1e7d7'}`,
+                        background: '#fffaf2',
+                        boxShadow: isActive
+                          ? `0 8px 32px ${cardTone.border}55, 0 2px 0 ${cardTone.border}66`
+                          : '0 4px 18px rgba(0,0,0,0.14)',
+                        overflow: 'hidden',
+                        padding: 0,
+                        cursor: 'pointer',
+                        transition: 'box-shadow 0.15s ease, border-color 0.15s ease',
+                      }}
                     >
-                      Hold
-                    </button>
-                  </div>
-                )}
+                      {/* Colored band header — matches TV .pc-band */}
+                      <div style={{
+                        padding: '11px 16px',
+                        background: bandBg,
+                        color: bandColor,
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        fontWeight: 800, letterSpacing: 1.2, fontSize: 13,
+                      }}>
+                        <span style={{ fontSize: 18 }}>{cardTone.icon}</span>
+                        <span style={{ textTransform: 'uppercase', letterSpacing: 1.5 }}>{cardTone.label}</span>
+                        <span style={{ marginLeft: 'auto', fontWeight: 700, fontSize: 11, opacity: 0.9, fontVariantNumeric: 'tabular-nums' }}>{fmtTime(ev.recordedAt)}</span>
+                        {isActive && (
+                          <span style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 99, padding: '2px 9px', fontSize: 10, fontWeight: 700, letterSpacing: 0.6 }}>FOCUSED</span>
+                        )}
+                      </div>
 
-                {activeCardState === 'yellow' && (
-                  <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <button onClick={onReleaseYellow} disabled={busyAction}
-                      style={{ height: 62, borderRadius: 12, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.2)', color: '#DCFCE7', fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
-                      {busyAction ? 'Working...' : 'Release'}
-                    </button>
-                    <button onClick={onHold} disabled={busyAction}
-                      style={{ height: 62, borderRadius: 12, border: '1px solid rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.2)', color: '#FDE68A', fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
-                      Hold
-                    </button>
-                  </div>
-                )}
+                      {/* Card body */}
+                      <div style={{ padding: '14px 16px 12px' }}>
+                        {/* Chaperone row — large photo like TV */}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                          <div style={{
+                            width: 96, height: 96, flexShrink: 0, borderRadius: 14,
+                            overflow: 'hidden', border: `4px solid ${BINUS_GOLD}`,
+                            background: '#f3e9d6', boxShadow: '0 4px 16px rgba(139,21,56,0.22)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            {ev.chaperone?.photoUrl
+                              ? <img src={ev.chaperone.photoUrl} alt={ev.chaperone?.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              : <span style={{ fontSize: 44, color: 'rgba(139,21,56,0.3)', lineHeight: 1 }}>👤</span>}
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1, paddingTop: 2 }}>
+                            <div style={{ fontSize: 22, fontWeight: 800, color: '#8B1538', lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {ev.chaperone?.name || 'Unknown'}
+                            </div>
+                            <div style={{ marginTop: 6 }}>
+                              <span style={{
+                                display: 'inline-block',
+                                background: BINUS_GOLD, color: '#5D0E27',
+                                fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5,
+                                padding: '3px 11px', borderRadius: 999,
+                              }}>
+                                {ev.chaperone?.relationship || ev.chaperone?.relation || 'Pickup'}
+                              </span>
+                            </div>
+                            <div style={{ marginTop: 7, fontSize: 12, color: '#64748b', fontWeight: 600 }}>
+                              {ev.gate || 'Main Gate'} · {fmtTime(ev.recordedAt)}
+                            </div>
+                          </div>
+                        </div>
 
-                {activeCardState === 'red' && (
-                  <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <button onClick={() => { setCaptureErr(''); setCaptureOpen(true); }} disabled={busyAction}
-                      style={{ height: 62, borderRadius: 12, border: '1px solid rgba(239,68,68,0.55)', background: 'rgba(239,68,68,0.24)', color: '#FECACA', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
-                      Capture & Release
-                    </button>
-                    <button onClick={onHold} disabled={busyAction}
-                      style={{ height: 62, borderRadius: 12, border: '1px solid rgba(245,158,11,0.4)', background: 'rgba(245,158,11,0.2)', color: '#FDE68A', fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
-                      Hold
-                    </button>
-                  </div>
-                )}
+                        {/* Student tiles — matches TV .pc-student grid */}
+                        {students.length > 0 && (
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 }}>
+                              Children ({students.length})
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 8 }}>
+                              {students.slice(0, 4).map((s, idx) => (
+                                <StudentTile key={`${ev.id}-${idx}`} s={s} />
+                              ))}
+                              {students.length > 4 && (
+                                <div style={{
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  background: '#fef3c7', border: '1.5px solid #FFD86A', borderRadius: 14,
+                                  padding: '10px 14px', color: '#5D0E27', fontWeight: 800, fontSize: 14,
+                                }}>
+                                  +{students.length - 4} more
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {students.length === 0 && (
+                          <div style={{ marginTop: 14, padding: '12px 0', color: '#94a3b8', fontSize: 13, fontStyle: 'italic', textAlign: 'center' }}>
+                            No authorised students
+                          </div>
+                        )}
 
-                {captureErr && (
-                  <div style={{ marginTop: 10, fontSize: 12, color: '#FCA5A5' }}>{captureErr}</div>
-                )}
+                        {/* Action buttons */}
+                        {cardState === 'green' && (
+                          <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <button onClick={(e) => { e.stopPropagation(); setActiveId(ev.id); releaseAction(ev, 'release'); }} disabled={busyAction}
+                              style={{ height: 48, borderRadius: 12, border: 'none', background: 'linear-gradient(90deg, #15803d, #22c55e)', color: 'white', fontWeight: 800, fontSize: 14, cursor: 'pointer', boxShadow: '0 3px 10px rgba(21,128,61,0.35)' }}>
+                              ✓ Release
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); setActiveId(ev.id); releaseAction(ev, 'hold'); }} disabled={busyAction}
+                              style={{ height: 48, borderRadius: 12, border: '2px solid #FCBF11', background: '#fffdf0', color: '#5D0E27', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                              ⏸ Hold
+                            </button>
+                          </div>
+                        )}
+
+                        {cardState === 'yellow' && (
+                          <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <button onClick={(e) => { e.stopPropagation(); setActiveId(ev.id); releaseAction(ev, 'release'); }} disabled={busyAction}
+                              style={{ height: 48, borderRadius: 12, border: 'none', background: 'linear-gradient(90deg, #15803d, #22c55e)', color: 'white', fontWeight: 800, fontSize: 14, cursor: 'pointer', boxShadow: '0 3px 10px rgba(21,128,61,0.35)' }}>
+                              ✓ Release
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); setActiveId(ev.id); releaseAction(ev, 'hold'); }} disabled={busyAction}
+                              style={{ height: 48, borderRadius: 12, border: '2px solid #FCBF11', background: '#fffdf0', color: '#5D0E27', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                              ⏸ Hold
+                            </button>
+                          </div>
+                        )}
+
+                        {cardState === 'red' && (
+                          <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <button onClick={(e) => { e.stopPropagation(); setActiveId(ev.id); releaseAction(ev, 'escalate'); }} disabled={busyAction}
+                              style={{ height: 48, borderRadius: 12, border: 'none', background: 'linear-gradient(90deg, #991b1b, #ef4444)', color: 'white', fontWeight: 800, fontSize: 12, cursor: 'pointer', boxShadow: '0 3px 10px rgba(153,27,27,0.45)' }}>
+                              🚨 Escalate to Security
+                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); setActiveId(ev.id); releaseAction(ev, 'hold'); }} disabled={busyAction}
+                              style={{ height: 48, borderRadius: 12, border: '2px solid #FCBF11', background: '#fffdf0', color: '#5D0E27', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+                              ⏸ Hold
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            </div>
-          )}
 
-          {pendingEvents.length > 1 && (
-            <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', padding: 10 }}>
-              <div style={{ color: '#94A3B8', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-                Queue
-              </div>
-              <div style={{ display: 'grid', gap: 7 }}>
-                {pendingEvents
-                  .filter((ev) => ev.id !== activeEvent?.id)
-                  .slice(0, 8)
-                  .map((ev) => (
-                    <QueueItem key={ev.id} ev={ev} active={ev.id === activeEvent?.id} onPick={setActiveId} />
-                  ))}
-              </div>
-            </div>
+              {queueEvents.length > 0 && (
+                <div style={{ borderRadius: 14, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', padding: 10 }}>
+                  <div style={{ color: '#94A3B8', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                    Queue Lane
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+                    {queueEvents.map((ev) => (
+                      <QueueRailCard key={ev.id} ev={ev} onPick={setActiveId} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Hold Tray ─────────────────────────────────────────── */}
+              {heldEvents.length > 0 && (
+                <div style={{
+                  borderRadius: 16,
+                  border: '2.5px solid #FCBF11',
+                  background: '#fffdf0',
+                  padding: '12px 14px',
+                  boxShadow: '0 4px 18px rgba(252,191,17,0.18)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <span style={{ fontSize: 16 }}>⏸</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: '#92400e', textTransform: 'uppercase', letterSpacing: 1.5 }}>On Hold ({heldEvents.length})</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#a16207' }}>Tap a card to review &amp; release</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+                    {heldEvents.map((ev) => {
+                      const cardState = normalizeCard(ev.cardState);
+                      const bandBg = cardState === 'green'
+                        ? 'linear-gradient(90deg, #15803d, #22c55e)'
+                        : cardState === 'red'
+                          ? 'linear-gradient(90deg, #991b1b, #ef4444)'
+                          : 'linear-gradient(90deg, #b45309, #fbbf24)';
+                      const bandColor = cardState === 'yellow' ? '#2a1500' : 'white';
+                      const students = ev.students || [];
+                      const isActive = ev.id === activeEvent?.id;
+                      return (
+                        <div key={ev.id} style={{
+                          borderRadius: 14,
+                          border: `2px solid ${isActive ? '#FCBF11' : 'rgba(252,191,17,0.4)'}`,
+                          background: isActive ? '#fffbe6' : 'white',
+                          overflow: 'hidden',
+                          boxShadow: isActive ? '0 4px 16px rgba(252,191,17,0.4)' : '0 2px 8px rgba(0,0,0,0.08)',
+                          transition: 'box-shadow 0.15s',
+                        }}>
+                          {/* Mini band */}
+                          <div style={{ padding: '7px 12px', background: bandBg, color: bandColor, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 13 }}>{STATE_THEME[cardState]?.icon}</span>
+                            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.8, textTransform: 'uppercase', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {ev.chaperone?.name || '--'}
+                            </span>
+                            <span style={{ fontSize: 10, opacity: 0.85, flexShrink: 0 }}>{fmtTime(ev.recordedAt)}</span>
+                          </div>
+                          {/* Body */}
+                          <div style={{ padding: '10px 12px' }}>
+                            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>
+                              {students.map((s) => s.name).filter(Boolean).join(', ') || 'No students'}
+                            </div>
+                            {/* Student photo row */}
+                            {students.length > 0 && (
+                              <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+                                {students.slice(0, 3).map((s, i) => {
+                                  const initials = (s.name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+                                  return (
+                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#fff7ea', border: '1.5px solid #FFD86A', borderRadius: 20, padding: '3px 8px 3px 3px' }}>
+                                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#fde68a', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: '#8B1538', fontWeight: 800, fontSize: 11 }}>
+                                        {s.photoUrl
+                                          ? <img src={s.photoUrl} alt={s.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                          : initials}
+                                      </div>
+                                      <span style={{ fontSize: 11, fontWeight: 600, color: '#1a0710' }}>{s.name?.split(' ')[0]}</span>
+                                    </div>
+                                  );
+                                })}
+                                {students.length > 3 && <span style={{ fontSize: 11, color: '#64748b', alignSelf: 'center' }}>+{students.length - 3}</span>}
+                              </div>
+                            )}
+                            <button
+                              onClick={() => { setActiveId(ev.id); releaseAction(ev, 'release'); }}
+                              disabled={busyAction}
+                              style={{
+                                width: '100%', height: 40, borderRadius: 10,
+                                border: 'none',
+                                background: 'linear-gradient(90deg, #15803d, #22c55e)',
+                                color: 'white', fontWeight: 800, fontSize: 13,
+                                cursor: 'pointer', boxShadow: '0 3px 8px rgba(21,128,61,0.3)',
+                              }}
+                            >
+                              ✓ Release
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {captureErr && (
+                <div style={{ marginTop: 2, fontSize: 12, color: '#FCA5A5' }}>{captureErr}</div>
+              )}
+            </>
           )}
 
           {lastUpdated && (

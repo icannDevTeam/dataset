@@ -34,13 +34,9 @@ export async function middleware(request) {
 
   // Skip public pages
   if (PUBLIC_PATHS.includes(pathname)) {
-    // If user is already authenticated, redirect away from login
-    const session = request.cookies.get('__session');
-    if (session?.value) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/v2';
-      return NextResponse.redirect(url);
-    }
+    // Let /login render and let client auth decide final redirect.
+    // Redirecting here based on cookie presence alone can create loops
+    // when the cookie is stale but Firebase client state is signed-out.
     return NextResponse.next();
   }
 
@@ -51,6 +47,7 @@ export async function middleware(request) {
     // No session — redirect to login
     const url = request.nextUrl.clone();
     url.pathname = '/login';
+    url.search = '';
     url.searchParams.set('from', pathname);
     return NextResponse.redirect(url);
   }
@@ -71,6 +68,7 @@ export async function middleware(request) {
       // Fail-closed: refuse to authenticate with a guessable fallback secret.
       const url = request.nextUrl.clone();
       url.pathname = '/login';
+      url.search = '';
       url.searchParams.set('error', 'server-misconfigured');
       const response = NextResponse.redirect(url);
       response.cookies.delete('__session');
@@ -94,6 +92,7 @@ export async function middleware(request) {
     if (isNaN(timestamp) || Date.now() - timestamp > SESSION_MAX_AGE_MS) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
+      url.search = '';
       url.searchParams.set('expired', '1');
       const response = NextResponse.redirect(url);
       response.cookies.delete('__session');
@@ -103,6 +102,7 @@ export async function middleware(request) {
     // Invalid/tampered/malformed cookie — redirect to login
     const url = request.nextUrl.clone();
     url.pathname = '/login';
+    url.search = '';
     const response = NextResponse.redirect(url);
     response.cookies.delete('__session');
     return response;

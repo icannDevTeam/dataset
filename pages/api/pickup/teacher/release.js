@@ -2,7 +2,7 @@
  * POST /api/pickup/teacher/release
  *
  * Teacher/admin release workflow for pickup events.
- * Body: { eventId, action: 'release'|'hold', note?, captureStoragePath?, tenant? }
+ * Body: { eventId, action: 'release'|'hold'|'escalate', note?, captureStoragePath?, tenant? }
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
@@ -31,8 +31,8 @@ export default async function handler(req, res) {
   if (!eventId || typeof eventId !== 'string') {
     return res.status(400).json({ error: 'eventId is required' });
   }
-  if (!['release', 'hold'].includes(normalizedAction)) {
-    return res.status(400).json({ error: "action must be 'release' or 'hold'" });
+  if (!['release', 'hold', 'escalate'].includes(normalizedAction)) {
+    return res.status(400).json({ error: "action must be 'release', 'hold', or 'escalate'" });
   }
 
   const sessionMarker = readCookie(req, '__session');
@@ -82,6 +82,9 @@ export default async function handler(req, res) {
   if (normalizedAction === 'release' && cardState === 'red' && !captureStoragePath) {
     return res.status(400).json({ error: 'red card release requires captureStoragePath' });
   }
+  if (normalizedAction === 'escalate' && cardState !== 'red') {
+    return res.status(400).json({ error: 'escalate is only valid for red card events' });
+  }
 
   const releasePayload = {
     by: actorEmail,
@@ -95,9 +98,27 @@ export default async function handler(req, res) {
     releasePayload.captureStoragePath = captureStoragePath;
   }
 
+  const nextStatus = normalizedAction === 'release'
+    ? 'released'
+    : normalizedAction === 'hold'
+      ? 'held'
+      : 'awaiting_security';
+
+  const extra = normalizedAction === 'escalate'
+    ? {
+      securityEscalation: {
+        by: actorEmail,
+        displayName: user.name || actorEmail,
+        at: admin.firestore.FieldValue.serverTimestamp(),
+        reason: typeof note === 'string' && note.trim() ? note.slice(0, 500) : 'red card escalation from teacher desk',
+      },
+    }
+    : {};
+
   await eventRef.set({
-    status: normalizedAction === 'release' ? 'released' : 'held',
+    status: nextStatus,
     teacherRelease: releasePayload,
+    ...extra,
   }, { merge: true });
 
   return res.status(200).json({
