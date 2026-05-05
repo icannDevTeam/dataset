@@ -18,6 +18,7 @@ export default function SettingsPage() {
   const [inviteName, setInviteName] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
   const [inviteRole, setInviteRole] = useState('viewer');
+  const [inviteClassScopes, setInviteClassScopes] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -84,12 +85,29 @@ export default function SettingsPage() {
     }
     setInviteLoading(true);
     setInviteError('');
+    const classScopes = inviteClassScopes
+      .split(',')
+      .map((x) => x.trim().toUpperCase())
+      .filter(Boolean);
+
+    if (inviteRole === 'teacher' && classScopes.length === 0) {
+      setInviteError('Teacher role requires at least one class scope (e.g. 4C).');
+      setInviteLoading(false);
+      return;
+    }
+
     try {
       const headers = await getAuthHeaders();
       const res = await fetch('/api/auth/users', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ email: inviteEmail.trim(), name: inviteName.trim(), password: invitePassword, role: inviteRole }),
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          name: inviteName.trim(),
+          password: invitePassword,
+          role: inviteRole,
+          classScopes,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -98,6 +116,7 @@ export default function SettingsPage() {
         setInviteName('');
         setInvitePassword('');
         setInviteRole('viewer');
+        setInviteClassScopes('');
         fetchUsers();
       } else {
         setInviteError(data.error || 'Failed to add user.');
@@ -143,6 +162,7 @@ export default function SettingsPage() {
       email: u.email,
       name: u.name,
       role: u.role,
+      classScopes: Array.isArray(u.classScopes) ? u.classScopes : [],
       permissions: { ...u.permissions },
     });
   }
@@ -177,7 +197,12 @@ export default function SettingsPage() {
   function changeEditRole(newRole) {
     // When role changes, reset permissions to that role's defaults
     const newPerms = resolvePermissions(newRole);
-    setEditingPerms(prev => ({ ...prev, role: newRole, permissions: newPerms }));
+    setEditingPerms(prev => ({
+      ...prev,
+      role: newRole,
+      classScopes: newRole === 'teacher' ? prev.classScopes : [],
+      permissions: newPerms,
+    }));
   }
 
   async function savePermissions() {
@@ -192,6 +217,7 @@ export default function SettingsPage() {
         body: JSON.stringify({
           email: editingPerms.email,
           role: editingPerms.role,
+          classScopes: editingPerms.classScopes || [],
           permissions: overrides,
         }),
       });
@@ -454,11 +480,21 @@ export default function SettingsPage() {
                               <select value={inviteRole} onChange={e => setInviteRole(e.target.value)}
                                 className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white appearance-none focus:outline-none focus:border-brand-500 cursor-pointer">
                                 <option value="viewer">Viewer</option>
+                                <option value="teacher">Teacher</option>
                                 <option value="admin">Admin</option>
                                 {role === 'owner' && <option value="owner">Owner</option>}
                               </select>
                             </div>
                           </div>
+                          {inviteRole === 'teacher' && (
+                            <div>
+                              <label className="text-xs text-slate-400 block mb-1">Class Scopes</label>
+                              <input type="text" value={inviteClassScopes} onChange={e => setInviteClassScopes(e.target.value)}
+                                placeholder="4C, 4B"
+                                className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-brand-500" />
+                              <p className="text-[10px] text-slate-500 mt-1">Comma-separated classes this teacher can validate.</p>
+                            </div>
+                          )}
                           <div className="flex items-center gap-3 pt-2">
                             <button type="submit" disabled={inviteLoading}
                               className="px-5 py-2 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold transition-all disabled:opacity-50">
@@ -511,6 +547,7 @@ export default function SettingsPage() {
                                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] uppercase font-bold border ${
                                         u.role === 'owner' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
                                         u.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' :
+                                        u.role === 'teacher' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                                         'bg-slate-500/10 text-slate-400 border-slate-500/20'
                                       }`}>{u.role}</span>
                                       {u.superAdmin && (
@@ -642,9 +679,25 @@ export default function SettingsPage() {
                             <select value={editingPerms.role} onChange={e => changeEditRole(e.target.value)}
                               className="bg-slate-950/50 border border-slate-700 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-brand-500 cursor-pointer">
                               <option value="viewer">Viewer</option>
+                              <option value="teacher">Teacher</option>
                               <option value="admin">Admin</option>
                               <option value="owner">Owner</option>
                             </select>
+                            {editingPerms.role === 'teacher' && (
+                              <input
+                                type="text"
+                                value={(editingPerms.classScopes || []).join(', ')}
+                                onChange={(e) => {
+                                  const arr = e.target.value
+                                    .split(',')
+                                    .map((x) => x.trim().toUpperCase())
+                                    .filter(Boolean);
+                                  setEditingPerms(prev => ({ ...prev, classScopes: [...new Set(arr)] }));
+                                }}
+                                placeholder="Class scopes, e.g. 4C, 4B"
+                                className="bg-slate-950/50 border border-slate-700 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-brand-500"
+                              />
+                            )}
                             <button onClick={() => setEditingPerms(null)} className="text-slate-500 hover:text-white transition-colors">
                               <i className="ph ph-x text-lg"></i>
                             </button>

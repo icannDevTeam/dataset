@@ -13,6 +13,19 @@ import { resolvePermissions } from '../../../lib/permissions';
 import admin from 'firebase-admin';
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
+const TEACHER_EMAIL_DOMAIN = (process.env.TEACHER_EMAIL_DOMAIN || 'binus.edu').toLowerCase();
+
+function sanitizeClassScopes(scopes) {
+  if (!Array.isArray(scopes)) return [];
+  return [...new Set(scopes
+    .map((x) => String(x || '').trim().toUpperCase())
+    .filter(Boolean)
+    .slice(0, 50))];
+}
+
+function isTeacherEmail(email) {
+  return String(email || '').toLowerCase().endsWith(`@${TEACHER_EMAIL_DOMAIN}`);
+}
 
 async function verifyAdmin(req) {
   const authHeader = req.headers['authorization'];
@@ -79,6 +92,7 @@ async function handler(req, res) {
           addedAt: d.addedAt?.toDate?.()?.toISOString() || null,
           lastLogin: d.lastLogin?.toDate?.()?.toISOString() || null,
           lastIP: ipMap[doc.id] || null,
+          classScopes: Array.isArray(d.classScopes) ? d.classScopes : [],
           disabled: d.disabled || false,
           superAdmin: d.superAdmin || (SUPER_ADMIN && doc.id === SUPER_ADMIN) || false,
         };
@@ -91,7 +105,7 @@ async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const { email, role, name, password } = req.body;
+    const { email, role, name, password, classScopes } = req.body;
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ error: 'Valid email is required.' });
     }
@@ -104,12 +118,23 @@ async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid email format.' });
     }
 
-    const validRoles = ['owner', 'admin', 'viewer'];
+    const validRoles = ['owner', 'admin', 'teacher', 'viewer'];
     const assignedRole = validRoles.includes(role) ? role : 'viewer';
+    const cleanClassScopes = sanitizeClassScopes(classScopes);
 
     // Only owners can create other owners/admins
     if (['owner', 'admin'].includes(assignedRole) && caller.role !== 'owner') {
       return res.status(403).json({ error: 'Only owners can assign admin/owner roles.' });
+    }
+
+    // Teacher account policy
+    if (assignedRole === 'teacher') {
+      if (!isTeacherEmail(cleanEmail)) {
+        return res.status(400).json({ error: `Teacher accounts must use @${TEACHER_EMAIL_DOMAIN} email.` });
+      }
+      if (cleanClassScopes.length === 0) {
+        return res.status(400).json({ error: 'Teacher account requires at least one class scope.' });
+      }
     }
 
     try {
@@ -138,13 +163,14 @@ async function handler(req, res) {
         email: cleanEmail,
         name: name || cleanEmail.split('@')[0],
         role: assignedRole,
+        classScopes: assignedRole === 'teacher' ? cleanClassScopes : [],
         addedBy: caller.email,
         addedAt: admin.firestore.FieldValue.serverTimestamp(),
         photoURL: null,
         disabled: false,
       });
 
-      return res.status(201).json({ ok: true, email: cleanEmail, role: assignedRole });
+      return res.status(201).json({ ok: true, email: cleanEmail, role: assignedRole, classScopes: assignedRole === 'teacher' ? cleanClassScopes : [] });
     } catch (err) {
       console.error('[USERS POST]', err.message);
       return res.status(500).json({ error: 'Failed to add user' });
@@ -198,7 +224,7 @@ async function handler(req, res) {
 
   // PATCH — Update user role, permissions, suspend, or revoke
   if (req.method === 'PATCH') {
-    const { email, role: newRole, permissions: newPermissions, action: patchAction } = req.body;
+    const { email, role: newRole, permissions: newPermissions, action: patchAction, classScopes } = req.body;
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ error: 'Email is required.' });
     }
@@ -253,15 +279,39 @@ async function handler(req, res) {
 
       // Handle revoke — strip all custom permissions, reset to viewer
       if (patchAction === 'revoke') {
-        await usersRef.doc(cleanEmail).update({ role: 'viewer', permissions: {} });
+        await usersRef.doc(cleanEmail).update({ role: 'viewer', permissions: {}, classScopes: [] });
         return res.status(200).json({ ok: true, email: cleanEmail, role: 'viewer', permissions: resolvePermissions('viewer') });
       }
 
-      if (newRole && ['owner', 'admin', 'viewer'].includes(newRole)) {
+      if (newRole && ['owner', 'admin', 'teacher', 'viewer'].includes(newRole)) {
         update.role = newRole;
       }
       if (newPermissions && typeof newPermissions === 'object') {
         update.permissions = newPermissions;
+      }
+
+      if (classScopes !== undefined) {
+        update.classScopes = sanitizeClassScopes(classScopes);
+      }
+
+      const effectiveRole = update.role || doc.data().role || 'viewer';
+      const effectiveEmail = cleanEmail;
+      const effectiveClassScopes = update.classScopes !== undefined
+        ? update.classScopes
+        : (Array.isArray(doc.data().classScopes) ? doc.data().classScopes : []);
+
+      if (effectiveRole === 'teacher') {
+        if (!isTeacherEmail(effectiveEmail)) {
+          return res.status(400).json({ error: `Teacher accounts must use @${TEACHER_EMAIL_DOMAIN} email.` });
+        }
+        if (!effectiveClassScopes || effectiveClassScopes.length === 0) {
+          return res.status(400).json({ error: 'Teacher account requires at least one class scope.' });
+        }
+      } else if (update.classScopes === undefined) {
+        // Ensure non-teacher users don't keep stale class scopes when role changes away from teacher
+        if (update.role && update.role !== 'teacher') {
+          update.classScopes = [];
+        }
       }
 
       if (Object.keys(update).length === 0) {
@@ -273,8 +323,11 @@ async function handler(req, res) {
       const updatedRole = update.role || doc.data().role || 'viewer';
       const updatedOverrides = update.permissions !== undefined ? update.permissions : (doc.data().permissions || {});
       const resolved = resolvePermissions(updatedRole, updatedOverrides);
+      const updatedClassScopes = update.classScopes !== undefined
+        ? update.classScopes
+        : (Array.isArray(doc.data().classScopes) ? doc.data().classScopes : []);
 
-      return res.status(200).json({ ok: true, email: cleanEmail, role: updatedRole, permissions: resolved });
+      return res.status(200).json({ ok: true, email: cleanEmail, role: updatedRole, permissions: resolved, classScopes: updatedClassScopes });
     } catch (err) {
       console.error('[USERS PATCH]', err.message);
       return res.status(500).json({ error: 'Failed to update user' });
