@@ -24,11 +24,25 @@ const PERIOD_OPTIONS = [
   { label: 'Last 60 Days', days: 60 },
 ];
 
+function getDateRange(days) {
+  const to = getWIBDate();
+  const from = new Date(Date.now() + 7 * 3600 * 1000 - (days - 1) * 86400000).toISOString().slice(0, 10);
+  return { from, to };
+}
+
 export default function AnalyticsPage() {
+  // Module toggle
+  const [module, setModule] = useState('attendance');
+
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Pickup analytics state
+  const [pickupData, setPickupData] = useState(null);
+  const [pickupLoading, setPickupLoading] = useState(false);
+  const [pickupError, setPickupError] = useState(null);
 
   const fetchAnalytics = useCallback(async () => {
     try {
@@ -45,7 +59,28 @@ export default function AnalyticsPage() {
     }
   }, [days]);
 
-  useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
+  const fetchPickupAnalytics = useCallback(async () => {
+    try {
+      setPickupLoading(true);
+      setPickupError(null);
+      const { from, to } = getDateRange(days);
+      const res = await fetch(`/api/pickup/admin/analytics?from=${from}&to=${to}`, { credentials: 'include' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || `HTTP ${res.status}`);
+      }
+      setPickupData(await res.json());
+    } catch (err) {
+      setPickupError(err.message);
+    } finally {
+      setPickupLoading(false);
+    }
+  }, [days]);
+
+  useEffect(() => {
+    if (module === 'attendance') fetchAnalytics();
+    else fetchPickupAnalytics();
+  }, [module, fetchAnalytics, fetchPickupAnalytics]);
 
   // Derived computations
   const trendDaysWithData = useMemo(() => {
@@ -172,6 +207,39 @@ export default function AnalyticsPage() {
       <Head><title>Analytics — BINUS Attendance</title></Head>
 
       <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
+
+        {/* Module toggle */}
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900/80 border border-slate-800 w-fit">
+          <button
+            onClick={() => setModule('attendance')}
+            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'attendance' ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <i className="ph ph-fingerprint"></i>
+            Facial Attendance
+          </button>
+          <button
+            onClick={() => setModule('pickup')}
+            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'pickup' ? 'bg-orange-500/20 text-orange-200 shadow-sm border border-orange-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <i className="ph ph-hand-waving"></i>
+            PickupGuard
+          </button>
+        </div>
+
+        {/* ══ PICKUP MODULE ══ */}
+        {module === 'pickup' && (
+          <PickupAnalyticsPanel
+            data={pickupData}
+            loading={pickupLoading}
+            error={pickupError}
+            days={days}
+            setDays={setDays}
+            onRefresh={fetchPickupAnalytics}
+          />
+        )}
+
+        {/* ══ ATTENDANCE MODULE ══ */}
+        {module === 'attendance' && (<>
 
         {/* Hero Section & Filters */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
@@ -717,6 +785,9 @@ export default function AnalyticsPage() {
             </button>
           </div>
         )}
+
+        {/* end attendance module */}
+        </>)}
       </div>
 
       {/* Footer */}
@@ -732,5 +803,218 @@ export default function AnalyticsPage() {
         </div>
       </footer>
     </V2Layout>
+  );
+}
+
+// ── Pickup Analytics Panel ────────────────────────────────────────────────────
+
+function PickupAnalyticsPanel({ data, loading, error, days, setDays, onRefresh }) {
+  const CARD_STATE_COLORS = {
+    green:  { bar: 'bg-emerald-500', text: 'text-emerald-400', label: 'Authorized' },
+    yellow: { bar: 'bg-amber-500',   text: 'text-amber-400',   label: 'Conditional' },
+    red:    { bar: 'bg-red-500',     text: 'text-red-400',     label: 'Restricted' },
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Hero & period selector */}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <i className="ph ph-hand-waving text-orange-400"></i>
+            <span className="text-sm font-medium text-orange-400 tracking-wide uppercase">PickupGuard Analytics</span>
+          </div>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white">Pickup Trends</h1>
+          <p className="text-slate-400 mt-2 max-w-2xl">
+            {data
+              ? <>Analyzing <span className="text-white font-medium">{data.range.totalDays}</span> days · <span className="text-white font-medium">{data.summary.totalPickups}</span> total pickups</>
+              : 'Loading pickup data…'}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center p-1 rounded-lg bg-slate-900/80 border border-slate-800">
+            {[7, 14, 30, 60].map((d) => (
+              <button key={d} onClick={() => setDays(d)}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${days === d ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}>
+                {d}d
+              </button>
+            ))}
+          </div>
+          <button onClick={onRefresh} disabled={loading}
+            className="flex items-center gap-2 px-4 py-2.5 bg-orange-500/10 border border-orange-500/30 text-orange-300 hover:bg-orange-500/20 rounded-lg text-sm font-medium transition-all disabled:opacity-50">
+            <i className="ph ph-arrows-clockwise"></i>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-xl bg-red-500/10 border border-red-500/30 px-5 py-4 text-red-300 text-sm flex items-center gap-3">
+          <i className="ph ph-warning-circle text-xl"></i>{error}
+        </div>
+      )}
+
+      {loading && !data && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="glass-panel rounded-2xl border border-slate-800 p-5 animate-pulse">
+              <div className="h-3 w-1/2 bg-slate-800 rounded mb-4"></div>
+              <div className="h-8 w-3/4 bg-slate-800 rounded"></div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            {[
+              { label: 'Total Pickups', value: data.summary.totalPickups, color: 'border-l-orange-500', icon: 'ph-hand-waving' },
+              { label: 'Avg / Day', value: data.summary.avgPerDay, color: 'border-l-brand-500', icon: 'ph-calendar' },
+              { label: 'Auto-Approved', value: data.summary.autoApproved, sub: data.summary.approvalRate + '%', color: 'border-l-emerald-500', icon: 'ph-check-circle' },
+              { label: 'Overridden', value: data.summary.officerOverridden, sub: data.summary.overrideRate + '%', color: 'border-l-amber-500', icon: 'ph-shield-warning' },
+              { label: 'Flagged Red', value: data.summary.flagged, color: 'border-l-red-500', icon: 'ph-flag' },
+              { label: 'Days', value: data.range.totalDays, color: 'border-l-indigo-500', icon: 'ph-clock' },
+            ].map((c) => (
+              <div key={c.label} className={`glass-panel rounded-2xl border-l-2 ${c.color} border border-slate-800 p-4`}>
+                <div className="flex justify-between items-start gap-1 mb-2">
+                  <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide leading-tight">{c.label}</p>
+                  <i className={`ph ${c.icon} text-slate-600 text-base flex-shrink-0`}></i>
+                </div>
+                <p className="text-2xl font-bold text-white">{c.value ?? '—'}</p>
+                {c.sub && <p className="text-[11px] text-slate-500 mt-1">{c.sub} rate</p>}
+              </div>
+            ))}
+          </div>
+
+          {/* Daily trend chart */}
+          {data.byDate?.length > 0 && (
+            <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+              <h3 className="text-sm font-semibold text-white mb-5 flex items-center gap-2">
+                <i className="ph ph-chart-bar text-orange-400"></i>
+                Daily Pickup Volume
+                <span className="ml-auto text-[11px] font-normal text-slate-500">{data.range.from} → {data.range.to}</span>
+              </h3>
+              <div className="flex items-end gap-px h-32">
+                {data.byDate.map((d) => {
+                  const max = Math.max(...data.byDate.map((x) => x.total), 1);
+                  const hPct = Math.round((d.total / max) * 100);
+                  return (
+                    <div key={d.date} className="flex-1 flex flex-col items-center gap-0.5 group relative min-w-0">
+                      <div
+                        className="w-full bg-orange-500/50 hover:bg-orange-400/80 rounded-sm transition-colors cursor-default"
+                        style={{ height: `${Math.max(hPct, 2)}%`, minHeight: d.total > 0 ? '4px' : '2px' }}
+                      ></div>
+                      {/* Tooltip */}
+                      <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-10 shadow-lg">
+                        {d.date}: {d.total}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-1.5 flex justify-between text-[10px] text-slate-600">
+                <span>{data.byDate[0]?.date}</span>
+                <span>{data.byDate[data.byDate.length - 1]?.date}</span>
+              </div>
+            </div>
+          )}
+
+          {/* By Gate + By Card State + By Class */}
+          <div className="grid lg:grid-cols-3 gap-5">
+            {/* By Gate */}
+            {data.byGate?.length > 0 && (
+              <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2"><i className="ph ph-door text-orange-400"></i> By Gate</h3>
+                <div className="space-y-2.5">
+                  {data.byGate.map((g) => {
+                    const pct = data.summary.totalPickups > 0 ? Math.round((g.total / data.summary.totalPickups) * 100) : 0;
+                    return (
+                      <div key={g.gate}>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-slate-300 font-medium">{g.gate || 'Unknown'}</span>
+                          <span className="text-slate-500">{g.total} · {pct}%</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div className="h-full bg-orange-500/60 rounded-full transition-all" style={{ width: `${pct}%` }}></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Card State */}
+            <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+              <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2"><i className="ph ph-identification-card text-orange-400"></i> Card State</h3>
+              <div className="space-y-3">
+                {Object.entries(data.byCardState || {}).map(([state, count]) => {
+                  const cfg = CARD_STATE_COLORS[state] || { bar: 'bg-slate-500', text: 'text-slate-400', label: state };
+                  const pct = data.summary.totalPickups > 0 ? Math.round((count / data.summary.totalPickups) * 100) : 0;
+                  return (
+                    <div key={state}>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className={`font-medium ${cfg.text}`}>{cfg.label}</span>
+                        <span className="text-slate-500">{count} · {pct}%</span>
+                      </div>
+                      <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div className={`h-full ${cfg.bar} opacity-60 rounded-full`} style={{ width: `${pct}%` }}></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Top Chaperones */}
+            {data.topChaperones?.length > 0 && (
+              <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2"><i className="ph ph-person text-orange-400"></i> Top Chaperones</h3>
+                <div className="space-y-1.5">
+                  {data.topChaperones.map((c, i) => (
+                    <div key={c.name} className="flex items-center gap-3 py-1.5 border-b border-slate-800/40 last:border-0">
+                      <span className="text-xs font-bold text-slate-600 w-4">{i + 1}</span>
+                      <span className="flex-1 text-sm text-slate-200 truncate">{c.name}</span>
+                      <span className="text-sm font-semibold text-orange-300">{c.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* By Class table */}
+          {data.byClass?.length > 0 && (
+            <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+              <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2"><i className="ph ph-users text-orange-400"></i> By Class</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[11px] text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                      <th className="pb-2 text-left pr-4">Class</th>
+                      <th className="pb-2 text-right pr-4">Total</th>
+                      <th className="pb-2 text-right pr-4">Auto-Approved</th>
+                      <th className="pb-2 text-right">Overridden</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/40">
+                    {data.byClass.map((c) => (
+                      <tr key={c.class} className="hover:bg-white/5">
+                        <td className="py-2 pr-4 font-medium text-white">{c.class || 'Unknown'}</td>
+                        <td className="py-2 pr-4 text-right text-slate-300">{c.total}</td>
+                        <td className="py-2 pr-4 text-right text-emerald-400">{c.autoApproved}</td>
+                        <td className="py-2 text-right text-amber-400">{c.overridden}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }

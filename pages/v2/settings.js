@@ -973,6 +973,7 @@ export default function SettingsPage() {
                               className="bg-slate-950/50 border border-slate-700 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-brand-500 cursor-pointer">
                               <option value="viewer">Viewer</option>
                               <option value="teacher">Teacher</option>
+                              <option value="guard">Guard (PickupGuard)</option>
                               <option value="admin">Admin</option>
                               <option value="owner">Owner</option>
                             </select>
