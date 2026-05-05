@@ -29,7 +29,6 @@ const NAV_SECTIONS = [
       { href: '/attendance-monitor', icon: 'ph-list-checks', label: 'Attendance Monitor' },
       { href: '/hikvision', icon: 'ph-fingerprint', label: 'Hikvision' },
       { href: '/v2/device-sync', icon: 'ph-cloud-arrow-down', label: 'Device Sync' },
-      { href: '/v2/settings', icon: 'ph-gear-six', label: 'Settings' },
     ],
   },
   {
@@ -45,6 +44,13 @@ const NAV_SECTIONS = [
   },
 ];
 
+// Bottom standalone items (always visible, not in collapsible sections)
+const BOTTOM_NAV = [
+  { href: '/v2/settings', icon: 'ph-gear-six', label: 'Settings' },
+  { href: '/v2/settings?tab=user-management', icon: 'ph-users', label: 'User Management', rbac: true },
+  { href: '/v2/settings?tab=teacher-management', icon: 'ph-chalkboard-teacher', label: 'Teacher Management', rbac: true },
+];
+
 export default function V2Layout({ children }) {
   const router = useRouter();
   const { user, role, permissions, signOut } = useAuth();
@@ -52,6 +58,7 @@ export default function V2Layout({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expandedNav, setExpandedNav] = useState(null);
+  const [collapsedSections, setCollapsedSections] = useState({}); // sectionLabel -> bool
   const [badges, setBadges] = useState({}); // badgeKey -> count
 
   const filteredNav = useMemo(() => filterNavForRole(NAV_SECTIONS, permissions), [permissions]);
@@ -125,121 +132,169 @@ export default function V2Layout({ children }) {
       </div>
 
       {/* Nav sections */}
-      <nav className="flex-1 overflow-y-auto no-scrollbar py-4 px-3 space-y-6">
-        {filteredNav.map((section) => (
-          <div key={section.label}>
-            {!collapsed && (
-              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest px-3 mb-2">{section.label}</p>
-            )}
-            {collapsed && (
-              <div className="w-full flex justify-center mb-2">
-                <div className="w-6 border-t border-slate-800"></div>
-              </div>
-            )}
-            <div className="space-y-1">
-              {section.items.map((item) => {
-                if (item.children) {
-                  const childActive = item.children.some((c) => isActive(c.href));
-                  const isOpen = expandedNav === item.label || childActive;
+      <nav className="flex-1 overflow-y-auto no-scrollbar py-4 px-3 space-y-4">
+        {filteredNav.map((section) => {
+          const isSectionCollapsed = !!collapsedSections[section.label];
+          const toggleSection = () => setCollapsedSections(prev => ({ ...prev, [section.label]: !prev[section.label] }));
+          return (
+            <div key={section.label}>
+              {!collapsed ? (
+                <button
+                  onClick={toggleSection}
+                  className="w-full flex items-center justify-between px-3 mb-1.5 group"
+                >
+                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">{section.label}</p>
+                  <i className={`ph ${isSectionCollapsed ? 'ph-caret-right' : 'ph-caret-down'} text-[10px] text-slate-600 group-hover:text-slate-400 transition-colors`}></i>
+                </button>
+              ) : (
+                <div className="w-full flex justify-center mb-2">
+                  <div className="w-6 border-t border-slate-800"></div>
+                </div>
+              )}
+              {!isSectionCollapsed && (
+                <div className="space-y-1">
+                  {section.items.map((item) => {
+                    if (item.children) {
+                      const childActive = item.children.some((c) => isActive(c.href));
+                      const isOpen = expandedNav === item.label || childActive;
 
-                  if (collapsed) {
-                    // When collapsed, show icon and navigate to first child on click
-                    return (
-                      <button
-                        key={item.label}
-                        onClick={() => router.push(item.children[0].href)}
-                        className={`group relative w-full flex items-center justify-center px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                          childActive
-                            ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
-                            : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
-                        }`}
-                        title={item.label}
-                      >
-                        <i className={`ph ${item.icon} text-xl`}></i>
-                        <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
-                          {item.label}
+                      if (collapsed) {
+                        return (
+                          <button
+                            key={item.label}
+                            onClick={() => router.push(item.children[0].href)}
+                            className={`group relative w-full flex items-center justify-center px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                              childActive
+                                ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
+                                : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
+                            }`}
+                            title={item.label}
+                          >
+                            <i className={`ph ${item.icon} text-xl`}></i>
+                            <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
+                              {item.label}
+                            </div>
+                          </button>
+                        );
+                      }
+
+                      return (
+                        <div key={item.label}>
+                          <button
+                            onClick={() => setExpandedNav(isOpen && !childActive ? null : item.label)}
+                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                              childActive
+                                ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
+                                : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
+                            }`}
+                          >
+                            <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
+                            <span className="flex-1 text-left">{item.label}</span>
+                            {item.badgeKey && badges[item.badgeKey] > 0 && (
+                              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-[10px] font-bold text-amber-950">
+                                {badges[item.badgeKey]}
+                              </span>
+                            )}
+                            <i className={`ph ${isOpen ? 'ph-caret-up' : 'ph-caret-down'} text-xs text-slate-500`}></i>
+                          </button>
+                          {isOpen && (
+                            <div className="ml-5 pl-4 border-l border-slate-800 mt-1 space-y-0.5">
+                              {item.children.map((child) => {
+                                const cActive = isActive(child.href);
+                                return (
+                                  <Link
+                                    key={child.href}
+                                    href={child.href}
+                                    className={`block px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                                      cActive
+                                        ? 'text-brand-400 bg-brand-500/5'
+                                        : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
+                                    }`}
+                                  >
+                                    {child.label}
+                                  </Link>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                      </button>
-                    );
-                  }
-
-                  return (
-                    <div key={item.label}>
-                      <button
-                        onClick={() => setExpandedNav(isOpen && !childActive ? null : item.label)}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                          childActive
-                            ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
+                      );
+                    }
+                    const active = isActive(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={`group relative flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                          active
+                            ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]'
                             : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
                         }`}
+                        title={collapsed ? item.label : undefined}
                       >
                         <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
-                        <span className="flex-1 text-left">{item.label}</span>
-                        {item.badgeKey && badges[item.badgeKey] > 0 && (
+                        {!collapsed && <span className="flex-1">{item.label}</span>}
+                        {!collapsed && item.badgeKey && badges[item.badgeKey] > 0 && (
                           <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-[10px] font-bold text-amber-950">
                             {badges[item.badgeKey]}
                           </span>
                         )}
-                        <i className={`ph ${isOpen ? 'ph-caret-up' : 'ph-caret-down'} text-xs text-slate-500`}></i>
-                      </button>
-                      {isOpen && (
-                        <div className="ml-5 pl-4 border-l border-slate-800 mt-1 space-y-0.5">
-                          {item.children.map((child) => {
-                            const cActive = isActive(child.href);
-                            return (
-                              <Link
-                                key={child.href}
-                                href={child.href}
-                                className={`block px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                                  cActive
-                                    ? 'text-brand-400 bg-brand-500/5'
-                                    : 'text-slate-500 hover:text-slate-200 hover:bg-white/5'
-                                }`}
-                              >
-                                {child.label}
-                              </Link>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-                const active = isActive(item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`group relative flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                      active
-                        ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20 shadow-[0_0_10px_rgba(34,211,238,0.05)]'
-                        : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
-                    }`}
-                    title={collapsed ? item.label : undefined}
-                  >
-                    <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
-                    {!collapsed && <span className="flex-1">{item.label}</span>}
-                    {!collapsed && item.badgeKey && badges[item.badgeKey] > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-[10px] font-bold text-amber-950">
-                        {badges[item.badgeKey]}
-                      </span>
-                    )}
-                    {collapsed && item.badgeKey && badges[item.badgeKey] > 0 && (
-                      <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-[10px] font-bold text-amber-950">
-                        {badges[item.badgeKey]}
-                      </span>
-                    )}
-                    {collapsed && (
-                      <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
-                        {item.label}
-                      </div>
-                    )}
-                  </Link>
-                );
-              })}
+                        {collapsed && item.badgeKey && badges[item.badgeKey] > 0 && (
+                          <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-[10px] font-bold text-amber-950">
+                            {badges[item.badgeKey]}
+                          </span>
+                        )}
+                        {collapsed && (
+                          <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
+                            {item.label}
+                          </div>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+          );
+        })}
+
+        {/* Bottom standalone: Settings + RBAC */}
+        <div className="pt-2">
+          <div className={`w-full border-t border-slate-800/60 mb-3`}></div>
+          {!collapsed && (
+            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest px-3 mb-1.5">System</p>
+          )}
+          <div className="space-y-1">
+            {BOTTOM_NAV.map((item) => {
+              // Permission check: rbac items need user_management permission
+              if (item.rbac && !permissions?.user_management) return null;
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`group relative flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                    active
+                      ? 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent'
+                  }`}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
+                  {!collapsed && <span className="flex-1">{item.label}</span>}
+                  {!collapsed && item.rbac && (
+                    <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 border border-slate-700">RBAC</span>
+                  )}
+                  {collapsed && (
+                    <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
+                      {item.label}
+                    </div>
+                  )}
+                </Link>
+              );
+            })}
           </div>
-        ))}
+        </div>
       </nav>
 
       {/* Bottom section */}

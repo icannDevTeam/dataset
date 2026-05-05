@@ -31,6 +31,9 @@ function formatTime12(timestamp) {
 
 export default function DashboardV2() {
   const router = useRouter();
+  // Module toggle
+  const [module, setModule] = useState('attendance');
+
   const [date, setDate] = useState(getWIBDate());
   const [records, setRecords] = useState([]);
   const [summary, setSummary] = useState({ total: 0, present: 0, late: 0, lastUpdated: null });
@@ -39,6 +42,11 @@ export default function DashboardV2() {
   const [error, setError] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastFetch, setLastFetch] = useState(null);
+
+  // Pickup module state
+  const [pickupData, setPickupData] = useState(null);
+  const [pickupLoading, setPickupLoading] = useState(false);
+  const [pickupError, setPickupError] = useState(null);
 
   // Thumbnails
   const [thumbnails, setThumbnails] = useState({});
@@ -80,6 +88,28 @@ export default function DashboardV2() {
       return () => clearInterval(timer);
     }
   }, [fetchAttendance, autoRefresh]);
+
+  const fetchPickup = useCallback(async () => {
+    try {
+      setPickupLoading(true);
+      setPickupError(null);
+      const today = getWIBDate();
+      const res = await fetch(`/api/pickup/admin/analytics?from=${today}&to=${today}`, { credentials: 'include' });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.error || `HTTP ${res.status}`);
+      }
+      setPickupData(await res.json());
+    } catch (err) {
+      setPickupError(err.message);
+    } finally {
+      setPickupLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (module === 'pickup') fetchPickup();
+  }, [module, fetchPickup]);
 
   // Fetch student face thumbnails (once)
   useEffect(() => {
@@ -207,6 +237,37 @@ export default function DashboardV2() {
     <V2Layout>
       <Head><title>Dashboard — BINUS Attendance</title></Head>
       <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
+
+        {/* Module toggle */}
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900/80 border border-slate-800 w-fit">
+          <button
+            onClick={() => setModule('attendance')}
+            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'attendance' ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <i className="ph ph-fingerprint"></i>
+            Facial Attendance
+          </button>
+          <button
+            onClick={() => setModule('pickup')}
+            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'pickup' ? 'bg-orange-500/20 text-orange-200 shadow-sm border border-orange-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <i className="ph ph-hand-waving"></i>
+            PickupGuard
+          </button>
+        </div>
+
+        {/* ══ PICKUP MODULE ══ */}
+        {module === 'pickup' && (
+          <DashboardPickupView
+            data={pickupData}
+            loading={pickupLoading}
+            error={pickupError}
+            onRefresh={fetchPickup}
+          />
+        )}
+
+        {/* ══ ATTENDANCE MODULE ══ */}
+        {module === 'attendance' && (<>
 
         {/* Hero Section */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -626,6 +687,9 @@ export default function DashboardV2() {
             </div>
           )}
         </div>
+
+        {/* end attendance module */}
+        </>)}
       </div>
 
       {/* Footer */}
@@ -641,5 +705,124 @@ export default function DashboardV2() {
         </div>
       </footer>
     </V2Layout>
+  );
+}
+
+// ── Pickup Dashboard Widget ────────────────────────────────────────────────────
+function DashboardPickupView({ data, loading, error, onRefresh }) {
+  const today = new Date(Date.now() + 7 * 3600 * 1000).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-orange-500"></span>
+            </span>
+            <span className="text-sm font-medium text-orange-400 tracking-wide uppercase">PickupGuard Today</span>
+          </div>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white">Pickup Overview</h1>
+          <p className="text-slate-400 mt-2">{today}</p>
+        </div>
+        <button onClick={onRefresh} disabled={loading}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-300 hover:bg-orange-500/20 text-sm font-medium transition-all disabled:opacity-50">
+          <i className="ph ph-arrows-clockwise"></i>
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div className="rounded-xl bg-red-500/10 border border-red-500/30 px-5 py-4 text-red-300 text-sm flex items-center gap-3">
+          <i className="ph ph-warning-circle text-xl"></i>
+          {error}
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && !data && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="glass-panel rounded-2xl border border-slate-800 p-5 animate-pulse">
+              <div className="h-3 w-1/2 bg-slate-800 rounded mb-4"></div>
+              <div className="h-8 w-3/4 bg-slate-800 rounded"></div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[
+              { label: 'Total Pickups', value: data.summary.totalPickups, icon: 'ph-hand-waving', color: 'border-l-orange-500' },
+              { label: 'Auto-Approved', value: data.summary.autoApproved, sub: data.summary.approvalRate + '%', icon: 'ph-check-circle', color: 'border-l-emerald-500' },
+              { label: 'Officer Override', value: data.summary.officerOverridden, sub: data.summary.overrideRate + '%', icon: 'ph-shield-warning', color: 'border-l-amber-500' },
+              { label: 'Flagged Red', value: data.summary.flagged, icon: 'ph-flag', color: 'border-l-red-500' },
+            ].map((c) => (
+              <div key={c.label} className={`glass-panel rounded-2xl border-l-2 ${c.color} border border-slate-800 p-5`}>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">{c.label}</p>
+                  <i className={`ph ${c.icon} text-slate-500 text-base`}></i>
+                </div>
+                <p className="text-3xl font-bold text-white">{c.value ?? '—'}</p>
+                {c.sub && <p className="text-xs text-slate-500 mt-1">{c.sub} rate</p>}
+              </div>
+            ))}
+          </div>
+
+          {/* By Gate + Card State */}
+          <div className="grid lg:grid-cols-2 gap-5">
+            {data.byGate?.length > 0 && (
+              <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2"><i className="ph ph-door text-orange-400"></i> By Gate</h3>
+                <div className="space-y-2">
+                  {data.byGate.map((g) => {
+                    const pct = data.summary.totalPickups > 0 ? Math.round((g.total / data.summary.totalPickups) * 100) : 0;
+                    return (
+                      <div key={g.gate}>
+                        <div className="flex justify-between text-xs mb-0.5">
+                          <span className="text-slate-300">{g.gate || 'Unknown'}</span>
+                          <span className="text-slate-500">{g.total} ({pct}%)</span>
+                        </div>
+                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div className="h-full bg-orange-500/60 rounded-full" style={{ width: `${pct}%` }}></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+              <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2"><i className="ph ph-identification-card text-orange-400"></i> Card State</h3>
+              <div className="space-y-2">
+                {Object.entries(data.byCardState || {}).map(([state, count]) => {
+                  const cfg = { green: { color: 'bg-emerald-500', label: 'Authorized' }, yellow: { color: 'bg-amber-500', label: 'Conditional' }, red: { color: 'bg-red-500', label: 'Restricted' } }[state] || { color: 'bg-slate-500', label: state };
+                  return (
+                    <div key={state} className="flex items-center gap-3">
+                      <span className={`w-2.5 h-2.5 rounded-full ${cfg.color}`}></span>
+                      <span className="flex-1 text-sm text-slate-300">{cfg.label}</span>
+                      <span className="text-sm font-bold text-white">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick link */}
+          <div className="flex">
+            <a href="/v2/reports?module=pickup" className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1 transition-colors">
+              <i className="ph ph-arrow-right"></i>
+              View full PickupGuard report
+            </a>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

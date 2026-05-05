@@ -506,6 +506,14 @@ export default function SettingsPage() {
     }
   }, [tabs, activeTab]);
 
+  // Deep-link: ?tab=user-management etc.
+  useEffect(() => {
+    const { tab } = router.query;
+    if (tab && tabs.find(t => t.id === tab)) {
+      setActiveTab(tab);
+    }
+  }, [router.query, tabs]);
+
     return (
     <V2Layout>
         <Head><title>Settings — BINUS Attendance</title></Head>
