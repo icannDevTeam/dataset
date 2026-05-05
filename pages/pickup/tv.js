@@ -104,6 +104,7 @@ function computeGateTimer(clock, gateStatus) {
 export default function PickupTV() {
   const router = useRouter();
   const { token, gate, tenant, profile: profileId, mode: modeQuery, dt: dtParam } = router.query;
+  const [viewport, setViewport] = useState({ w: 1920, h: 1080 });
   const [mounted, setMounted] = useState(false);
   const [feed, setFeed] = useState({ events: [], now: null, profile: null });
   const [err, setErr] = useState(null);
@@ -121,6 +122,14 @@ export default function PickupTV() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const update = () => setViewport({ w: window.innerWidth || 1920, h: window.innerHeight || 1080 });
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
   }, []);
 
   // On first mount, hydrate token from localStorage and verify with server
@@ -180,7 +189,9 @@ export default function PickupTV() {
         if (gate) params.set('gate', String(gate));
         if (tenant) params.set('tenant', String(tenant));
         if (profileId) params.set('profile', String(profileId));
-        params.set('mode', modeQuery ? String(modeQuery) : 'released');
+        // Default to "all" so queue rows are populated even when only a few
+        // events are already released.
+        params.set('mode', modeQuery ? String(modeQuery) : 'all');
         const r = await fetch(`/api/pickup/tv/feed?${params.toString()}`, {
           cache: 'no-store',
           headers: deviceToken ? { 'x-tv-device-token': deviceToken } : {},
@@ -261,7 +272,9 @@ export default function PickupTV() {
   }, [feed.events, beepEnabled]);
 
   const events = feed.events || [];
-  const wallSize = Math.min(maxCards, 8); // CSS grid templates only defined up to count-8
+  const isCompact = viewport.w < 1400 || viewport.h < 860;
+  const wallCap = isCompact ? 3 : 8;
+  const wallSize = Math.min(maxCards, wallCap); // CSS grid templates only defined up to count-8
   const baseWall = events.slice(0, wallSize);
   // Queue holds the next 12 most recent events (room for fast-arriving streams).
   const queue = showQueue ? events.slice(wallSize, wallSize + 12) : [];
@@ -430,7 +443,13 @@ export default function PickupTV() {
             ) : (
               <div className={`wall-grid count-${wall.length}`}>
                 {wall.map((e, i) => (
-                  <PickupCard key={e.id} ev={e} featured={i === 0} serverOffsetMs={serverOffsetMs} />
+                  <PickupCard
+                    key={e.id}
+                    ev={e}
+                    featured={i === 0}
+                    serverOffsetMs={serverOffsetMs}
+                    featuredStudentLimit={isCompact ? 6 : 10}
+                  />
                 ))}
               </div>
             )}
@@ -587,8 +606,14 @@ export default function PickupTV() {
         }
         .tv-main.no-queue { grid-template-columns: minmax(0, 1fr); }
         @media (max-width: 1100px) {
-          .tv-main { grid-template-columns: minmax(0, 1fr); }
-          .tv-queue { display: none; }
+          .tv-main {
+            grid-template-columns: minmax(0, 1fr);
+            grid-template-rows: minmax(0, 1fr) minmax(180px, 32vh);
+          }
+          .tv-queue {
+            display: flex;
+            min-height: 0;
+          }
         }
 
         /* Card wall (5 simultaneous pickup cards) */
@@ -1053,7 +1078,7 @@ export default function PickupTV() {
           padding: 0 6px 12px; border-bottom: 1px solid rgba(252,191,17,0.18);
         }
         .tv-queue-title small { font-size: 11px; opacity: 0.55; letter-spacing: 1.2px; }
-        .tv-queue-list { flex: 1; overflow: hidden; padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+        .tv-queue-list { flex: 1; overflow: auto; padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
         .tv-empty { text-align: center; padding: 40px 0; color: rgba(255,255,255,0.4); font-size: 14px; }
 
         .qr {
@@ -1089,6 +1114,86 @@ export default function PickupTV() {
           border-radius: 999px; background: rgba(252,191,17,0.18);
           color: var(--binus-gold); font-weight: 800; font-size: 11px;
           display: flex; align-items: center; justify-content: center;
+        }
+
+        @media (max-height: 860px) {
+          .tv-root {
+            grid-template-rows: clamp(66px, 7.2vh, 88px) 1fr clamp(42px, 5.5vh, 58px);
+            gap: clamp(8px, 1.2vh, 12px);
+            padding: clamp(10px, 1.6vh, 18px) clamp(12px, 1.8vw, 20px) 0;
+          }
+          .tv-header {
+            padding: 8px 14px;
+          }
+          .tv-wall {
+            border-radius: 16px;
+            padding: 12px;
+          }
+          .wall-grid {
+            gap: 10px;
+          }
+          .pcard .pc-band {
+            padding: 8px 12px;
+            font-size: 11px;
+          }
+          .pcard.featured .pc-band {
+            font-size: 13px;
+            padding: 9px 14px;
+          }
+          .pc-body {
+            padding: 8px;
+            gap: 8px;
+          }
+          .pcard.featured .pc-body {
+            padding: 10px;
+            gap: 10px;
+          }
+          .pcard.featured .pc-photo {
+            width: clamp(90px, 18cqw, 150px);
+            height: clamp(90px, 18cqw, 150px);
+          }
+          .pc-students-grid {
+            gap: 10px;
+          }
+          .pc-student-tile {
+            padding: 10px 12px 10px 10px;
+            gap: 10px;
+          }
+          .pc-tile-photo, .pc-tile-fb {
+            width: clamp(62px, 7.2cqw, 90px);
+            height: clamp(62px, 7.2cqw, 90px);
+          }
+          .pc-tile-name {
+            font-size: clamp(16px, 2.1cqw, 22px);
+          }
+          .pc-success-seal {
+            margin-top: 10px;
+            padding: 8px;
+          }
+          .tv-queue {
+            border-radius: 16px;
+            padding: 10px;
+          }
+          .tv-queue-title {
+            font-size: 14px;
+            padding: 0 4px 8px;
+          }
+          .qr {
+            grid-template-columns: 44px 1fr auto;
+            gap: 8px;
+            padding: 8px 10px;
+          }
+          .qr-photo {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+          }
+          .qr-name {
+            font-size: 13px;
+          }
+          .qr-sub {
+            font-size: 10px;
+          }
         }
 
         /* Spirit ticker */
@@ -1533,7 +1638,7 @@ function TvEntryScreen({ bootError, onAdopt }) {
   );
 }
 
-function PickupCard({ ev, featured, serverOffsetMs }) {
+function PickupCard({ ev, featured, serverOffsetMs, featuredStudentLimit = 10 }) {
   const theme = STATE_THEME[ev.cardState] || STATE_THEME.yellow;
   const decisionLabel = DECISION_LABEL[ev.decision] || ev.decision;
   const live = (() => {
@@ -1542,7 +1647,7 @@ function PickupCard({ ev, featured, serverOffsetMs }) {
     const syncedNowMs = Date.now() + (serverOffsetMs || 0);
     return Number.isFinite(eventMs) ? ((syncedNowMs - eventMs) / 1000) < 25 : false;
   })();
-  const studentLimit = featured ? 12 : 3;
+  const studentLimit = featured ? featuredStudentLimit : 3;
   const studentSrc = ev.capturePath || ev.chaperone?.photoUrl;
   const students = ev.students || [];
 
