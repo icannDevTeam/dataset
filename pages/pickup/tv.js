@@ -441,16 +441,33 @@ export default function PickupTV() {
             ) : wall.length === 0 ? (
               <IdleSplash />
             ) : (
-              <div className={`wall-grid count-${wall.length}`}>
-                {wall.map((e, i) => (
-                  <PickupCard
-                    key={e.id}
-                    ev={e}
-                    featured={i === 0}
-                    serverOffsetMs={serverOffsetMs}
-                    featuredStudentLimit={isCompact ? 6 : 10}
-                  />
-                ))}
+              <div className="wall-flex">
+                {wall[0] && (
+                  <div className="wall-featured">
+                    <PickupCard
+                      key={`${wall[0].id}-featured`}
+                      ev={wall[0]}
+                      featured
+                      serverOffsetMs={serverOffsetMs}
+                      featuredStudentLimit={isCompact ? 4 : 8}
+                    />
+                  </div>
+                )}
+
+                {wall.length > 1 && (
+                  <div className="wall-support" role="list" aria-label="Upcoming cards">
+                    {wall.slice(1).map((e) => (
+                      <div key={`${e.id}-support`} className="wall-support-item" role="listitem">
+                        <PickupCard
+                          ev={e}
+                          featured={false}
+                          serverOffsetMs={serverOffsetMs}
+                          featuredStudentLimit={isCompact ? 4 : 8}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -614,9 +631,25 @@ export default function PickupTV() {
             display: flex;
             min-height: 0;
           }
+          .wall-flex {
+            flex-direction: column;
+          }
+          .wall-featured {
+            flex: 0 0 58%;
+          }
+          .wall-support {
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            align-content: stretch;
+          }
+          .wall-support-item {
+            flex: 0 0 min(360px, 72vw);
+            min-width: 240px;
+          }
         }
 
-        /* Card wall (5 simultaneous pickup cards) */
+        /* Card wall */
         .tv-wall {
           background: rgba(255,255,255,0.96);
           border-radius: 24px;
@@ -624,42 +657,49 @@ export default function PickupTV() {
           padding: 18px;
           overflow: hidden;
           position: relative;
+          min-height: 0;
         }
-        .wall-grid {
-          display: grid;
-          gap: 14px;
+        .wall-flex {
+          display: flex;
+          align-items: stretch;
+          gap: 12px;
           height: 100%;
+          min-height: 0;
+          min-width: 0;
         }
-        /* Adaptive layout: more cards = denser grid. Featured (newest) is bigger. */
-        .wall-grid.count-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
-        .wall-grid.count-2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
-        .wall-grid.count-3 {
-          grid-template-columns: 1.4fr 1fr;
-          grid-template-rows: 1fr 1fr;
+        .wall-featured {
+          flex: 1.35 1 0;
+          min-width: 0;
+          min-height: 0;
+          display: flex;
+          transition: all 380ms cubic-bezier(.2,.8,.2,1);
         }
-        .wall-grid.count-3 > :nth-child(1) { grid-row: span 2; }
-        /* Featured big card on the left, 4 supporting cards in a 2x2 grid on the right. */
-        .wall-grid.count-4 {
-          grid-template-columns: 1.4fr 1fr 1fr;
-          grid-template-rows: 1fr 1fr;
+        .wall-featured > :global(.pcard),
+        .wall-featured .pcard {
+          flex: 1;
+          min-height: 0;
         }
-        .wall-grid.count-4 > :nth-child(1) { grid-row: span 2; }
-        .wall-grid.count-5 {
-          grid-template-columns: 1.3fr 1fr 1fr;
-          grid-template-rows: 1fr 1fr;
+        .wall-support {
+          flex: 1 1 0;
+          min-width: 0;
+          min-height: 0;
+          display: flex;
+          flex-wrap: wrap;
+          align-content: flex-start;
+          gap: 10px;
+          overflow: auto;
+          padding-right: 2px;
         }
-        .wall-grid.count-5 > :nth-child(1) { grid-row: span 2; }
-        .wall-grid.count-6 {
-          grid-template-columns: 1fr 1fr 1fr;
-          grid-template-rows: 1fr 1fr;
+        .wall-support-item {
+          flex: 1 1 calc(50% - 6px);
+          min-width: 220px;
+          display: flex;
+          transition: transform 340ms ease, opacity 340ms ease;
         }
-        .wall-grid.count-7,
-        .wall-grid.count-8 {
-          grid-template-columns: 1.3fr 1fr 1fr 1fr;
-          grid-template-rows: 1fr 1fr;
+        .wall-support-item .pcard {
+          flex: 1;
+          min-height: 180px;
         }
-        .wall-grid.count-7 > :nth-child(1),
-        .wall-grid.count-8 > :nth-child(1) { grid-row: span 2; }
 
         .pcard {
           background: #fffaf2;
@@ -669,7 +709,8 @@ export default function PickupTV() {
           border: 2px solid #f1e7d7;
           position: relative;
           min-height: 0; min-width: 0;
-          animation: cardIn 0.35s ease-out;
+          animation: cardIn 0.4s ease-out;
+          transition: transform 360ms cubic-bezier(.2,.8,.2,1), box-shadow 320ms ease, border-color 280ms ease;
           container-type: inline-size;
         }
         .pcard.featured { border-width: 3px; box-shadow: 0 12px 40px rgba(139,21,56,0.18); }
@@ -679,7 +720,7 @@ export default function PickupTV() {
           color: white; font-weight: 800; letter-spacing: 1.2px;
           font-size: 13px;
         }
-        .pcard.featured .pc-band { font-size: 16px; padding: 12px 20px; }
+        .pcard.featured .pc-band { font-size: 14px; padding: 11px 16px; }
         .pc-band.success { background: linear-gradient(90deg, #15803d, #22c55e); }
         .pc-band.warn    { background: linear-gradient(90deg, #b45309, #fbbf24); color: #2a1500; }
         .pc-band.danger  { background: linear-gradient(90deg, #991b1b, #ef4444); }
@@ -793,7 +834,7 @@ export default function PickupTV() {
         }
         .pc-tile-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
         .pc-tile-name {
-          font-size: clamp(20px, 2.6cqw, 28px);
+          font-size: clamp(16px, 2.1cqw, 22px);
           font-weight: 800; color: var(--ink); line-height: 1.15;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
@@ -890,7 +931,7 @@ export default function PickupTV() {
           position: relative;
           flex-shrink: 0;
         }
-        .pcard.featured .pc-photo { width: clamp(120px, 26cqw, 220px); height: clamp(120px, 26cqw, 220px); border-width: 5px; border-radius: 18px; }
+        .pcard.featured .pc-photo { width: clamp(100px, 22cqw, 180px); height: clamp(100px, 22cqw, 180px); border-width: 5px; border-radius: 18px; }
         .pc-photo img { width: 100%; height: 100%; object-fit: cover; }
         .pc-photo .pc-fallback {
           position: absolute; inset: 0;
@@ -907,13 +948,13 @@ export default function PickupTV() {
 
         .pc-info { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
         .pc-name {
-          font-size: clamp(14px, 4cqw, 22px); font-weight: 800; line-height: 1.05;
+          font-size: clamp(13px, 3.2cqw, 19px); font-weight: 800; line-height: 1.05;
           color: var(--binus-maroon); letter-spacing: -0.3px;
           overflow: hidden; text-overflow: ellipsis;
           display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
           word-break: break-word;
         }
-        .pcard.featured .pc-name { font-size: clamp(22px, 5cqw, 38px); }
+        .pcard.featured .pc-name { font-size: clamp(19px, 4.4cqw, 30px); }
         .pc-rel {
           margin-top: 6px;
           align-self: flex-start;
@@ -1129,8 +1170,11 @@ export default function PickupTV() {
             border-radius: 16px;
             padding: 12px;
           }
-          .wall-grid {
+          .wall-flex {
             gap: 10px;
+          }
+          .wall-support {
+            gap: 8px;
           }
           .pcard .pc-band {
             padding: 8px 12px;
