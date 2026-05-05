@@ -14,6 +14,7 @@ import admin from 'firebase-admin';
 import { withAuth } from '../../../../lib/auth-middleware';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { verifyCookie } from '../../auth/session';
+const { isTeacherEmail, classesIntersect } = require('../../../../lib/teacher-auth');
 const tenancy = require('../../../../lib/tenancy');
 
 const WINDOW_MS = 10 * 60 * 1000;
@@ -27,10 +28,6 @@ function readCookie(req, name) {
     return decodeURIComponent(p.slice(name.length + 1));
   }
   return null;
-}
-
-function normalizeClassSet(values) {
-  return new Set((values || []).map((x) => String(x || '').trim().toUpperCase()).filter(Boolean));
 }
 
 async function handler(req, res) {
@@ -62,7 +59,7 @@ async function handler(req, res) {
   if (user.disabled) {
     return res.status(403).json({ error: 'account disabled' });
   }
-  if (actorRole === 'teacher' && !actorEmail.endsWith(`@${TEACHER_EMAIL_DOMAIN}`)) {
+  if (actorRole === 'teacher' && !isTeacherEmail(actorEmail, TEACHER_EMAIL_DOMAIN)) {
     return res.status(403).json({ error: `teacher login must use @${TEACHER_EMAIL_DOMAIN}` });
   }
 
@@ -97,12 +94,12 @@ async function handler(req, res) {
 
   // Teacher can only validate events for their assigned classes.
   if (actorRole === 'teacher') {
-    const teacherClasses = normalizeClassSet(user.classScopes || []);
-    if (teacherClasses.size === 0) {
+    const teacherClasses = Array.isArray(user.classScopes) ? user.classScopes : [];
+    if (teacherClasses.length === 0) {
       return res.status(403).json({ error: 'teacher has no class scope assigned' });
     }
-    const eventClasses = normalizeClassSet((ev.students || []).map((s) => s.homeroom));
-    const allowed = [...eventClasses].some((cls) => teacherClasses.has(cls));
+    const eventClasses = (ev.students || []).map((s) => s.homeroom);
+    const allowed = classesIntersect(teacherClasses, eventClasses);
     if (!allowed) {
       return res.status(403).json({ error: 'event not in your assigned class scope' });
     }

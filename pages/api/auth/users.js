@@ -11,21 +11,10 @@ import { initializeFirebase, getFirestoreDB } from '../../../lib/firebase-admin'
 import { withAuth } from '../../../lib/auth-middleware';
 import { resolvePermissions } from '../../../lib/permissions';
 import admin from 'firebase-admin';
+const { sanitizeClassScopes, isTeacherEmail } = require('../../../lib/teacher-auth');
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
 const TEACHER_EMAIL_DOMAIN = (process.env.TEACHER_EMAIL_DOMAIN || 'binus.edu').toLowerCase();
-
-function sanitizeClassScopes(scopes) {
-  if (!Array.isArray(scopes)) return [];
-  return [...new Set(scopes
-    .map((x) => String(x || '').trim().toUpperCase())
-    .filter(Boolean)
-    .slice(0, 50))];
-}
-
-function isTeacherEmail(email) {
-  return String(email || '').toLowerCase().endsWith(`@${TEACHER_EMAIL_DOMAIN}`);
-}
 
 async function verifyAdmin(req) {
   const authHeader = req.headers['authorization'];
@@ -129,7 +118,7 @@ async function handler(req, res) {
 
     // Teacher account policy
     if (assignedRole === 'teacher') {
-      if (!isTeacherEmail(cleanEmail)) {
+      if (!isTeacherEmail(cleanEmail, TEACHER_EMAIL_DOMAIN)) {
         return res.status(400).json({ error: `Teacher accounts must use @${TEACHER_EMAIL_DOMAIN} email.` });
       }
       if (cleanClassScopes.length === 0) {
@@ -301,7 +290,7 @@ async function handler(req, res) {
         : (Array.isArray(doc.data().classScopes) ? doc.data().classScopes : []);
 
       if (effectiveRole === 'teacher') {
-        if (!isTeacherEmail(effectiveEmail)) {
+        if (!isTeacherEmail(effectiveEmail, TEACHER_EMAIL_DOMAIN)) {
           return res.status(400).json({ error: `Teacher accounts must use @${TEACHER_EMAIL_DOMAIN} email.` });
         }
         if (!effectiveClassScopes || effectiveClassScopes.length === 0) {
