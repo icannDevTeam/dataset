@@ -20,11 +20,17 @@ import { withAuth } from '../../../../lib/auth-middleware';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 import admin from 'firebase-admin';
 import crypto from 'crypto';
-import { enrollChaperones } from '../../../../lib/chaperone-enroll';
 
 const tenancy = require('../../../../lib/tenancy');
 
 const FIRST_CHAPERONE_NO = 9000000000;
+
+// Extract grade ('1'…'12') from a homeroom string like '4A', '12-IB', etc.
+function gradeFromHomeroom(hr) {
+  if (!hr) return null;
+  const m = String(hr).match(/^(\d{1,2})/);
+  return m ? m[1] : null;
+}
 
 /**
  * Atomically reserve next chaperone employeeNo. Mirror of
@@ -85,6 +91,22 @@ async function handler(req, res) {
     const created = [];
     const studentDenorm = new Map(); // sid -> array of {chaperoneId, name, relation}
 
+    // Pre-fetch authorized students once so we can stamp grades/classes onto
+    // each chaperone doc (used by the Enroll page to group + target devices).
+    const allAuthorizedSids = new Set();
+    for (const c of rec.chaperones) {
+      (c.authorizedStudentIds || []).forEach((sid) => sid && allAuthorizedSids.add(sid));
+    }
+    const studentMetaById = {};
+    await Promise.all([...allAuthorizedSids].map(async (sid) => {
+      try {
+        const s = await db.doc(`${tenancy.studentsPath(tid)}/${sid}`).get();
+        if (s.exists) { studentMetaById[sid] = s.data() || {}; return; }
+        const legacy = await db.doc(`students/${sid}`).get();
+        if (legacy.exists) studentMetaById[sid] = legacy.data() || {};
+      } catch {}
+    }));
+
     for (const c of rec.chaperones) {
       const employeeNo = await allocateEmployeeNo(db, tid);
       const chaperoneId = `chap-${employeeNo}`;
@@ -101,6 +123,19 @@ async function handler(req, res) {
       }
       // No more skip-on-empty; admin will upload faces in a follow-up step.
 
+      // Derive grades / homerooms from the authorized students. These are
+      // used by the Enroll page to (a) group chaperones by class and
+      // (b) push only to grade-scoped Hikvision terminals.
+      const studentClassesSet = new Set();
+      const studentGradesSet = new Set();
+      for (const sid of (c.authorizedStudentIds || [])) {
+        const s = studentMetaById[sid];
+        if (!s) continue;
+        if (s.homeroom) studentClassesSet.add(String(s.homeroom));
+        const g = s.grade ? String(s.grade) : gradeFromHomeroom(s.homeroom);
+        if (g) studentGradesSet.add(g);
+      }
+
       const chapDoc = {
         chaperoneId,
         employeeNo,
@@ -114,12 +149,14 @@ async function handler(req, res) {
         guardianEmail: rec.guardian.email,
         guardianPhone: rec.guardian.phone,
         authorizedStudentIds: c.authorizedStudentIds || [],
+        studentClasses: [...studentClassesSet],
+        studentGrades: [...studentGradesSet],
         facePaths: finalFacePaths,
         // 'approved_pending_faces' = chaperone is allocated and authorized but
         // cannot be enrolled on the Hikvision device until an admin uploads
         // photos via /api/pickup/admin/chaperone-photos.
         status: finalFacePaths.length === 0 ? 'approved_pending_faces' : 'approved',
-        deviceEnrolled: false,    // P2: listener / batch job sets true
+        deviceEnrolled: false,    // flipped by /v2/pickup-enroll page
         deviceEnrollErrors: null,
         approvedAt: now,
         approvedFromOnboarding: recordId,
@@ -173,24 +210,16 @@ async function handler(req, res) {
       }));
     } catch (e) { console.error('[approve] lock update', e.message); }
 
-    // ── Auto-enrol on Hikvision devices (best-effort) ──────────────────────
-    // Failures are recorded on each chaperone doc (deviceEnrolled/deviceEnrollErrors)
-    // so the admin can retry via /api/pickup/admin/reenroll without blocking approval.
-    // Skip chaperones whose faces haven't been uploaded yet (Phase 2 admin upload step).
-    const enrollable = created.filter((c) => c.facesCopied > 0).map((c) => c.chaperoneId);
-    let enrollment = [];
-    try {
-      enrollment = enrollable.length
-        ? await enrollChaperones(db, bucket, tid, enrollable)
-        : [];
-    } catch (e) {
-      console.error('[pickup/admin/approve] enrollment error', e.message);
-      enrollment = created.map((c) => ({ chaperoneId: c.chaperoneId, ok: false, error: e.message }));
-    }
-
-    await recRef.set({ enrollment }, { merge: true });
-
-    return res.status(200).json({ ok: true, recordId, allocated: created, enrollment });
+    // Hikvision device enrolment is intentionally DECOUPLED from approval.
+    // Admins go to /v2/pickup-enroll once photos are uploaded to push the
+    // chaperone to the right grade-level terminal(s). This avoids blind
+    // pushes to all gates and gives a clean enrolled/not-enrolled board.
+    return res.status(200).json({
+      ok: true,
+      recordId,
+      allocated: created,
+      nextStep: 'upload-photos-then-enroll',
+    });
   } catch (err) {
     console.error('[pickup/admin/approve]', err.message, err.stack);
     return res.status(500).json({ error: 'internal', message: err.message });

@@ -21,7 +21,7 @@ const tenancy = require('../../../../lib/tenancy');
 
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const { chaperoneIds, recordId, tenant } = req.body || {};
+  const { chaperoneIds, recordId, tenant, gradeFilter, deviceIps } = req.body || {};
   const tid = tenant ? String(tenant) : tenancy.getTenantId();
 
   try {
@@ -42,7 +42,15 @@ async function handler(req, res) {
       return res.status(400).json({ error: 'no chaperoneIds resolved' });
     }
 
-    const summary = await enrollChaperones(db, bucket, tid, ids);
+    const opts = {};
+    if (Array.isArray(gradeFilter) && gradeFilter.length > 0) {
+      opts.gradeFilter = gradeFilter.map(String);
+    }
+    if (Array.isArray(deviceIps) && deviceIps.length > 0) {
+      opts.deviceIps = deviceIps.map(String);
+    }
+
+    const summary = await enrollChaperones(db, bucket, tid, ids, opts);
 
     if (recordId) {
       await db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`).set(

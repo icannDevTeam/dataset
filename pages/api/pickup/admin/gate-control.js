@@ -23,6 +23,7 @@ import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withAuth } from '../../../../lib/auth-middleware';
 const tenancy = require('../../../../lib/tenancy');
+const { terminalGateStatus, isValidHHMM } = require('../../../../lib/terminal-gate');
 
 async function handler(req, res) {
   try {
@@ -35,18 +36,48 @@ async function handler(req, res) {
       const val = req.body?.gateOverride;
       const tidParam = req.body?.terminalId || req.body?.profileId;
       if (!tidParam) return res.status(400).json({ error: 'terminalId required' });
-      if (val !== 'open' && val !== 'closed' && val !== null) {
-        return res.status(400).json({ error: 'gateOverride must be "open", "closed", or null' });
-      }
+
       const ref = termsRef.doc(String(tidParam));
       const snap = await ref.get();
       if (!snap.exists) return res.status(404).json({ error: 'terminal not found' });
-      await ref.set({
-        gateOverride: val,
-        gateOverrideAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-      return res.status(200).json({ ok: true, terminalId: tidParam, gateOverride: val });
+
+      const patch = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+
+      // Schedule edits (optional)
+      if (req.body?.windowOpen !== undefined) {
+        if (req.body.windowOpen && !isValidHHMM(req.body.windowOpen)) {
+          return res.status(400).json({ error: 'windowOpen must be HH:MM' });
+        }
+        patch.windowOpen = req.body.windowOpen || null;
+      }
+      if (req.body?.windowClose !== undefined) {
+        if (req.body.windowClose && !isValidHHMM(req.body.windowClose)) {
+          return res.status(400).json({ error: 'windowClose must be HH:MM' });
+        }
+        patch.windowClose = req.body.windowClose || null;
+      }
+
+      // Manual override (optional, but typical for this endpoint)
+      if (val !== undefined) {
+        if (val !== 'open' && val !== 'closed' && val !== null) {
+          return res.status(400).json({ error: 'gateOverride must be "open", "closed", or null' });
+        }
+        patch.gateOverride = val;
+        patch.gateOverrideAt = admin.firestore.FieldValue.serverTimestamp();
+        patch.gateOverrideBy = req.user?.email || req.user?.username || 'admin';
+      }
+
+      await ref.set(patch, { merge: true });
+      const updated = (await ref.get()).data();
+      const eff = terminalGateStatus(updated);
+      return res.status(200).json({
+        ok: true,
+        terminalId: tidParam,
+        gateOverride: updated.gateOverride || null,
+        windowOpen: updated.windowOpen || null,
+        windowClose: updated.windowClose || null,
+        effective: eff,
+      });
     }
 
     if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
@@ -55,15 +86,14 @@ async function handler(req, res) {
     const profiles = snap.docs.map((d) => {
       const t = d.data();
       if (t.enabled === false) return null;
-      const override = t.gateOverride === 'open' || t.gateOverride === 'closed' ? t.gateOverride : null;
-      const open = override ? override === 'open' : true;
+      const status = terminalGateStatus(t);
       return {
         id: d.id,
         name: t.name || d.id,
         gates: [t.gateLabel || t.name || d.id],
-        override,
-        scheduled: { configured: false, opensAt: '', closesAt: '', open: true },
-        effective: { open, manualOverride: override },
+        override: status.manualOverride,
+        scheduled: status.scheduled,
+        effective: { open: status.open, manualOverride: status.manualOverride, reason: status.reason },
       };
     }).filter(Boolean);
 

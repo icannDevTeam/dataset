@@ -97,6 +97,9 @@ async function handler(req, res) {
     const byClassMap   = {};   // homeroom -> total
     const cardStateTot = { green: 0, yellow: 0, red: 0 };
     const chaperoneMap = {};   // chaperone name -> total
+    const officerMap   = {};   // officer name -> overrides count
+    const byHour       = new Array(24).fill(0).map(() => ({ total: 0, overridden: 0 }));
+    const recent       = [];   // last events for activity feed
 
     let totalPickups      = 0;
     let autoApproved      = 0;
@@ -147,6 +150,39 @@ async function handler(req, res) {
       // chaperone frequency
       const chapName = e.chaperone?.name || e.chaperoneId;
       if (chapName) inc(chaperoneMap, chapName);
+
+      // officer overrides — track who did them
+      if (isOverride) {
+        const off = e.officerOverride?.officer || e.officerOverride?.name || 'Unknown';
+        inc(officerMap, off);
+      }
+
+      // peak hours (WIB hour-of-day)
+      try {
+        const dt = e.recordedAt?.toDate ? e.recordedAt.toDate() : new Date(e.recordedAt);
+        const wibHour = new Date(dt.getTime() + 7 * 3600 * 1000).getUTCHours();
+        byHour[wibHour].total++;
+        if (isOverride) byHour[wibHour].overridden++;
+      } catch {}
+
+      // recent activity (collect first 50, snap is desc-ordered)
+      if (recent.length < 50) {
+        const dt = e.recordedAt?.toDate ? e.recordedAt.toDate() : new Date(e.recordedAt);
+        recent.push({
+          id: doc.id,
+          at: dt?.toISOString?.() || null,
+          gate,
+          cardState,
+          isOverride,
+          chaperone: chapName || null,
+          officer: e.officerOverride?.officer || null,
+          note: e.officerOverride?.note || null,
+          students: (e.students || []).map(s => ({
+            name: s.name || s.fullName,
+            homeroom: s.homeroom || s.class || null,
+          })),
+        });
+      }
     });
 
     // ── Build output arrays ─────────────────────────────────────────────────
@@ -177,6 +213,17 @@ async function handler(req, res) {
       .sort((a, b) => b.total - a.total)
       .slice(0, 10);
 
+    const topOfficers = Object.entries(officerMap)
+      .map(([name, total]) => ({ name, total }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+
+    // Peak hours: find busiest hour
+    const peakHourIdx = byHour.reduce((best, h, i) => h.total > byHour[best].total ? i : best, 0);
+    const peakHour = byHour[peakHourIdx].total > 0
+      ? { hour: peakHourIdx, count: byHour[peakHourIdx].total }
+      : null;
+
     const avgPerDay    = totalDays > 0 ? Math.round((totalPickups / totalDays) * 10) / 10 : 0;
     const approvalRate = totalPickups > 0 ? Math.round((autoApproved / totalPickups) * 1000) / 10 : 0;
     const overrideRate = totalPickups > 0 ? Math.round((officerOverridden / totalPickups) * 1000) / 10 : 0;
@@ -197,7 +244,11 @@ async function handler(req, res) {
       byGate,
       byClass,
       byCardState: cardStateTot,
+      byHour,
+      peakHour,
       topChaperones,
+      topOfficers,
+      recent,
     });
   } catch (err) {
     console.error('[pickup/admin/analytics]', err.message, err.stack);

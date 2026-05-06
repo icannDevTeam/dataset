@@ -32,6 +32,81 @@ const QUICK_RANGES = [
   { label: 'Last 30 Days', get: () => ({ from: getWIBDate(-29), to: getWIBDate() }) },
 ];
 
+// Cooldown — keep aligned with backend/attendance_listener.py DUPLICATE_WINDOW
+const SCAN_COOLDOWN_HOURS = 8;
+
+function downloadCSV(filename, rows) {
+  const csv = rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportPickupCSV(data, fromDate, toDate) {
+  if (!data) return;
+  const generated = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  const rows = [];
+  rows.push(['BINUS PickupGuard — Analytics Report']);
+  rows.push(['Date Range', `${fromDate} → ${toDate}`]);
+  rows.push(['Total Days', data.range?.totalDays ?? '']);
+  rows.push(['Generated At', generated]);
+  rows.push([]);
+  rows.push(['--- Summary ---']);
+  rows.push(['Total Pickups', data.summary.totalPickups]);
+  rows.push(['Auto-Approved', data.summary.autoApproved, `${data.summary.approvalRate}%`]);
+  rows.push(['Officer Overridden', data.summary.officerOverridden, `${data.summary.overrideRate}%`]);
+  rows.push(['Flagged (non-green)', data.summary.flagged]);
+  rows.push(['Average / Day', data.summary.avgPerDay]);
+  if (data.peakHour) rows.push(['Peak Hour (WIB)', `${String(data.peakHour.hour).padStart(2, '0')}:00`, `${data.peakHour.count} pickups`]);
+  rows.push([]);
+  rows.push(['--- Card State ---']);
+  rows.push(['State', 'Count']);
+  Object.entries(data.byCardState || {}).forEach(([k, v]) => rows.push([k, v]));
+  rows.push([]);
+  rows.push(['--- Daily Volume ---']);
+  rows.push(['Date', 'Total', 'Auto-Approved', 'Overridden', 'Green', 'Yellow', 'Red']);
+  (data.byDate || []).forEach(d => rows.push([d.date, d.total, d.autoApproved, d.overridden, d.green, d.yellow, d.red]));
+  rows.push([]);
+  rows.push(['--- Hourly Volume (WIB) ---']);
+  rows.push(['Hour', 'Total Pickups', 'Overrides']);
+  (data.byHour || []).forEach((h, i) => rows.push([`${String(i).padStart(2, '0')}:00`, h.total, h.overridden]));
+  rows.push([]);
+  rows.push(['--- By Gate ---']);
+  rows.push(['Gate', 'Total', 'Auto-Approved', 'Overridden']);
+  (data.byGate || []).forEach(g => rows.push([g.gate, g.total, g.autoApproved, g.overridden]));
+  rows.push([]);
+  rows.push(['--- By Class ---']);
+  rows.push(['Homeroom', 'Total Pickups']);
+  (data.byClass || []).forEach(c => rows.push([c.homeroom || c.class, c.total]));
+  rows.push([]);
+  rows.push(['--- Top Chaperones ---']);
+  rows.push(['Name', 'Pickup Count']);
+  (data.topChaperones || []).forEach(c => rows.push([c.name, c.total ?? c.count]));
+  rows.push([]);
+  rows.push(['--- Top Officers (Overrides) ---']);
+  rows.push(['Officer', 'Override Count']);
+  (data.topOfficers || []).forEach(o => rows.push([o.name, o.total]));
+  rows.push([]);
+  rows.push(['--- Recent Events ---']);
+  rows.push(['Time (UTC)', 'Gate', 'Card State', 'Override', 'Officer', 'Chaperone', 'Note', 'Students']);
+  (data.recent || []).forEach(r => rows.push([
+    (r.at || '').replace('T', ' ').slice(0, 19),
+    r.gate,
+    r.cardState,
+    r.isOverride ? 'YES' : 'no',
+    r.officer || '',
+    r.chaperone || '',
+    r.note || '',
+    (r.students || []).map(s => `${s.name}${s.homeroom ? ` (${s.homeroom})` : ''}`).join(' | '),
+  ]));
+  downloadCSV(`pickupguard-report-${fromDate}-to-${toDate}.csv`, rows);
+}
+
+
 export default function ReportsPage() {
   // Module toggle: 'attendance' | 'pickup'
   const [module, setModule] = useState('attendance');
@@ -154,28 +229,55 @@ export default function ReportsPage() {
     return <i className={`ph ${sortDir === 'asc' ? 'ph-caret-up' : 'ph-caret-down'} text-brand-400 ml-1`}></i>;
   };
 
-  // CSV export
+  // CSV export — full breakdown with metadata, daily, terminals, and class summary
   const exportCSV = useCallback(() => {
     if (!data) return;
-    const rows = [['Name', 'Student ID', 'Class', 'Grade', 'Days Present', 'Days Late', 'Days Absent', 'Attendance Rate', 'On-Time Rate']];
-    data.studentRecords.forEach((s) =>
-      rows.push([s.name, s.employeeNo, s.homeroom, s.grade, s.daysPresent, s.daysLate, s.daysAbsent, s.attendanceRate + '%', s.onTimeRate + '%'])
-    );
+    const generated = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+    const rows = [];
+    rows.push(['BINUS Facial Attendance — Detailed Report']);
+    rows.push(['Date Range', `${fromDate} → ${toDate}`]);
+    rows.push(['School Days With Data', `${data.range.daysWithData} of ${data.range.schoolDays}`]);
+    rows.push(['Filters', `class=${filterClass || 'ALL'}, grade=${filterGrade || 'ALL'}, terminal=${filterSource || 'ALL'}`]);
+    rows.push(['Generated At', generated]);
+    rows.push(['Scan Cooldown', `${SCAN_COOLDOWN_HOURS} hours (one attendance per student per session)`]);
+    rows.push([]);
+    rows.push(['--- Summary ---']);
+    rows.push(['Enrolled Students', data.summary.enrolledStudents]);
+    rows.push(['Tracked Students', data.summary.totalStudents]);
+    rows.push(['Total Scans', data.summary.totalScans]);
+    rows.push(['On-Time Scans', data.summary.totalPresent, `${data.summary.presentRate}%`]);
+    rows.push(['Late Scans', data.summary.totalLate, `${data.summary.lateRate}%`]);
+    rows.push(['Avg Daily Attendance', data.summary.avgDailyAttendance]);
+    rows.push([]);
+    rows.push(['--- Per-Student ---']);
+    rows.push(['Name', 'Student ID', 'Class', 'Grade', 'Days Present', 'Days Late', 'Days Absent', 'Attendance %', 'On-Time %']);
+    [...data.studentRecords]
+      .sort((a, b) => a.homeroom.localeCompare(b.homeroom) || a.name.localeCompare(b.name))
+      .forEach((s) => rows.push([s.name, s.employeeNo, s.homeroom, s.grade, s.daysPresent, s.daysLate, s.daysAbsent, `${s.attendanceRate}%`, `${s.onTimeRate}%`]));
     rows.push([]);
     rows.push(['--- Class Summary ---']);
-    rows.push(['Class', 'Grade', 'Enrolled', 'Students Tracked', 'Total Scans', 'Present', 'Late', 'Attendance Rate', 'On-Time Rate']);
-    data.classSummary.forEach((c) =>
-      rows.push([c.homeroom, c.grade, c.enrolled, c.studentsTracked, c.totalScans, c.totalPresent, c.totalLate, c.attendanceRate + '%', c.onTimeRate + '%'])
+    rows.push(['Class', 'Grade', 'Enrolled', 'Tracked', 'Total Scans', 'Present', 'Late', 'Attendance %', 'On-Time %']);
+    (data.classSummary || []).forEach((c) =>
+      rows.push([c.homeroom, c.grade, c.enrolled, c.studentsTracked, c.totalScans, c.totalPresent, c.totalLate, `${c.attendanceRate}%`, `${c.onTimeRate}%`])
     );
-    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `attendance-report-${fromDate}-to-${toDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [data, fromDate, toDate]);
+    if (data.dailyBreakdown?.length || data.daily?.length) {
+      rows.push([]);
+      rows.push(['--- Daily Breakdown ---']);
+      rows.push(['Date', 'Day', 'Total Scans', 'On-Time', 'Late']);
+      (data.dailyBreakdown || data.daily || []).forEach((d) => {
+        const dt = new Date((d.date || d.day) + 'T00:00:00Z');
+        const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getUTCDay()];
+        rows.push([d.date || d.day, dow, d.totalScans ?? d.total ?? 0, d.present ?? d.onTime ?? 0, d.late ?? 0]);
+      });
+    }
+    if (data.sourceSummary?.length) {
+      rows.push([]);
+      rows.push(['--- Terminal Breakdown ---']);
+      rows.push(['Terminal', 'Total Scans', 'Unique Students', 'On-Time', 'Late', 'On-Time %']);
+      data.sourceSummary.forEach((s) => rows.push([s.source, s.totalScans, s.uniqueStudents, s.present ?? 0, s.late ?? 0, `${s.presentRate ?? 0}%`]));
+    }
+    downloadCSV(`attendance-report-${fromDate}-to-${toDate}.csv`, rows);
+  }, [data, fromDate, toDate, filterClass, filterGrade, filterSource]);
 
   const handlePrint = () => window.print();
 
@@ -206,6 +308,27 @@ export default function ReportsPage() {
       <Head><title>Reports — BINUS Attendance</title></Head>
 
       <div ref={printRef} className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
+
+        {/* Print-only header (hidden on screen via .print-show) */}
+        <div className="print-show hidden mb-4" style={{ borderBottom: '2px solid #8B1538', paddingBottom: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+            <div>
+              <div style={{ fontSize: '11px', letterSpacing: '0.1em', color: '#8B1538', fontWeight: 600 }}>BINUS SCHOOL SIMPRUG</div>
+              <div style={{ fontSize: '20px', fontWeight: 700, color: 'black', marginTop: '2px' }}>
+                {module === 'pickup' ? 'PickupGuard Analytics Report' : 'Facial Attendance Report'}
+              </div>
+              <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>
+                Range: {fromDate} → {toDate}
+                {module === 'attendance' && data && ` · ${data.range.daysWithData} of ${data.range.schoolDays} school days`}
+                {module === 'pickup' && pickupData && ` · ${pickupData.range.totalDays} day(s) · ${pickupData.summary.totalPickups} pickups`}
+              </div>
+            </div>
+            <div style={{ fontSize: '10px', color: '#64748b', textAlign: 'right' }}>
+              Generated {new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC<br/>
+              {module === 'attendance' && `Scan cooldown: ${SCAN_COOLDOWN_HOURS} hours per student`}
+            </div>
+          </div>
+        </div>
 
         {/* Module toggle */}
         <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900/80 border border-slate-800 w-fit no-print">
@@ -248,6 +371,12 @@ export default function ReportsPage() {
                   : 'Configure date range and filters below.'
               )}
             </p>
+            {module === 'attendance' && (
+              <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/70 border border-slate-800 text-xs text-slate-300 no-print">
+                <i className="ph ph-timer text-brand-400"></i>
+                <span>Each student can scan once per <span className="text-white font-semibold">{SCAN_COOLDOWN_HOURS}h</span> session — duplicates within this window are ignored.</span>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-3 no-print">
@@ -272,14 +401,32 @@ export default function ReportsPage() {
               </>
             )}
             {module === 'pickup' && (
-              <button
-                onClick={fetchPickupReport}
-                disabled={pickupLoading}
-                className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50"
-              >
-                <i className="ph ph-arrows-clockwise text-lg"></i>
-                Refresh
-              </button>
+              <>
+                <button
+                  onClick={() => exportPickupCSV(pickupData, fromDate, toDate)}
+                  disabled={!pickupData}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50"
+                >
+                  <i className="ph ph-file-csv text-lg"></i>
+                  Export CSV
+                </button>
+                <button
+                  onClick={handlePrint}
+                  disabled={!pickupData}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-400 text-white rounded-lg text-sm font-semibold transition-all shadow-[0_0_20px_rgba(249,115,22,0.3)] hover:shadow-[0_0_25px_rgba(249,115,22,0.5)] active:scale-95 disabled:opacity-50"
+                >
+                  <i className="ph ph-printer text-lg"></i>
+                  Print Report
+                </button>
+                <button
+                  onClick={fetchPickupReport}
+                  disabled={pickupLoading}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50"
+                >
+                  <i className="ph ph-arrows-clockwise text-lg"></i>
+                  Refresh
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -1453,21 +1600,136 @@ function PickupAnalyticsView({ data, loading, error, fromDate, toDate, setFromDa
             </div>
           )}
 
-          {/* Top Chaperones */}
-          {data.topChaperones?.length > 0 && (
+          {/* Top Chaperones + Top Officers side by side */}
+          <div className="grid lg:grid-cols-2 gap-5">
+            {data.topChaperones?.length > 0 && (
+              <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                  <i className="ph ph-person text-orange-400"></i>
+                  Top Chaperones
+                </h3>
+                <div className="space-y-2">
+                  {data.topChaperones.map((c, i) => (
+                    <div key={c.name} className="flex items-center gap-3 py-2 border-b border-slate-800/40 last:border-0">
+                      <span className="text-xs font-bold text-slate-600 w-5">{i + 1}</span>
+                      <span className="flex-1 text-slate-200 text-sm">{c.name}</span>
+                      <span className="text-sm font-semibold text-orange-300">{c.total ?? c.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data.topOfficers?.length > 0 && (
+              <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+                <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                  <i className="ph ph-shield-check text-amber-400"></i>
+                  Top Officers (Manual Overrides)
+                </h3>
+                <div className="space-y-2">
+                  {data.topOfficers.map((o, i) => (
+                    <div key={o.name} className="flex items-center gap-3 py-2 border-b border-slate-800/40 last:border-0">
+                      <span className="text-xs font-bold text-slate-600 w-5">{i + 1}</span>
+                      <span className="flex-1 text-slate-200 text-sm">{o.name}</span>
+                      <span className="text-sm font-semibold text-amber-300">{o.total}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Peak Hours (24-hour distribution, WIB) */}
+          {data.byHour?.some(h => h.total > 0) && (
             <div className="glass-panel rounded-2xl border border-slate-800 p-5">
-              <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
-                <i className="ph ph-person text-orange-400"></i>
-                Top Chaperones
-              </h3>
-              <div className="space-y-2">
-                {data.topChaperones.map((c, i) => (
-                  <div key={c.name} className="flex items-center gap-3 py-2 border-b border-slate-800/40 last:border-0">
-                    <span className="text-xs font-bold text-slate-600 w-5">{i + 1}</span>
-                    <span className="flex-1 text-slate-200 text-sm">{c.name}</span>
-                    <span className="text-sm font-semibold text-orange-300">{c.count}</span>
-                  </div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <i className="ph ph-clock-countdown text-orange-400"></i>
+                  Peak Hours (WIB)
+                </h3>
+                {data.peakHour && (
+                  <span className="text-xs text-slate-400">
+                    Busiest: <span className="text-orange-300 font-medium">{String(data.peakHour.hour).padStart(2, '0')}:00</span> · {data.peakHour.count} pickups
+                  </span>
+                )}
+              </div>
+              <div className="flex items-end gap-1 h-32">
+                {data.byHour.map((h, i) => {
+                  const max = Math.max(...data.byHour.map(x => x.total), 1);
+                  const pct = Math.round((h.total / max) * 100);
+                  const overridePct = h.total > 0 ? Math.round((h.overridden / h.total) * 100) : 0;
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group relative">
+                      <div className="w-full bg-orange-500/60 rounded-t hover:bg-orange-400/80 transition-colors cursor-default" style={{ height: `${Math.max(pct, h.total > 0 ? 4 : 0)}%` }}>
+                        {h.overridden > 0 && (
+                          <div className="w-full bg-amber-400/80 rounded-t" style={{ height: `${overridePct}%` }}></div>
+                        )}
+                      </div>
+                      <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-10">
+                        {String(i).padStart(2, '0')}:00 — {h.total} ({h.overridden} ovr)
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-2 grid grid-cols-12 text-[10px] text-slate-600">
+                {[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22].map(h => (
+                  <span key={h} className="text-center">{String(h).padStart(2, '0')}</span>
                 ))}
+              </div>
+              <div className="mt-3 flex items-center gap-4 text-[10px] text-slate-500">
+                <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-orange-500/60"></span> Pickups</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-amber-400/80"></span> Officer override</span>
+              </div>
+            </div>
+          )}
+
+          {/* Recent Events */}
+          {data.recent?.length > 0 && (
+            <div className="glass-panel rounded-2xl border border-slate-800 p-5 print-break-inside-avoid">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <i className="ph ph-list-bullets text-orange-400"></i>
+                  Recent Pickup Events
+                </h3>
+                <span className="text-xs text-slate-500">last {Math.min(data.recent.length, 25)} of {data.recent.length}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                      <th className="pb-3 text-left pr-4">Time (WIB)</th>
+                      <th className="pb-3 text-left pr-4">Gate</th>
+                      <th className="pb-3 text-left pr-4">Card</th>
+                      <th className="pb-3 text-left pr-4">Chaperone</th>
+                      <th className="pb-3 text-left pr-4">Students</th>
+                      <th className="pb-3 text-left">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/40">
+                    {data.recent.slice(0, 25).map((r) => {
+                      const wib = r.at ? new Date(new Date(r.at).getTime() + 7 * 3600 * 1000).toISOString().slice(11, 19) : '—';
+                      const cfg = CARD_STATE_COLORS[r.cardState] || CARD_STATE_COLORS.green;
+                      return (
+                        <tr key={r.id} className="hover:bg-white/5">
+                          <td className="py-2 pr-4 font-mono text-xs text-slate-300">{wib}</td>
+                          <td className="py-2 pr-4 text-slate-300">{r.gate}</td>
+                          <td className="py-2 pr-4">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-medium ${cfg.bg} ${cfg.text}`}>
+                              {r.isOverride && <i className="ph ph-shield-warning"></i>}
+                              {cfg.label}
+                            </span>
+                          </td>
+                          <td className="py-2 pr-4 text-slate-200">{r.chaperone || <span className="text-slate-600">—</span>}</td>
+                          <td className="py-2 pr-4 text-slate-300 text-xs">
+                            {(r.students || []).map(s => s.name + (s.homeroom ? ` (${s.homeroom})` : '')).join(', ') || <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="py-2 text-slate-400 text-xs">{r.note || (r.officer ? `via ${r.officer}` : '')}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

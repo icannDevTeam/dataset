@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withAuth } from '../../../../lib/auth-middleware';
 const tenancy = require('../../../../lib/tenancy');
+const { isValidHHMM } = require('../../../../lib/terminal-gate');
 
 function stableTerminalId(name) {
   return crypto.createHash('sha1').update(String(name || '')).digest('hex').slice(0, 12);
@@ -42,6 +43,9 @@ function publicTerminal(id, data) {
     gateLabel: data.gateLabel || null,
     releaseGroupId: data.releaseGroupId || null,
     gateOverride: data.gateOverride || null,    // 'open' | 'closed' | null
+    windowOpen:  typeof data.windowOpen  === 'string' && /^\d{2}:\d{2}$/.test(data.windowOpen)  ? data.windowOpen  : null,
+    windowClose: typeof data.windowClose === 'string' && /^\d{2}:\d{2}$/.test(data.windowClose) ? data.windowClose : null,
+    gateOverrideAt: tsIso(data.gateOverrideAt),
     enabled: data.enabled !== false,
     lastSeenAt: tsIso(data.lastSeenAt),
     createdAt: tsIso(data.createdAt),
@@ -82,6 +86,12 @@ async function handler(req, res) {
         gateOverride: ['open', 'closed', null].includes(req.body?.gateOverride)
           ? req.body.gateOverride
           : (existing.data()?.gateOverride || null),
+        windowOpen:  req.body?.windowOpen  !== undefined
+          ? (req.body.windowOpen  ? (isValidHHMM(req.body.windowOpen)  ? req.body.windowOpen  : null) : null)
+          : (existing.data()?.windowOpen  || null),
+        windowClose: req.body?.windowClose !== undefined
+          ? (req.body.windowClose ? (isValidHHMM(req.body.windowClose) ? req.body.windowClose : null) : null)
+          : (existing.data()?.windowClose || null),
         enabled: req.body?.enabled !== undefined ? !!req.body.enabled : (existing.data()?.enabled !== false),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
@@ -112,6 +122,19 @@ async function handler(req, res) {
           return res.status(400).json({ error: 'gateOverride must be open|closed|null' });
         }
         patch.gateOverride = req.body.gateOverride;
+        patch.gateOverrideAt = admin.firestore.FieldValue.serverTimestamp();
+      }
+      if (req.body?.windowOpen !== undefined) {
+        if (req.body.windowOpen && !isValidHHMM(req.body.windowOpen)) {
+          return res.status(400).json({ error: 'windowOpen must be HH:MM' });
+        }
+        patch.windowOpen = req.body.windowOpen || null;
+      }
+      if (req.body?.windowClose !== undefined) {
+        if (req.body.windowClose && !isValidHHMM(req.body.windowClose)) {
+          return res.status(400).json({ error: 'windowClose must be HH:MM' });
+        }
+        patch.windowClose = req.body.windowClose || null;
       }
       if (req.body?.enabled !== undefined) patch.enabled = !!req.body.enabled;
       await ref.set(patch, { merge: true });

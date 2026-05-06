@@ -157,24 +157,49 @@ export default async function handler(req, res) {
     const cutoffMs = sinceMs && !Number.isNaN(sinceMs)
       ? Math.max(sinceMs, Date.now() - WINDOW_MS)
       : Date.now() - WINDOW_MS;
-    const cutoff = admin.firestore.Timestamp.fromMillis(cutoffMs);
 
     // Firestore IN supports up to 30 values; we only ever expect 1-3 terminals per group.
-    const snap = await db.collection(tenancy.pickupEventsPath(tid))
-      .where('terminalId', 'in', terminalIds.slice(0, 30))
-      .where('recordedAt', '>', cutoff)
-      .orderBy('recordedAt', 'desc')
-      .limit(80).get();
+    // Fetch per-terminal with single equality (no composite index needed) and
+    // filter/sort recordedAt in memory.
+    const perTerm = await Promise.all(
+      terminalIds.slice(0, 30).map((tidx) =>
+        db.collection(tenancy.pickupEventsPath(tid))
+          .where('terminalId', '==', tidx)
+          .limit(200).get()
+      )
+    );
+    const allDocs = perTerm.flatMap((s) => s.docs).filter((d) => {
+      const ms = d.data().recordedAt?.toMillis?.() || 0;
+      return ms > cutoffMs;
+    });
+    allDocs.sort((a, b) => {
+      const ta = a.data().recordedAt?.toMillis?.() || 0;
+      const tb = b.data().recordedAt?.toMillis?.() || 0;
+      return tb - ta;
+    });
+    const snap = { docs: allDocs.slice(0, 80) };
 
     const maxActive = Math.max(1, Math.min(4, parseInt(req.query.max, 10) || 2));
     const active = [];
     const held = [];
+    let todayReleased = 0;
+    const todayStartMs = (() => {
+      // Local-day start in UTC+7 (WIB)
+      const now = new Date(Date.now() + 7 * 3600 * 1000);
+      const ymd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      return ymd - 7 * 3600 * 1000;
+    })();
     for (const doc of snap.docs) {
-      const status = doc.data().status || 'pending';
+      const data = doc.data();
+      const status = data.status || 'pending';
       if (status === 'pending' && active.length < 50) {
         active.push(doc);
       } else if (status === 'held') {
         held.push(doc);
+      } else if (status === 'released') {
+        const releasedAt = data.teacherRelease?.at?.toMillis ? data.teacherRelease.at.toMillis()
+          : (data.recordedAt?.toMillis ? data.recordedAt.toMillis() : 0);
+        if (releasedAt >= todayStartMs) todayReleased++;
       }
     }
     // active is desc-by-recordedAt; show oldest unresolved first (FIFO).
@@ -198,6 +223,7 @@ export default async function handler(req, res) {
       },
       active: activeOut,
       held: heldOut,
+      todayReleased,
     });
   } catch (e) {
     console.error('[pickup/tablet/feed]', e.message);

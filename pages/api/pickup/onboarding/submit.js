@@ -135,7 +135,11 @@ export default async function handler(req, res) {
 
   const validStudentIds = new Set(cleanStudents.map((s) => s.id));
   if (claims.sid && !validStudentIds.has(String(claims.sid))) {
-    return res.status(400).json({ error: 'token-bound student must be in submission' });
+    return res.status(400).json({
+      error: 'token-bound-student-missing',
+      message: `This invite link was issued for student ${claims.sid}. That student must be included in the submission.`,
+      requiredStudentId: String(claims.sid),
+    });
   }
 
   const cleanChaperones = chaperones

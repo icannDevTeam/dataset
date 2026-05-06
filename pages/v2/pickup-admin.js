@@ -299,6 +299,87 @@ export default function PickupAdminPage() {
   // Clear selection when tab changes
   useEffect(() => { setSelected({}); setRejectingId(null); }, [tab]);
 
+  // Admin uploads a student profile photo from the form details view.
+  // The parent form only collects student id+name; admins fill in the photo here.
+  const uploadStudentPhoto = useCallback(async (studentId, file) => {
+    if (!studentId || !file) return;
+    if (!/^image\/(jpe?g|png|webp)$/i.test(file.type)) {
+      pushToast('error', 'Photo must be JPEG, PNG or WebP.');
+      return;
+    }
+    if (file.size > 800 * 1024) {
+      pushToast('error', 'Photo must be ≤ 800 KB.');
+      return;
+    }
+    const reader = new FileReader();
+    const dataUrl = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    try {
+      const r = await fetch('/api/pickup/admin/student-photo', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ studentId, imageBase64: dataUrl }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || j.message || 'upload failed');
+      // Patch the in-memory thumbnails so the new photo shows immediately.
+      setThumbnails((m) => ({ ...m, [studentId]: j.photoUrl }));
+      pushToast('success', `Saved photo for ${studentId}.`);
+      // Refresh records so onboarding-list re-reads `students/{sid}.photoUrl`.
+      reload();
+    } catch (e) {
+      pushToast('error', `Upload failed: ${e.message}`);
+    }
+  }, [reload]);
+
+  // Admin uploads/appends a chaperone face photo (only available after the form
+  // is approved, because that's when chaperones get a stable doc id).
+  const uploadChaperonePhoto = useCallback(async (chaperoneId, file, { replace = false } = {}) => {
+    if (!chaperoneId || !file) return;
+    if (!/^image\/(jpe?g|png|webp)$/i.test(file.type)) {
+      pushToast('error', 'Photo must be JPEG, PNG or WebP.');
+      return;
+    }
+    if (file.size > 800 * 1024) {
+      pushToast('error', 'Photo must be ≤ 800 KB.');
+      return;
+    }
+    const reader = new FileReader();
+    const dataUrl = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    try {
+      const r = await fetch('/api/pickup/admin/chaperone-photos', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chaperoneId,
+          replace,
+          enroll: true,
+          photos: [{ imageBase64: dataUrl }],
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || j.message || 'upload failed');
+      const enrollFails = (j.enrollment || []).filter((e) => !e.ok);
+      if (enrollFails.length) {
+        pushToast('warn', `Photo saved but enroll warning on ${enrollFails.length} device(s).`);
+      } else {
+        pushToast('success', `Chaperone photo ${replace ? 'replaced' : 'added'} & enrolled.`);
+      }
+      reload();
+    } catch (e) {
+      pushToast('error', `Upload failed: ${e.message}`);
+    }
+  }, [reload]);
+
   // ─── Filtered + sorted view ─────────────────────────────────────────────
   const visibleRecords = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -503,9 +584,14 @@ export default function PickupAdminPage() {
           {view === 'kiosks' ? (
             <KioskManager showToast={kioskToast} />
           ) : view === 'settings' ? (
-            <div className="max-w-2xl">
+            <div className="max-w-4xl">
               <h2 className="text-lg font-semibold text-white mb-1">Pickup Settings</h2>
               <p className="text-sm text-slate-400 mb-6">Tenant-level configuration for PickupGuard behaviour.</p>
+
+              {/* Per-terminal gate control + schedule (live state, admin override) */}
+              <div className="mb-4">
+                <TerminalGateControlCard />
+              </div>
 
               {pickupSettings === null ? (
                 <div className="text-slate-400 text-sm">Loading…</div>
@@ -752,6 +838,8 @@ export default function PickupAdminPage() {
                   onReenroll={() => reenroll(rec)}
                   onPhoto={(url, caption) => setLightbox({ url, caption })}
                   onPrint={() => setPrintRec(rec)}
+                  onUploadStudentPhoto={uploadStudentPhoto}
+                  onUploadChaperonePhoto={uploadChaperonePhoto}
                   busy={working[rec.id]}
                   rejecting={rejectingId === rec.id}
                   rejectReason={rejectReason}
@@ -914,6 +1002,261 @@ function LiveGatePill({ ev }) {
   );
 }
 
+// ─── Terminal Gate Control card (Pickup Settings) ──────────────────────────
+//
+// Surfaces the live, per-Hikvision-terminal gate state (manual override + WIB
+// schedule) on the Pickup Settings page so admins can open/close pickup
+// without leaving the dashboard. Shares the same `/api/pickup/admin/terminals`
+// endpoint that /v2/terminals uses, so any change here is reflected everywhere
+// (including the backend gate enforcer that pushes RemoteControl to the door
+// relay only on state transitions).
+function TerminalGateControlCard() {
+  const [terminals, setTerminals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState({});
+  const [now, setNow] = useState(() => new Date());
+  // Per-terminal local schedule edit drafts, keyed by terminal id.
+  const [drafts, setDrafts] = useState({});
+
+  const reload = useCallback(async () => {
+    try {
+      const r = await fetch('/api/pickup/admin/terminals', { credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'failed');
+      setTerminals((j.terminals || []).filter((t) => t.enabled !== false));
+      setErr(null);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+  // Refresh every 15s so the live state stays close to reality without
+  // hammering Firestore.
+  useEffect(() => {
+    const t = setInterval(reload, 15000);
+    return () => clearInterval(t);
+  }, [reload]);
+  // Tick clock every 30s so in-window/out-of-window pills auto-update.
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  const setOverride = async (id, val) => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const r = await fetch(`/api/pickup/admin/terminals?id=${id}`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gateOverride: val }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'failed');
+      await reload();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy((b) => ({ ...b, [id]: false })); }
+  };
+
+  const saveSchedule = async (id) => {
+    const d = drafts[id];
+    if (!d) return;
+    setBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const r = await fetch(`/api/pickup/admin/terminals?id=${id}`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          windowOpen:  d.windowOpen ?? null,
+          windowClose: d.windowClose ?? null,
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'failed');
+      setDrafts((prev) => { const n = { ...prev }; delete n[id]; return n; });
+      await reload();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy((b) => ({ ...b, [id]: false })); }
+  };
+
+  // Compute effective gate state mirroring lib/terminal-gate.js so the UI is
+  // accurate without an extra round-trip.
+  const effective = (t) => {
+    const override = t.gateOverride === 'open' || t.gateOverride === 'closed' ? t.gateOverride : null;
+    const parse = (s) => /^\d{2}:\d{2}$/.test(s || '') ? (parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3), 10)) : null;
+    const o = parse(t.windowOpen), c = parse(t.windowClose);
+    const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    const cur = wib.getUTCHours() * 60 + wib.getUTCMinutes();
+    let scheduledOpen = true, configured = false;
+    if (o != null && c != null) {
+      configured = true;
+      scheduledOpen = o <= c ? (cur >= o && cur <= c) : (cur >= o || cur <= c);
+    }
+    if (override === 'closed') return { open: false, reason: 'manual-closed', override, configured, scheduledOpen };
+    if (override === 'open')   return { open: true,  reason: 'manual-open',   override, configured, scheduledOpen };
+    if (configured)            return { open: scheduledOpen, reason: scheduledOpen ? 'in-window' : 'out-of-window', override: null, configured, scheduledOpen };
+    return { open: true, reason: 'always-open', override: null, configured: false, scheduledOpen: true };
+  };
+
+  const openCount = terminals.filter((t) => effective(t).open).length;
+  const closedCount = terminals.length - openCount;
+
+  return (
+    <div className="rounded-2xl bg-white/5 border border-slate-800 px-5 py-4">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-brand-500/15 border border-brand-500/30 flex items-center justify-center">
+            <i className="ph ph-door-open text-xl text-brand-300"></i>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-white">Pickup gate control</p>
+            <p className="text-xs text-slate-400 mt-0.5 max-w-xl">
+              Open or close the pickup gate per terminal. Manual override always wins over the schedule;
+              choose <span className="text-slate-200 font-semibold">Auto</span> to follow the schedule (or stay always-open if no schedule is set).
+            </p>
+          </div>
+        </div>
+        <div className="text-xs text-slate-300 bg-slate-950/50 border border-slate-700 rounded-lg px-3 py-1.5">
+          Open: <span className="text-emerald-300 font-semibold">{openCount}</span>
+          <span className="mx-2 text-slate-600">|</span>
+          Closed: <span className="text-rose-300 font-semibold">{closedCount}</span>
+        </div>
+      </div>
+
+      {err && (
+        <div className="mb-3 p-2 rounded bg-red-950/60 border border-red-500/40 text-red-200 text-xs">
+          {err}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-slate-400 text-sm">Loading terminals…</div>
+      ) : terminals.length === 0 ? (
+        <div className="text-slate-400 text-sm">
+          No active terminals registered yet. Start the Pandora listener (run_listeners.py) to auto-register.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {terminals.map((t) => {
+            const eff = effective(t);
+            const draft = drafts[t.id] || {};
+            const winOpen  = draft.windowOpen  !== undefined ? draft.windowOpen  : (t.windowOpen  || '');
+            const winClose = draft.windowClose !== undefined ? draft.windowClose : (t.windowClose || '');
+            const dirty = draft.windowOpen !== undefined || draft.windowClose !== undefined;
+            const isBusy = !!busy[t.id];
+            return (
+              <div
+                key={t.id}
+                className={`rounded-xl border px-4 py-3 ${
+                  eff.open
+                    ? 'border-emerald-500/30 bg-emerald-500/5'
+                    : 'border-rose-500/30 bg-rose-500/5'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <i className={`ph ${eff.open ? 'ph-door-open text-emerald-300' : 'ph-door text-rose-300'}`}></i>
+                      <span className="font-semibold text-white">{t.name}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${
+                        eff.open ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                      }`}>
+                        {eff.open ? 'Open' : 'Closed'}
+                      </span>
+                      {eff.override && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          Manual
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-500">{eff.reason}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      {t.gateLabel || t.gradeLabel || t.id}
+                      {t.ip && <span className="text-slate-600"> · {t.ip}</span>}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      Schedule: {eff.configured ? `${t.windowOpen} – ${t.windowClose} WIB` : 'No schedule (always open unless manually closed)'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={isBusy || t.gateOverride === 'open'}
+                      onClick={() => setOverride(t.id, 'open')}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-200 border border-emerald-500/30 hover:bg-emerald-500/30 disabled:opacity-50"
+                    >
+                      <i className="ph ph-door-open mr-1"></i>Open
+                    </button>
+                    <button
+                      disabled={isBusy || !t.gateOverride}
+                      onClick={() => setOverride(t.id, null)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 text-slate-300 border border-slate-700 hover:bg-white/10 disabled:opacity-50"
+                    >
+                      Auto
+                    </button>
+                    <button
+                      disabled={isBusy || t.gateOverride === 'closed'}
+                      onClick={() => setOverride(t.id, 'closed')}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-500/20 text-rose-200 border border-rose-500/30 hover:bg-rose-500/30 disabled:opacity-50"
+                    >
+                      <i className="ph ph-door mr-1"></i>Close
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-[auto_auto_auto_1fr] gap-3 items-end">
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Opens at (WIB)</label>
+                    <input
+                      type="time"
+                      value={winOpen}
+                      onChange={(e) => setDrafts((p) => ({ ...p, [t.id]: { ...(p[t.id] || {}), windowOpen: e.target.value || null } }))}
+                      className="bg-slate-950/60 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Closes at (WIB)</label>
+                    <input
+                      type="time"
+                      value={winClose}
+                      onChange={(e) => setDrafts((p) => ({ ...p, [t.id]: { ...(p[t.id] || {}), windowClose: e.target.value || null } }))}
+                      className="bg-slate-950/60 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <button
+                      disabled={!dirty || isBusy}
+                      onClick={() => saveSchedule(t.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                        dirty
+                          ? 'bg-brand-500/20 text-brand-200 border-brand-500/40 hover:bg-brand-500/30'
+                          : 'bg-slate-900 text-slate-500 border-slate-800'
+                      }`}
+                    >
+                      {isBusy ? 'Saving…' : 'Save schedule'}
+                    </button>
+                  </div>
+                  <div className="text-[11px] text-slate-500 sm:text-right">
+                    {(winOpen && winClose)
+                      ? <>Auto: gate opens at <b className="text-slate-300">{winOpen}</b> and closes at <b className="text-slate-300">{winClose}</b>.</>
+                      : <>No schedule — gate stays open unless manually closed.</>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="mt-3 text-[11px] text-slate-500">
+        Backend gate enforcer pushes <code className="text-slate-300">alwaysOpen</code> / <code className="text-slate-300">alwaysClose</code> / <code className="text-slate-300">resume</code> to the door relay only on state transitions, so the relay isn't fired on every face scan.
+      </p>
+    </div>
+  );
+}
+
 // ─── Stat card ──────────────────────────────────────────────────────────────
 function StatCard({ label, value, hint, tone = 'slate', icon }) {
   const tones = {
@@ -958,7 +1301,8 @@ function RecordCard(props) {
   const {
     rec, thumbnails, selected, onToggleSelect, expanded, onToggle,
     onApprove, onStartReject, onCancelReject, onSubmitReject, onReenroll,
-    onPhoto, onPrint, busy, rejecting, rejectReason, setRejectReason, showSelect,
+    onPhoto, onPrint, onUploadStudentPhoto, onUploadChaperonePhoto,
+    busy, rejecting, rejectReason, setRejectReason, showSelect,
   } = props;
 
   const enrichedStudents = (rec.students || []).map((s) => ({
@@ -997,6 +1341,14 @@ function RecordCard(props) {
             <div className="text-sm font-semibold text-white truncate flex items-center gap-2 flex-wrap">
               {rec.guardian?.name || '—'}
               <StatusPill status={rec.status} />
+              {rec.formNumber && (
+                <span
+                  title="Submission ID — use this for audit & reports"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold border bg-brand-500/15 text-brand-200 border-brand-500/40"
+                >
+                  <i className="ph ph-hash"></i>{rec.formNumber}
+                </span>
+              )}
               {enrollSummary && (
                 <EnrollPill summary={enrollSummary} />
               )}
@@ -1046,36 +1398,23 @@ function RecordCard(props) {
 
           {/* Students */}
           <div>
-            <SectionHeader icon="ph-graduation-cap" label={`Students (${enrichedStudents.length})`} />
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {enrichedStudents.map((s) => (
-                <div key={s.id} className="flex items-center gap-3 p-3 rounded-lg bg-white/5 border border-slate-800">
-                  {s.photoUrl ? (
-                    <img src={s.photoUrl} alt={s.name}
-                      onClick={() => onPhoto(s.photoUrl, `${s.name} (BINUS DB)`)}
-                      className="w-14 h-14 rounded-lg object-cover flex-shrink-0 cursor-zoom-in border border-slate-700" />
-                  ) : (
-                    <div className="w-14 h-14 rounded-lg bg-slate-800 flex items-center justify-center text-slate-600 text-xs flex-shrink-0">
-                      <i className="ph ph-user"></i>
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-white truncate">{s.name}</div>
-                    <div className="text-xs text-slate-500 truncate">
-                      ID {s.id}{s.homeroom ? ` · ${s.homeroom}` : ''}
-                    </div>
-                    {!s.photoUrl && (
-                      <div className="text-[10px] text-amber-400 mt-0.5">
-                        <i className="ph ph-warning"></i> No DB photo
-                      </div>
-                    )}
-                    {s.dbName && s.dbName !== s.name && (
-                      <div className="text-[10px] text-slate-500 mt-0.5" title="Name on file in BINUS DB">
-                        DB: {s.dbName}
-                      </div>
-                    )}
-                  </div>
-                </div>
+            <SectionHeader icon="ph-graduation-cap" label={`Students on this form (${enrichedStudents.length})`} />
+            {enrichedStudents.length > 1 && (
+              <p className="text-[11px] text-slate-500 -mt-1 mb-3">
+                <i className="ph ph-info mr-1"></i>
+                {enrichedStudents.length} siblings on a single submission — upload a photo for each child below.
+              </p>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {enrichedStudents.map((s, i) => (
+                <StudentTile
+                  key={s.id}
+                  s={s}
+                  index={i}
+                  total={enrichedStudents.length}
+                  onPhoto={onPhoto}
+                  onUpload={onUploadStudentPhoto ? (file) => onUploadStudentPhoto(s.id, file) : null}
+                />
               ))}
             </div>
           </div>
@@ -1089,7 +1428,10 @@ function RecordCard(props) {
                 const enrol = (rec.enrollment || []).find((e) => e.chaperoneId === allocated?.chaperoneId);
                 return (
                   <ChaperoneRow key={c.tempId || i} c={c} index={i} allocated={allocated} enrol={enrol}
-                    enrichedStudents={enrichedStudents} onPhoto={onPhoto} />
+                    enrichedStudents={enrichedStudents} onPhoto={onPhoto}
+                    onUpload={onUploadChaperonePhoto && allocated
+                      ? (file, opts) => onUploadChaperonePhoto(allocated.chaperoneId, file, opts)
+                      : null} />
                 );
               })}
             </div>
@@ -1157,15 +1499,184 @@ function RecordCard(props) {
                 )}
               </div>
               {rec.status === 'approved' && rec.allocatedChaperones?.length > 0 && (
-                <button onClick={onReenroll} disabled={!!busy}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500/10 border border-brand-500/30 text-brand-300 hover:bg-brand-500/20 disabled:opacity-50">
-                  {busy === 'reenroll' ? 'Re-enrolling…' : (
-                    <><i className="ph ph-fingerprint mr-1"></i>Re-push to devices</>
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <a
+                    href="/v2/pickup-enroll"
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500/10 border border-brand-500/30 text-brand-300 hover:bg-brand-500/20"
+                    title="Push these chaperones to the right grade-level Hikvision terminal"
+                  >
+                    <i className="ph ph-fingerprint mr-1"></i>Open Enrolment board
+                  </a>
+                  <button onClick={onReenroll} disabled={!!busy}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+                    title="Quick re-push of just this form's chaperones (uses each chaperone's grade scope)">
+                    {busy === 'reenroll' ? 'Re-enrolling…' : (
+                      <><i className="ph ph-arrows-clockwise mr-1"></i>Quick re-push</>
+                    )}
+                  </button>
+                </div>
               )}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudentTile({ s, index, total, onPhoto, onUpload }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFile = useCallback(async (file) => {
+    if (!file || !onUpload) return;
+    setBusy(true);
+    try { await onUpload(file); } finally { setBusy(false); }
+  }, [onUpload]);
+
+  const onChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    await handleFile(file);
+  };
+
+  const onDrop = async (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    await handleFile(file);
+  };
+
+  const hasPhoto = !!s.photoUrl;
+  const isSibling = total > 1;
+
+  return (
+    <div
+      onDragOver={(e) => { if (onUpload) { e.preventDefault(); setDragOver(true); } }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+      className={`group relative rounded-xl border bg-gradient-to-br from-white/5 to-white/[0.02] overflow-hidden transition-all ${
+        dragOver ? 'border-brand-400 ring-2 ring-brand-500/40 bg-brand-500/5' : 'border-slate-800 hover:border-slate-700'
+      }`}
+    >
+      {/* Status bar */}
+      <div className={`px-3 py-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider border-b ${
+        hasPhoto
+          ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+          : 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+      }`}>
+        <span className="flex items-center gap-1.5">
+          <i className={`ph ${hasPhoto ? 'ph-check-circle-fill' : 'ph-warning-circle-fill'}`}></i>
+          {hasPhoto ? 'Photo on file' : 'Photo required'}
+        </span>
+        {isSibling && (
+          <span className="text-slate-400" title="Sibling number on this form">
+            Child {index + 1}/{total}
+          </span>
+        )}
+      </div>
+
+      <div className="p-4 flex gap-4">
+        {/* Photo zone */}
+        <div className="relative flex-shrink-0">
+          {hasPhoto ? (
+            <button
+              type="button"
+              onClick={() => onPhoto(s.photoUrl, `${s.name} · ID ${s.id}${s.homeroom ? ` · ${s.homeroom}` : ''}`)}
+              className="block w-24 h-24 rounded-xl overflow-hidden border-2 border-slate-700 hover:border-brand-400 transition-colors cursor-zoom-in"
+              title="View full size"
+            >
+              <img src={s.photoUrl} alt={s.name} className="w-full h-full object-cover" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onUpload && inputRef.current?.click()}
+              disabled={!onUpload || busy}
+              className="w-24 h-24 rounded-xl border-2 border-dashed border-slate-700 hover:border-brand-400 hover:bg-brand-500/5 transition-colors flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-brand-300 disabled:opacity-50"
+              title="Click or drop a photo"
+            >
+              <i className="ph ph-image-square text-3xl"></i>
+              <span className="text-[9px] uppercase tracking-wider font-bold">No photo</span>
+            </button>
+          )}
+
+          {onUpload && (
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              disabled={busy}
+              title={hasPhoto ? 'Replace photo' : 'Upload photo'}
+              className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-brand-500 hover:bg-brand-400 text-white flex items-center justify-center border-2 border-slate-900 shadow-lg disabled:opacity-50"
+            >
+              {busy
+                ? <i className="ph ph-spinner-gap animate-spin"></i>
+                : <i className={`ph ${hasPhoto ? 'ph-pencil-simple' : 'ph-plus'}`}></i>}
+            </button>
+          )}
+
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={onChange}
+          />
+        </div>
+
+        {/* Info zone */}
+        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1.5">
+          <div className="text-base font-bold text-white leading-tight truncate" title={s.name}>
+            {s.name || '—'}
+          </div>
+
+          {s.dbName && s.dbName !== s.name && (
+            <div className="text-[10px] text-amber-400 -mt-0.5" title="Name on file in BINUS DB differs from form">
+              <i className="ph ph-warning mr-0.5"></i>DB: {s.dbName}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+            <span
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/60 border border-slate-700 text-[10px] font-mono text-slate-300"
+              title="BINUS Student ID"
+            >
+              <i className="ph ph-identification-card text-slate-500"></i>
+              {s.id}
+            </span>
+            {s.homeroom ? (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand-500/15 border border-brand-500/30 text-[10px] font-bold text-brand-200"
+                title="Homeroom class"
+              >
+                <i className="ph ph-chalkboard-teacher"></i>
+                {s.homeroom}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/40 border border-slate-700/50 text-[10px] text-slate-500 italic">
+                no class
+              </span>
+            )}
+          </div>
+
+          {onUpload && (
+            <div className="text-[10px] text-slate-500 mt-1 leading-snug">
+              {hasPhoto
+                ? <span><i className="ph ph-info mr-0.5"></i>Click photo to view · pencil to replace</span>
+                : <span><i className="ph ph-arrow-down mr-0.5"></i>Drop a photo here or click <b className="text-brand-300">+</b> to upload</span>}
+              <div className="text-slate-600 mt-0.5">JPEG / PNG / WebP, ≤ 800 KB</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Drag overlay */}
+      {dragOver && (
+        <div className="absolute inset-0 bg-brand-500/20 border-2 border-dashed border-brand-400 rounded-xl flex items-center justify-center pointer-events-none">
+          <div className="text-brand-200 font-bold text-sm flex items-center gap-2">
+            <i className="ph ph-upload-simple text-2xl"></i>Drop to upload
+          </div>
         </div>
       )}
     </div>
@@ -1202,108 +1713,257 @@ function EnrollPill({ summary }) {
   </span>;
 }
 
-function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto }) {
+function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, onUpload }) {
+  const addInputRef = useRef(null);
+  const replaceInputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  const faces = c.faceUrls || [];
+  const MAX_FACES = 8;
+  const slots = Array.from({ length: MAX_FACES }, (_, i) => faces[i] || null);
+  const filled = faces.length;
+  const canUpload = !!onUpload && !!allocated;
+
+  const handleAdd = async (file) => {
+    if (!file || !onUpload) return;
+    setBusy(true);
+    try { await onUpload(file, { replace: false }); } finally { setBusy(false); }
+  };
+  const handleReplace = async (file) => {
+    if (!file || !onUpload) return;
+    if (!confirm(`Replace ALL ${filled} existing photo(s) for ${c.name}?`)) return;
+    setBusy(true);
+    try { await onUpload(file, { replace: true }); } finally { setBusy(false); }
+  };
+  const onDrop = async (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) await handleAdd(file);
+  };
+
+  const authorizedNames = (c.authorizedStudentIds || []).map((sid) => {
+    const s = enrichedStudents.find((x) => x.id === sid);
+    return { id: sid, name: s?.name || sid };
+  });
+
   return (
-    <div className="bg-white/5 border border-slate-800 rounded-lg p-4">
-      <div className="flex items-start gap-4 flex-wrap">
-        <div className="flex-1 min-w-[220px]">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="w-6 h-6 rounded-full bg-orange-500/20 text-orange-300 flex items-center justify-center text-xs font-bold">
-              {index + 1}
-            </span>
-            <span className="text-sm font-semibold text-white">{c.name}</span>
-            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-              {REL_LABEL[c.relation] || c.relation}
-            </span>
-            {allocated && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                #{allocated.employeeNo}
+    <div
+      onDragOver={(e) => { if (canUpload) { e.preventDefault(); setDragOver(true); } }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+      className={`relative rounded-xl border bg-gradient-to-br from-white/5 to-white/[0.02] overflow-hidden transition-all ${
+        dragOver ? 'border-orange-400 ring-2 ring-orange-500/40' : 'border-slate-800 hover:border-slate-700'
+      }`}
+    >
+      {/* Header strip */}
+      <div className="px-4 py-2.5 flex items-center justify-between gap-2 flex-wrap border-b border-slate-800 bg-slate-900/40">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="w-7 h-7 rounded-full bg-orange-500/20 text-orange-300 flex items-center justify-center text-xs font-bold flex-shrink-0">
+            {index + 1}
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-bold text-white truncate">{c.name}</span>
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                {REL_LABEL[c.relation] || c.relation}
               </span>
-            )}
-            {allocated && enrol && (
-              enrol.ok ? (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-                  title={(enrol.devices || []).map((d) => `${d.name}: ${d.ok ? 'ok' : d.error}`).join('\n')}>
-                  <i className="ph ph-fingerprint mr-0.5"></i>enrolled
-                </span>
-              ) : (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/30"
-                  title={(enrol.devices || []).map((d) => `${d.name}: ${d.ok ? 'ok' : d.error}`).join('\n') || enrol.error || ''}>
-                  <i className="ph ph-warning mr-0.5"></i>enroll failed
-                </span>
-              )
-            )}
+            </div>
           </div>
-          <div className="text-xs text-slate-500 break-all">
-            <i className="ph ph-phone mr-0.5"></i>{c.phone}
-            {c.email && <> · <i className="ph ph-envelope mr-0.5"></i>{c.email}</>}
-            {c.idNumber && <> · <i className="ph ph-identification-card mr-0.5"></i>{c.idNumber}</>}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {(c.authorizedStudentIds || []).map((sid) => {
-              const s = enrichedStudents.find((x) => x.id === sid);
-              return (
-                <span key={sid}
-                  className="text-[11px] px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-300 border border-brand-500/30">
-                  ✓ {s?.name || sid}
-                </span>
-              );
-            })}
-          </div>
-          {/* Per-device enrollment status */}
-          {enrol && enrol.devices && enrol.devices.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {enrol.devices.map((d, k) => (
-                <span key={k} title={d.error || ''}
-                  className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
-                    d.ok
-                      ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                      : 'bg-red-500/10 text-red-300 border-red-500/30'
-                  }`}>
-                  {d.ok ? '✓' : '✗'} {d.name}
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {allocated ? (
+            <span
+              className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+              title="Allocated chaperone employee number"
+            >
+              <i className="ph ph-hash mr-0.5"></i>{allocated.employeeNo}
+            </span>
+          ) : (
+            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30">
+              Pending approval
+            </span>
+          )}
+          {allocated && enrol && (enrol.ok ? (
+            <span
+              className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+              title={(enrol.devices || []).map((d) => `${d.name}: ${d.ok ? 'ok' : d.error}`).join('\n')}
+            >
+              <i className="ph ph-fingerprint mr-0.5"></i>enrolled
+            </span>
+          ) : (
+            <span
+              className="text-[10px] px-2 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/30"
+              title={(enrol.devices || []).map((d) => `${d.name}: ${d.ok ? 'ok' : d.error}`).join('\n') || enrol.error || ''}
+            >
+              <i className="ph ph-warning mr-0.5"></i>enroll failed
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* Contact row */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+          {c.phone && (<span><i className="ph ph-phone text-slate-500 mr-1"></i>{c.phone}</span>)}
+          {c.email && (<span><i className="ph ph-envelope text-slate-500 mr-1"></i>{c.email}</span>)}
+          {c.idNumber && (<span><i className="ph ph-identification-card text-slate-500 mr-1"></i>{c.idNumber}</span>)}
+        </div>
+
+        {/* Authorized to pick up */}
+        {authorizedNames.length > 0 && (
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">
+              <i className="ph ph-graduation-cap mr-1"></i>Authorized to pick up
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {authorizedNames.map((a) => (
+                <span key={a.id}
+                  className="text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-200 border border-brand-500/30">
+                  <i className="ph ph-check-circle"></i>{a.name}
                 </span>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Face photo grid */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              <i className="ph ph-camera mr-1"></i>Face photos
+              <span className={`ml-2 font-mono normal-case tracking-normal ${
+                filled === 0 ? 'text-amber-400' : 'text-slate-300'
+              }`}>
+                {filled}/{MAX_FACES}
+              </span>
+            </div>
+            {canUpload && (
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => addInputRef.current?.click()}
+                  disabled={busy || filled >= MAX_FACES}
+                  title={filled >= MAX_FACES ? `Max ${MAX_FACES} photos` : 'Add another photo'}
+                  className="text-[11px] inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-orange-500/15 text-orange-200 border border-orange-500/30 hover:bg-orange-500/25 disabled:opacity-40"
+                >
+                  {busy ? <i className="ph ph-spinner-gap animate-spin"></i> : <i className="ph ph-plus"></i>}
+                  Add
+                </button>
+                {filled > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => replaceInputRef.current?.click()}
+                    disabled={busy}
+                    title="Replace all photos with one new photo"
+                    className="text-[11px] inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800/60 text-slate-300 border border-slate-700 hover:bg-slate-800 disabled:opacity-40"
+                  >
+                    <i className="ph ph-arrows-clockwise"></i>Replace all
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+            {slots.map((url, j) => url ? (
+              <button
+                key={j}
+                type="button"
+                onClick={() => onPhoto(url, `${c.name} · face ${j + 1}/${filled}`)}
+                className="relative aspect-square rounded-lg overflow-hidden border-2 border-orange-500/40 hover:border-orange-300 transition-colors cursor-zoom-in group/face"
+                title={`Click to view face ${j + 1}`}
+              >
+                <img src={url} alt={`${c.name} ${j + 1}`} className="w-full h-full object-cover" />
+                <span className="absolute top-0.5 left-0.5 text-[9px] font-mono px-1 py-0 rounded bg-black/60 text-white">
+                  {j + 1}
+                </span>
+              </button>
+            ) : (
+              <button
+                key={j}
+                type="button"
+                onClick={() => canUpload && j === filled && addInputRef.current?.click()}
+                disabled={!canUpload || j !== filled}
+                className={`aspect-square rounded-lg border-2 border-dashed flex items-center justify-center text-slate-600 ${
+                  canUpload && j === filled
+                    ? 'border-orange-500/40 hover:border-orange-300 hover:bg-orange-500/5 cursor-pointer text-orange-400'
+                    : 'border-slate-800 cursor-default'
+                }`}
+                title={canUpload && j === filled ? 'Add photo here' : 'Empty slot'}
+              >
+                {canUpload && j === filled ? <i className="ph ph-plus text-lg"></i> : <i className="ph ph-image-square text-base opacity-30"></i>}
+              </button>
+            ))}
+          </div>
+
+          {filled === 0 && (
+            <div className="mt-2 text-[11px] text-amber-400/90 flex items-center gap-1.5">
+              <i className="ph ph-warning-circle"></i>
+              No face photos {canUpload
+                ? <>— add at least one so the chaperone can be recognised at the gate.</>
+                : <>— admin can upload after the form is approved.</>}
+            </div>
+          )}
+          {!allocated && onUpload && (
+            <div className="mt-2 text-[11px] text-slate-500">
+              <i className="ph ph-info mr-1"></i>Approve the form first to enable photo uploads.
+            </div>
+          )}
+          {canUpload && filled > 0 && (
+            <div className="mt-2 text-[10px] text-slate-600">
+              JPEG / PNG / WebP, ≤ 800 KB. Each upload re-enrols the chaperone on all configured Hikvision devices.
             </div>
           )}
         </div>
 
-        {/* Side-by-side: BINUS student vs chaperone faces */}
-        <div className="flex items-center gap-3">
-          {(() => {
-            const sid = (c.authorizedStudentIds || [])[0];
-            const s = enrichedStudents.find((x) => x.id === sid);
-            return s ? (
-              <div className="text-center">
-                <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Picks up</div>
-                {s.photoUrl ? (
-                  <img src={s.photoUrl} alt={s.name}
-                    onClick={() => onPhoto(s.photoUrl, `${s.name} (BINUS DB)`)}
-                    className="w-16 h-16 rounded-lg object-cover border-2 border-slate-700 cursor-zoom-in" />
-                ) : (
-                  <div className="w-16 h-16 rounded-lg bg-slate-800 flex items-center justify-center text-slate-600">
-                    <i className="ph ph-user-circle text-2xl"></i>
-                  </div>
-                )}
-              </div>
-            ) : null;
-          })()}
-          <div className="text-slate-600 text-2xl font-thin px-1">↔</div>
-          <div className="text-center">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Chaperone faces</div>
-            <div className="flex gap-1">
-              {(c.faceUrls || []).length === 0 ? (
-                <div className="w-16 h-16 rounded-lg bg-slate-800 flex items-center justify-center text-slate-600 text-xs">
-                  no photos
-                </div>
-              ) : (c.faceUrls).map((u, j) => (
-                <img key={j} src={u} alt={`${c.name} ${j + 1}`}
-                  onClick={() => onPhoto(u, `${c.name} (parent-supplied)`)}
-                  className="w-16 h-16 rounded-lg object-cover border-2 border-orange-500/40 cursor-zoom-in" />
-              ))}
-            </div>
+        {/* Per-device enrollment status */}
+        {enrol && enrol.devices && enrol.devices.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {enrol.devices.map((d, k) => (
+              <span key={k} title={d.error || ''}
+                className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
+                  d.ok
+                    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                    : 'bg-red-500/10 text-red-300 border-red-500/30'
+                }`}>
+                {d.ok ? '✓' : '✗'} {d.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Hidden inputs */}
+      <input
+        ref={addInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={async (e) => {
+          const f = e.target.files?.[0]; e.target.value = '';
+          await handleAdd(f);
+        }}
+      />
+      <input
+        ref={replaceInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={async (e) => {
+          const f = e.target.files?.[0]; e.target.value = '';
+          await handleReplace(f);
+        }}
+      />
+
+      {dragOver && canUpload && (
+        <div className="absolute inset-0 bg-orange-500/20 border-2 border-dashed border-orange-400 rounded-xl flex items-center justify-center pointer-events-none">
+          <div className="text-orange-200 font-bold text-sm flex items-center gap-2">
+            <i className="ph ph-upload-simple text-2xl"></i>Drop to add face photo
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

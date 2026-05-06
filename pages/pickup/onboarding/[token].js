@@ -612,6 +612,19 @@ export default function PickupOnboardingPage() {
         if (!silent) {
           setManualMode(true);
           setError('We could not auto-fill this Binusian ID. Please enter the student’s name and class manually below.');
+        } else {
+          // Silent auto-add (token-bound primary student) failed.
+          // Inject a stub so the token's required student is in the list,
+          // then surface manual-entry UI pre-filled with the SID so the
+          // parent can fill in name + homeroom and edit the stub.
+          setStudents((prev) => prev.find((s) => s.id === sid) ? prev : [...prev, { id: sid, name: '', homeroom: null, photoUrl: null, _needsManual: true }]);
+          setChaperones((prev) => prev.map((c) => ({
+            ...c,
+            authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), sid])),
+          })));
+          setStudentInputId(sid);
+          setManualMode(true);
+          setError(`This invite link is for student ${sid}, but we could not auto-fill their details. Please enter the name and class below to continue.`);
         }
         return;
       }
@@ -639,9 +652,15 @@ export default function PickupOnboardingPage() {
     if (!sid) return setError('Binusian ID is required.');
     if (!/^[A-Za-z0-9_-]{4,32}$/.test(sid)) return setError('Binusian ID looks invalid.');
     if (!nm) return setError('Please type the student’s full name.');
-    if (students.find((s) => s.id === sid)) return setError('That student is already added.');
+    const existing = students.find((s) => s.id === sid);
+    if (existing && !existing._needsManual) return setError('That student is already added.');
     const student = { id: sid, name: nm, homeroom: hr || null, photoUrl: null };
-    setStudents((prev) => [...prev, student]);
+    if (existing && existing._needsManual) {
+      // Replace the stub (token-bound primary student that lookup couldn't fill).
+      setStudents((prev) => prev.map((s) => (s.id === sid ? student : s)));
+    } else {
+      setStudents((prev) => [...prev, student]);
+    }
     setChaperones((prev) => prev.map((c) => ({
       ...c,
       authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), student.id])),
@@ -699,6 +718,10 @@ export default function PickupOnboardingPage() {
       return setError('Type your full name exactly as the signature.');
     }
     if (students.length === 0) return setError('Add at least one student.');
+    const stubStudent = students.find((s) => s._needsManual);
+    if (stubStudent) {
+      return setError(`Please complete the details for student ${stubStudent.id} before submitting.`);
+    }
     if (chaperones.length === 0) return setError('Add at least one chaperone.');
     for (const c of chaperones) {
       if (!c.name.trim()) return setError('Every chaperone needs a name.');
@@ -1053,13 +1076,17 @@ export default function PickupOnboardingPage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
                       {students.map((s) => (
                         <div key={s.id} style={{
-                          padding: '12px 16px', background: BRAND.surfaceAlt,
-                          borderRadius: 8, border: `1px solid ${BRAND.border}`,
+                          padding: '12px 16px',
+                          background: s._needsManual ? '#FFF7ED' : BRAND.surfaceAlt,
+                          borderRadius: 8,
+                          border: `1px solid ${s._needsManual ? '#FB923C' : BRAND.border}`,
                           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                           gap: 12,
                         }}>
                           <div>
-                            <div style={{ fontWeight: 600, color: BRAND.text }}>{s.name}</div>
+                            <div style={{ fontWeight: 600, color: BRAND.text }}>
+                              {s.name || <span style={{ color: '#C2410C', fontStyle: 'italic' }}>⚠ Name needed — please complete below</span>}
+                            </div>
                             <div style={{ fontSize: 12, color: BRAND.textSubtle, marginTop: 2 }}>
                               Binusian ID {s.id}{s.homeroom ? ` · ${s.homeroom}` : ''}
                               {s.id === primarySid && (

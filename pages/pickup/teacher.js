@@ -254,10 +254,175 @@ function HeldRow({ ev, onAction, busy }) {
   );
 }
 
+function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const wibTime = (() => {
+    const wib = new Date(now.getTime() + (now.getTimezoneOffset() + 7 * 60) * 60 * 1000);
+    const hh = String(wib.getHours()).padStart(2, '0');
+    const mm = String(wib.getMinutes()).padStart(2, '0');
+    const ss = String(wib.getSeconds()).padStart(2, '0');
+    return { hh, mm, ss };
+  })();
+  const wibDate = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  const terminals = identity?.terminalIds?.length || 0;
+  const lastSeenAgo = lastEventAt ? timeAgo(lastEventAt) : null;
+
+  return (
+    <div style={{
+      position: 'relative', overflow: 'hidden',
+      borderRadius: 28, padding: '48px 40px',
+      background: 'radial-gradient(120% 120% at 0% 0%, rgba(252,191,17,0.10), transparent 55%), radial-gradient(120% 120% at 100% 100%, rgba(139,21,56,0.30), transparent 55%), linear-gradient(180deg, #0f172a 0%, #0b1224 100%)',
+      border: '1px solid rgba(148,163,184,0.12)',
+      boxShadow: '0 30px 80px -30px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04)',
+      minHeight: 460,
+    }}>
+      {/* ambient blobs */}
+      <div aria-hidden style={{
+        position: 'absolute', top: '-30%', left: '-20%', width: 420, height: 420,
+        borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(252,191,17,0.18) 0%, transparent 70%)',
+        animation: 'pgFloatA 14s ease-in-out infinite',
+      }} />
+      <div aria-hidden style={{
+        position: 'absolute', bottom: '-30%', right: '-20%', width: 520, height: 520,
+        borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(139,21,56,0.35) 0%, transparent 70%)',
+        animation: 'pgFloatB 18s ease-in-out infinite',
+      }} />
+
+      <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 40, alignItems: 'center' }}>
+        {/* LEFT: identity + clock */}
+        <div>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 10,
+            padding: '6px 14px', borderRadius: 999,
+            background: 'rgba(252,191,17,0.12)', border: '1px solid rgba(252,191,17,0.35)',
+            color: BINUS_GOLD, fontSize: 11, fontWeight: 800, letterSpacing: 2,
+          }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%', background: '#22c55e',
+              boxShadow: '0 0 0 0 rgba(34,197,94,0.7)', animation: 'pgPulseDot 1.8s ease-out infinite',
+            }} />
+            LIVE · LISTENING
+          </div>
+
+          <div style={{ marginTop: 18, fontSize: 13, color: '#94a3b8', letterSpacing: 1.5, fontWeight: 700 }}>
+            RELEASE GROUP
+          </div>
+          <div style={{ fontSize: 38, fontWeight: 900, color: '#f8fafc', lineHeight: 1.05, marginTop: 4, letterSpacing: -0.5 }}>
+            {identity?.releaseGroupName || '—'}
+          </div>
+          {identity?.gradeLabel && (
+            <div style={{
+              display: 'inline-block', marginTop: 10,
+              padding: '4px 12px', borderRadius: 8,
+              background: BINUS_MAROON, color: '#fff', fontWeight: 800, fontSize: 13, letterSpacing: 1,
+            }}>{identity.gradeLabel}</div>
+          )}
+
+          <div style={{
+            marginTop: 32, display: 'flex', alignItems: 'baseline', gap: 4,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            color: '#f1f5f9',
+          }}>
+            <span style={{ fontSize: 64, fontWeight: 700, letterSpacing: -2 }}>{wibTime.hh}</span>
+            <span style={{ fontSize: 64, fontWeight: 200, color: '#475569', animation: 'pgBlink 1s steps(2,end) infinite' }}>:</span>
+            <span style={{ fontSize: 64, fontWeight: 700, letterSpacing: -2 }}>{wibTime.mm}</span>
+            <span style={{ fontSize: 28, fontWeight: 400, color: '#64748b', marginLeft: 6 }}>{wibTime.ss}</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: BINUS_GOLD, marginLeft: 10, letterSpacing: 1 }}>WIB</span>
+          </div>
+          <div style={{ marginTop: 4, fontSize: 13, color: '#94a3b8' }}>{wibDate}</div>
+        </div>
+
+        {/* RIGHT: standby visualizer + stats */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
+          <div style={{
+            position: 'relative', width: 220, height: 220,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {[0, 1, 2].map((i) => (
+              <div key={i} aria-hidden style={{
+                position: 'absolute', inset: 0, borderRadius: '50%',
+                border: `2px solid ${BINUS_GOLD}`, opacity: 0,
+                animation: `pgRipple 3.2s cubic-bezier(0.22,1,0.36,1) ${i * 1.06}s infinite`,
+              }} />
+            ))}
+            <div style={{
+              width: 110, height: 110, borderRadius: '50%',
+              background: `radial-gradient(circle at 30% 30%, ${BINUS_GOLD}, #c89308)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: `0 20px 50px -10px ${BINUS_GOLD}88, inset 0 -8px 20px rgba(0,0,0,0.25)`,
+            }}>
+              <svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke={BINUS_MAROON} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3.5" />
+                <path d="M12 2 L12 5 M12 19 L12 22 M2 12 L5 12 M19 12 L22 12 M4.93 4.93 L7.05 7.05 M16.95 16.95 L19.07 19.07 M4.93 19.07 L7.05 16.95 M16.95 7.05 L19.07 4.93" />
+              </svg>
+            </div>
+          </div>
+          <div style={{ textAlign: 'center', color: '#cbd5e1' }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Awaiting next pickup</div>
+            <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>
+              {lastSeenAgo ? `Last activity ${lastSeenAgo}` : 'Standing by for terminal scans'}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, width: '100%' }}>
+            <Stat label="TERMINALS" value={terminals} accent={BINUS_GOLD} />
+            <Stat label="RELEASED TODAY" value={todayReleased ?? 0} accent="#22c55e" />
+            <Stat label="ON HOLD" value={heldCount ?? 0} accent="#f59e0b" />
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        @keyframes pgPulseDot {
+          0%   { box-shadow: 0 0 0 0 rgba(34,197,94,0.7); }
+          70%  { box-shadow: 0 0 0 14px rgba(34,197,94,0); }
+          100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+        }
+        @keyframes pgBlink { 0%,49%{opacity:1} 50%,100%{opacity:0.25} }
+        @keyframes pgRipple {
+          0%   { transform: scale(0.55); opacity: 0.55; }
+          80%  { opacity: 0.05; }
+          100% { transform: scale(1.05); opacity: 0; }
+        }
+        @keyframes pgFloatA {
+          0%,100% { transform: translate(0,0); }
+          50%     { transform: translate(40px,30px); }
+        }
+        @keyframes pgFloatB {
+          0%,100% { transform: translate(0,0); }
+          50%     { transform: translate(-40px,-30px); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function Stat({ label, value, accent }) {
+  return (
+    <div style={{
+      padding: '14px 12px', borderRadius: 14,
+      background: 'rgba(15,23,42,0.55)', border: `1px solid rgba(148,163,184,0.15)`,
+      textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 28, fontWeight: 800, color: accent, lineHeight: 1, fontFamily: 'ui-monospace, monospace' }}>{value}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 1.2, marginTop: 6 }}>{label}</div>
+    </div>
+  );
+}
+
 export default function TeacherTabletPage() {
   const [token, setToken] = useState(null);
   const [identity, setIdentity] = useState(null);   // whoami payload
-  const [feed, setFeed] = useState({ active: [], held: [] });
+  const [feed, setFeed] = useState({ active: [], held: [], todayReleased: 0 });
+  const [lastEventAt, setLastEventAt] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState({});
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
@@ -319,7 +484,14 @@ export default function TeacherTabletPage() {
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      setFeed({ active: j.active || [], held: j.held || [] });
+      setFeed({ active: j.active || [], held: j.held || [], todayReleased: j.todayReleased || 0 });
+      // Track most recent activity timestamp for the standby hero
+      const latest = [...(j.active || []), ...(j.held || [])]
+        .map((e) => e.scannedAt || e.recordedAt)
+        .filter(Boolean)
+        .sort()
+        .pop();
+      if (latest) setLastEventAt(latest);
       setErr(null);
     } catch (e) {
       setErr(e.message);
@@ -363,7 +535,7 @@ export default function TeacherTabletPage() {
     localStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setIdentity(null);
-    setFeed({ active: [], held: [] });
+    setFeed({ active: [], held: [], todayReleased: 0 });
   };
 
   if (!token) {
@@ -437,14 +609,12 @@ export default function TeacherTabletPage() {
         {/* Active panel: max 2 cards */}
         <div style={{ padding: '22px', maxWidth: 1200, margin: '0 auto' }}>
           {feed.active.length === 0 ? (
-            <div style={{
-              padding: '40px 20px', textAlign: 'center',
-              border: '2px dashed #334155', borderRadius: 16, color: '#64748b',
-            }}>
-              <div style={{ fontSize: 48, marginBottom: 8 }}>👋</div>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>No active pickups</div>
-              <div style={{ fontSize: 13, marginTop: 4 }}>New scans on your terminals will appear here.</div>
-            </div>
+            <StandbyHero
+              identity={identity}
+              todayReleased={feed.todayReleased}
+              heldCount={feed.held.length}
+              lastEventAt={lastEventAt}
+            />
           ) : (
             <div style={{
               display: 'grid',

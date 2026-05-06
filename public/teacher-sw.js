@@ -27,12 +27,6 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
-  // Keep teacher APIs live: never serve stale cached API responses.
-  if (url.pathname.startsWith('/api/pickup/teacher/')) {
-    event.respondWith(fetch(event.request));
-    return;
-  }
-
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => caches.match('/pickup/teacher'))
