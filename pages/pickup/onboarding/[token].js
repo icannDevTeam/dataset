@@ -515,12 +515,19 @@ export default function PickupOnboardingPage() {
   const [studentInputId, setStudentInputId] = useState('');
   const [studentLookupBusy, setStudentLookupBusy] = useState(false);
   const [students, setStudents] = useState([]);
+  // Phase 3: manual fallback when BINUS API is down or returns nothing.
+  const [manualMode, setManualMode] = useState(false);
+  const [manualName, setManualName] = useState('');
+  const [manualHomeroom, setManualHomeroom] = useState('');
 
   const [chaperones, setChaperones] = useState([]);
 
   const [signature, setSignature] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
+  // Phase 3: welcome modal + dedupe conflict surfacing.
+  const [welcomeAcked, setWelcomeAcked] = useState(true);   // default true; flipped after token validates
+  const [conflict, setConflict] = useState(null);
 
   // Validate token + auto-fill primary student
   useEffect(() => {
@@ -544,7 +551,15 @@ export default function PickupOnboardingPage() {
           setPrimarySid(json.sid || null);
           if (json.sid) await addStudent(json.sid, true);
         } catch { /* ignore */ }
-        if (!cancel) setTokenOk(true);
+        if (!cancel) {
+          setTokenOk(true);
+          // Phase 3: show one-time welcome modal per browser session.
+          try {
+            const key = `pog-welcome-acked-${(token || '').slice(0, 24)}`;
+            const acked = typeof window !== 'undefined' && sessionStorage.getItem(key) === '1';
+            setWelcomeAcked(!!acked);
+          } catch { setWelcomeAcked(false); }
+        }
       } catch (e) {
         if (!cancel) setError(e.message);
       } finally {
@@ -558,23 +573,81 @@ export default function PickupOnboardingPage() {
   async function addStudent(sidOverride, silent = false) {
     const sid = (sidOverride || studentInputId || '').trim();
     if (!sid) return;
+    if (!/^[A-Za-z0-9_-]{4,32}$/.test(sid)) {
+      if (!silent) setError('Binusian ID looks invalid (4–32 letters, digits, dash or underscore).');
+      return;
+    }
     if (students.find((s) => s.id === sid)) {
       if (!silent) setError('That student is already added.');
       return;
     }
     setStudentLookupBusy(true); setError(null);
     try {
-      const r = await fetch('/api/pickup/onboarding/lookup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, studentId: sid }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || 'lookup failed');
-      setStudents((prev) => [...prev, j.student]);
+      // Phase 3: query BINUS API and tenant Firestore in parallel.
+      // Tenant Firestore is authoritative for token scope; BINUS API enriches
+      // name/homeroom when the student isn't yet in our local copy.
+      const [tenantRes, binusRes] = await Promise.allSettled([
+        fetch('/api/pickup/onboarding/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, studentId: sid }),
+        }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) })),
+        fetch('/api/student/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ studentId: sid }),
+        }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) })),
+      ]);
+
+      let student = null;
+      if (tenantRes.status === 'fulfilled' && tenantRes.value.ok) {
+        student = tenantRes.value.body.student;
+      } else if (binusRes.status === 'fulfilled' && binusRes.value.ok && binusRes.value.body.success) {
+        const b = binusRes.value.body;
+        student = { id: sid, name: b.name, homeroom: b.homeroom, photoUrl: null };
+      }
+
+      if (!student) {
+        // Both lookups failed → offer manual fallback.
+        if (!silent) {
+          setManualMode(true);
+          setError('We could not auto-fill this Binusian ID. Please enter the student’s name and class manually below.');
+        }
+        return;
+      }
+
+      setStudents((prev) => [...prev, student]);
+      // Auto-include the new student in every chaperone's authorization list
+      setChaperones((prev) => prev.map((c) => ({
+        ...c,
+        authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), student.id])),
+      })));
       setStudentInputId('');
-    } catch (e) { if (!silent) setError(e.message); }
-    finally { setStudentLookupBusy(false); }
+      setManualMode(false);
+      setManualName(''); setManualHomeroom('');
+    } catch (e) {
+      if (!silent) setError(e.message || 'Lookup failed. You can switch to manual entry below.');
+      setManualMode(true);
+    } finally { setStudentLookupBusy(false); }
+  }
+
+  function addStudentManual() {
+    setError(null);
+    const sid = studentInputId.trim();
+    const nm = manualName.trim();
+    const hr = manualHomeroom.trim();
+    if (!sid) return setError('Binusian ID is required.');
+    if (!/^[A-Za-z0-9_-]{4,32}$/.test(sid)) return setError('Binusian ID looks invalid.');
+    if (!nm) return setError('Please type the student’s full name.');
+    if (students.find((s) => s.id === sid)) return setError('That student is already added.');
+    const student = { id: sid, name: nm, homeroom: hr || null, photoUrl: null };
+    setStudents((prev) => [...prev, student]);
+    setChaperones((prev) => prev.map((c) => ({
+      ...c,
+      authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), student.id])),
+    })));
+    setStudentInputId(''); setManualName(''); setManualHomeroom('');
+    setManualMode(false);
   }
 
   function removeStudent(id) {
@@ -619,6 +692,8 @@ export default function PickupOnboardingPage() {
   async function submit(e) {
     e.preventDefault();
     setError(null);
+    setConflict(null);
+    if (chaperones.length > 3) return setError('Maximum 3 authorized people.');
     if (!guardianName.trim()) return setError('Your full name is required.');
     if (signature.trim().toLowerCase() !== guardianName.trim().toLowerCase()) {
       return setError('Type your full name exactly as the signature.');
@@ -629,7 +704,9 @@ export default function PickupOnboardingPage() {
       if (!c.name.trim()) return setError('Every chaperone needs a name.');
       if (!c.phone.trim()) return setError(`Phone number missing for ${c.name || 'a chaperone'}.`);
       if (c.authorizedStudentIds.length === 0) return setError(`${c.name} must be authorized for at least one student.`);
-      if (c.facePaths.length === 0) return setError(`${c.name} needs at least one face photo.`);
+      if (!Array.isArray(c.facePaths) || c.facePaths.length === 0) {
+        return setError(`${c.name || 'A chaperone'} needs at least one face photo.`);
+      }
     }
     setSubmitting(true);
     try {
@@ -644,8 +721,13 @@ export default function PickupOnboardingPage() {
         }),
       });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error || 'submission failed');
-      setDone({ recordId: j.recordId, at: new Date().toISOString() });
+      if (r.status === 409 && j.error === 'student-already-registered') {
+        setConflict(j);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      if (!r.ok) throw new Error(j.message || j.error || 'submission failed');
+      setDone({ recordId: j.recordId, formNumber: j.formNumber, at: new Date().toISOString() });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) { setError(e.message); }
     finally { setSubmitting(false); }
@@ -655,7 +737,7 @@ export default function PickupOnboardingPage() {
   const stepDone = {
     1: !!(guardianName.trim() && guardianEmail.trim() && guardianPhone.trim()),
     2: students.length > 0,
-    3: chaperones.length > 0 && chaperones.every((c) => c.facePaths.length > 0 && c.name.trim()),
+    3: chaperones.length > 0 && chaperones.every((c) => c.name.trim() && c.phone.trim() && c.authorizedStudentIds.length > 0 && (c.facePaths || []).length > 0),
     4: !!done,
   };
 
@@ -685,6 +767,122 @@ export default function PickupOnboardingPage() {
         minHeight: '100vh', background: BRAND.bg,
         fontFamily: FONT_STACK, color: BRAND.text,
       }}>
+
+        {/* ───── Phase 3: Welcome modal ───── */}
+        {tokenOk && !welcomeAcked && !done && (
+          <div role="dialog" aria-modal="true" style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(15,23,42,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 16,
+          }}>
+            <div style={{
+              background: '#fff', borderRadius: 16, maxWidth: 520, width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+              padding: 28, fontFamily: FONT_STACK,
+            }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: '50%',
+                background: `${BRAND.orange}22`, color: BRAND.orange,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 28, fontWeight: 700, marginBottom: 14,
+              }}>!</div>
+              <h2 style={{ margin: 0, fontSize: 20, color: BRAND.text }}>
+                Before you start — please read
+              </h2>
+              <div style={{ marginTop: 12, color: BRAND.textMuted, fontSize: 14, lineHeight: 1.65 }}>
+                <p style={{ margin: '0 0 10px' }}>
+                  This pickup-authorization form can be <strong>submitted only once</strong>{' '}
+                  per student. After submission you cannot edit it through this link.
+                </p>
+                <p style={{ margin: '0 0 10px' }}>
+                  For any changes — adding or removing a chaperone, replacing a photo,
+                  or correcting details — please visit the{' '}
+                  <strong style={{ color: BRAND.navy }}>ACOP office on the 3rd floor</strong>.
+                </p>
+                <p style={{ margin: 0 }}>
+                  Make sure each authorized person has 1–3 clear face photos before submitting.
+                </p>
+              </div>
+              <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="button" style={btn({ padding: '12px 24px' })}
+                  onClick={() => {
+                    try {
+                      const key = `pog-welcome-acked-${(token || '').slice(0, 24)}`;
+                      sessionStorage.setItem(key, '1');
+                    } catch {}
+                    setWelcomeAcked(true);
+                  }}>
+                  I understand, continue
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ───── Phase 3: Dedupe conflict modal ───── */}
+        {conflict && (
+          <div role="dialog" aria-modal="true" style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(15,23,42,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 16,
+          }}>
+            <div style={{
+              background: '#fff', borderRadius: 16, maxWidth: 540, width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+              padding: 28, fontFamily: FONT_STACK,
+            }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: '50%',
+                background: BRAND.dangerBg, color: BRAND.danger,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 28, fontWeight: 700, marginBottom: 14,
+              }}>!</div>
+              <h2 style={{ margin: 0, fontSize: 20, color: BRAND.danger }}>
+                Already registered
+              </h2>
+              <div style={{ marginTop: 12, color: BRAND.textMuted, fontSize: 14, lineHeight: 1.65 }}>
+                <p style={{ margin: '0 0 12px' }}>{conflict.message}</p>
+                {Array.isArray(conflict.conflicts) && conflict.conflicts.length > 0 && (
+                  <div style={{
+                    background: BRAND.surfaceAlt, border: `1px solid ${BRAND.border}`,
+                    borderRadius: 8, padding: 12, marginBottom: 12,
+                  }}>
+                    {conflict.conflicts.map((c, i) => (
+                      <div key={i} style={{ fontSize: 13, marginBottom: i < conflict.conflicts.length - 1 ? 8 : 0 }}>
+                        <div style={{ fontWeight: 700, color: BRAND.text }}>{c.studentName}</div>
+                        <div style={{ color: BRAND.textSubtle, fontSize: 12, marginTop: 2 }}>
+                          Binusian ID {c.studentId}
+                          {c.formNumber && (
+                            <> · Existing form{' '}
+                              <code style={{
+                                background: '#fff', padding: '1px 6px', borderRadius: 4,
+                                fontWeight: 700, color: BRAND.navy,
+                              }}>{c.formNumber}</code>
+                            </>
+                          )}
+                          {c.status && <> · {c.status}</>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p style={{ margin: 0, fontSize: 13.5 }}>
+                  For any changes please visit the{' '}
+                  <strong style={{ color: BRAND.navy }}>ACOP office on the 3rd floor</strong>.
+                </p>
+              </div>
+              <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+                <button type="button" style={btn({ padding: '12px 24px' })}
+                  onClick={() => setConflict(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <header style={{
           background: `linear-gradient(135deg, ${BRAND.navy} 0%, ${BRAND.navyLight} 100%)`,
           color: '#fff',
@@ -746,16 +944,35 @@ export default function PickupOnboardingPage() {
               <h2 style={{ color: BRAND.success, marginTop: 0, fontSize: 22 }}>
                 Submission received
               </h2>
+
+              {done.formNumber && (
+                <div style={{
+                  margin: '16px 0', padding: '14px 18px',
+                  background: '#fff', border: `2px solid ${BRAND.navy}`,
+                  borderRadius: 10, display: 'inline-block',
+                }}>
+                  <div style={{ fontSize: 11, color: BRAND.textMuted, fontWeight: 700,
+                    letterSpacing: 1, textTransform: 'uppercase' }}>
+                    Form Number
+                  </div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: BRAND.navy,
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    letterSpacing: 1, marginTop: 4 }}>
+                    {done.formNumber}
+                  </div>
+                </div>
+              )}
+
               <p style={{ color: '#166534', fontSize: 14, lineHeight: 1.6 }}>
-                Your reference: <code style={{
-                  background: '#fff', padding: '2px 8px', borderRadius: 4,
-                  fontWeight: 600, fontSize: 13, color: BRAND.text,
-                }}>{done.recordId}</code>
+                Please save the form number above for your reference. The school
+                office will review your submission. Once approved, each authorized
+                adult will be activated at the gate. A confirmation will be sent to{' '}
+                <strong>{guardianEmail}</strong>.
               </p>
-              <p style={{ color: '#166534', fontSize: 14, lineHeight: 1.6 }}>
-                The school office will review your submission. Once approved,
-                each authorized adult will be activated at the gate. A
-                confirmation will be sent to <strong>{guardianEmail}</strong>.
+              <p style={{ color: '#166534', fontSize: 13, lineHeight: 1.6, marginBottom: 0 }}>
+                <strong>Need to make changes?</strong> Please visit the{' '}
+                <strong>ACOP office on the 3rd floor</strong>. This form can only be
+                submitted once per student.
               </p>
             </div>
           )}
@@ -823,7 +1040,7 @@ export default function PickupOnboardingPage() {
 
                 <div style={card()}>
                   {sectionHeading(2, 'Your child(ren)',
-                    'Add by Student ID. Your link already includes one student.')}
+                    'Type the Binusian ID. We’ll auto-fill the name and class. If the system can’t find it, you can type the details manually.')}
 
                   {students.length === 0 ? (
                     <div style={{
@@ -844,7 +1061,7 @@ export default function PickupOnboardingPage() {
                           <div>
                             <div style={{ fontWeight: 600, color: BRAND.text }}>{s.name}</div>
                             <div style={{ fontSize: 12, color: BRAND.textSubtle, marginTop: 2 }}>
-                              ID {s.id}{s.homeroom ? ` · ${s.homeroom}` : ''}
+                              Binusian ID {s.id}{s.homeroom ? ` · ${s.homeroom}` : ''}
                               {s.id === primarySid && (
                                 <span style={{
                                   marginLeft: 8, background: BRAND.orange, color: '#fff',
@@ -863,16 +1080,70 @@ export default function PickupOnboardingPage() {
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input style={{ ...input(), flex: 1 }}
-                      placeholder="Add another student by ID (e.g. 2270005673)"
-                      value={studentInputId}
-                      onChange={(e) => setStudentInputId(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }} />
-                    <button type="button" style={btnSecondary()}
-                      onClick={() => addStudent()} disabled={studentLookupBusy}>
-                      {studentLookupBusy ? '…' : 'Add'}
-                    </button>
+                  <div style={{
+                    padding: 14, border: `1px solid ${BRAND.border}`,
+                    borderRadius: 10, background: BRAND.surfaceAlt,
+                  }}>
+                    <label style={label()}>Binusian ID *</label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input style={{ ...input(), flex: 1 }}
+                        placeholder="e.g. 2270005673"
+                        value={studentInputId}
+                        onChange={(e) => setStudentInputId(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }} />
+                      <button type="button" style={btn()}
+                        onClick={() => addStudent()} disabled={studentLookupBusy || !studentInputId.trim()}>
+                        {studentLookupBusy ? 'Looking up…' : 'Look up'}
+                      </button>
+                    </div>
+
+                    {!manualMode && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: BRAND.textSubtle }}>
+                        Can’t find your child?{' '}
+                        <button type="button"
+                          onClick={() => { setManualMode(true); setError(null); }}
+                          style={{
+                            background: 'none', border: 'none', padding: 0,
+                            color: BRAND.navy, fontWeight: 600, cursor: 'pointer',
+                            textDecoration: 'underline', fontSize: 12,
+                          }}>Enter details manually</button>.
+                      </div>
+                    )}
+
+                    {manualMode && (
+                      <div style={{
+                        marginTop: 12, padding: 14,
+                        background: BRAND.surface, borderRadius: 8,
+                        border: `1px dashed ${BRAND.borderStrong}`,
+                      }}>
+                        <div style={{ fontSize: 12, color: BRAND.textMuted, marginBottom: 10, fontWeight: 600 }}>
+                          Manual entry (used when our directory lookup is unavailable)
+                        </div>
+                        <div className="pog-grid-2" style={{
+                          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
+                        }}>
+                          <div>
+                            <label style={label()}>Student full name *</label>
+                            <input style={input()} value={manualName}
+                              onChange={(e) => setManualName(e.target.value)} />
+                          </div>
+                          <div>
+                            <label style={label()}>Class / homeroom</label>
+                            <input style={input()} placeholder="e.g. 4C" value={manualHomeroom}
+                              onChange={(e) => setManualHomeroom(e.target.value)} />
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                          <button type="button" style={btnSecondary()} onClick={addStudentManual}>
+                            Add manually
+                          </button>
+                          <button type="button" style={btnGhost()}
+                            onClick={() => { setManualMode(false); setManualName(''); setManualHomeroom(''); setError(null); }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -924,10 +1195,25 @@ export default function PickupOnboardingPage() {
                         </div>
                         <div>
                           <label style={label()}>Relation *</label>
-                          <select style={input()} value={c.relation}
-                            onChange={(e) => updateChaperone(idx, { relation: e.target.value })}>
+                          <select style={input()}
+                            value={RELATIONS.some((r) => r.v === c.relation) ? c.relation : '__custom__'}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === '__custom__') {
+                                updateChaperone(idx, { relation: '' });
+                              } else {
+                                updateChaperone(idx, { relation: v });
+                              }
+                            }}>
                             {RELATIONS.map((r) => <option key={r.v} value={r.v}>{r.l}</option>)}
+                            <option value="__custom__">Other (type custom…)</option>
                           </select>
+                          {!RELATIONS.some((r) => r.v === c.relation) && (
+                            <input style={{ ...input(), marginTop: 8 }}
+                              placeholder="Type relationship (e.g. uncle, aunt, godparent)"
+                              value={c.relation}
+                              onChange={(e) => updateChaperone(idx, { relation: e.target.value })} />
+                          )}
                         </div>
                         <div>
                           <label style={label()}>Phone *</label>
@@ -979,7 +1265,11 @@ export default function PickupOnboardingPage() {
                       </div>
 
                       <div style={{ marginTop: 18 }}>
-                        <label style={label()}>Face photos *</label>
+                        <label style={label()}>
+                          Face photos * <span style={{ fontWeight: 400, color: BRAND.textSubtle }}>
+                            (1–3 photos required)
+                          </span>
+                        </label>
                         <ChaperoneFaceCapture
                           tempId={c.tempId}
                           token={token}
@@ -991,8 +1281,10 @@ export default function PickupOnboardingPage() {
                   ))}
 
                   <button type="button" style={btnSecondary()} onClick={addChaperone}
-                    disabled={students.length === 0}>
-                    + Add another person
+                    disabled={students.length === 0 || chaperones.length >= 3}>
+                    {chaperones.length >= 3
+                      ? 'Maximum 3 people'
+                      : '+ Add another person (max 3)'}
                   </button>
                 </div>
 

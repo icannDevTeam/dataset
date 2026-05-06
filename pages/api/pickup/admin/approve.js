@@ -89,7 +89,8 @@ async function handler(req, res) {
       const employeeNo = await allocateEmployeeNo(db, tid);
       const chaperoneId = `chap-${employeeNo}`;
 
-      // Copy faces
+      // Copy faces (Phase 2: parents no longer upload, so this is usually
+      // empty. Admin can upload faces later via /api/pickup/admin/chaperone-photos.)
       const finalFacePaths = [];
       for (let i = 0; i < (c.facePaths || []).length; i++) {
         const src = c.facePaths[i];
@@ -98,10 +99,7 @@ async function handler(req, res) {
         const ok = await copyFace(bucket, src, dst);
         if (ok) finalFacePaths.push(dst);
       }
-      if (finalFacePaths.length === 0) {
-        // Don't roll back already-allocated IDs — skip this chaperone with note
-        continue;
-      }
+      // No more skip-on-empty; admin will upload faces in a follow-up step.
 
       const chapDoc = {
         chaperoneId,
@@ -117,7 +115,10 @@ async function handler(req, res) {
         guardianPhone: rec.guardian.phone,
         authorizedStudentIds: c.authorizedStudentIds || [],
         facePaths: finalFacePaths,
-        status: 'approved',
+        // 'approved_pending_faces' = chaperone is allocated and authorized but
+        // cannot be enrolled on the Hikvision device until an admin uploads
+        // photos via /api/pickup/admin/chaperone-photos.
+        status: finalFacePaths.length === 0 ? 'approved_pending_faces' : 'approved',
         deviceEnrolled: false,    // P2: listener / batch job sets true
         deviceEnrollErrors: null,
         approvedAt: now,
@@ -160,17 +161,28 @@ async function handler(req, res) {
       allocatedChaperones: created,
     }, { merge: true });
 
+    // Phase 3: flip per-student locks to 'approved' so the form stays
+    // permanently closed for these students. Best-effort.
+    try {
+      await Promise.all((rec.students || []).map((s) => {
+        if (!s || !s.id) return null;
+        return db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${s.id}`).set({
+          status: 'approved',
+          approvedAt: now,
+        }, { merge: true });
+      }));
+    } catch (e) { console.error('[approve] lock update', e.message); }
+
     // ── Auto-enrol on Hikvision devices (best-effort) ──────────────────────
     // Failures are recorded on each chaperone doc (deviceEnrolled/deviceEnrollErrors)
     // so the admin can retry via /api/pickup/admin/reenroll without blocking approval.
+    // Skip chaperones whose faces haven't been uploaded yet (Phase 2 admin upload step).
+    const enrollable = created.filter((c) => c.facesCopied > 0).map((c) => c.chaperoneId);
     let enrollment = [];
     try {
-      enrollment = await enrollChaperones(
-        db,
-        bucket,
-        tid,
-        created.map((c) => c.chaperoneId),
-      );
+      enrollment = enrollable.length
+        ? await enrollChaperones(db, bucket, tid, enrollable)
+        : [];
     } catch (e) {
       console.error('[pickup/admin/approve] enrollment error', e.message);
       enrollment = created.map((c) => ({ chaperoneId: c.chaperoneId, ok: false, error: e.message }));

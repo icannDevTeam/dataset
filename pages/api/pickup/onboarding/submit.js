@@ -2,10 +2,15 @@
  * POST /api/pickup/onboarding/submit
  *
  * Token-gated parent-driven submission. Creates a `pickup_onboarding/{id}`
- * record with status=pending awaiting admin approval. Face photos are
- * uploaded separately via /api/pickup/onboarding/face — this endpoint
- * accepts the textual form + array of storage paths returned by the
- * face uploader.
+ * record with status=pending awaiting admin approval.
+ *
+ * Phase 3 changes:
+ *   - Allocates a human-readable `formNumber` (PKP-YYYY-NNNNN) atomically
+ *   - Single-submission lock: rejects (409) if any student in the request
+ *     already has an active `pickup_student_locks/{sid}` (status != rejected)
+ *   - Re-requires ≥1 face photo per chaperone
+ *   - Caps chaperones at 3 (parent form), accepts custom relation strings
+ *   - 5/hour per-IP rate limit
  *
  * Body:
  *   {
@@ -13,17 +18,19 @@
  *     guardianName, guardianEmail, guardianPhone,
  *     students: [{ id, name, homeroom }],
  *     chaperones: [{
- *        tempId,         // client-side uuid used to attach face uploads
+ *        tempId,         // ties to /face uploads
  *        name,
- *        relation,       // 'parent' | 'driver' | 'nanny' | 'emergency' | 'other'
+ *        relation,       // any short string (canonical or custom)
  *        phone, idNumber?, email?,
- *        authorizedStudentIds: [...],   // subset of students[].id
- *        facePaths: [storage paths from /face]
+ *        authorizedStudentIds: [...],
+ *        facePaths: [storage paths from /face]   // ≥1 required
  *     }],
  *     consentSignature   // typed name = guardianName
  *   }
  *
- * Returns: { ok, recordId }
+ * Returns: { ok, recordId, formNumber }
+ *   On dedupe collision (409):
+ *     { error:'student-already-registered', message, conflicts:[{studentId,studentName,formNumber,status}] }
  */
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import admin from 'firebase-admin';
@@ -31,30 +38,40 @@ import crypto from 'crypto';
 
 const tenancy = require('../../../../lib/tenancy');
 const { verifyPickupOnboardingToken } = require('../../../../lib/pickup-token');
+const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
 
-const ALLOWED_RELATIONS = new Set(['parent', 'mother', 'father', 'guardian',
-  'driver', 'nanny', 'grandparent', 'sibling', 'emergency', 'other']);
+const MAX_CHAPERONES = 3;
+const MAX_STUDENTS = 10;
+const FIRST_FORM_SEQ = 0;
 
-function clientIp(req) {
-  return (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
-    || req.socket?.remoteAddress || null;
+function clientIpHdr(req) {
+  return clientIp(req);
+}
+
+function sanitizeRelation(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return 'other';
+  // allow alpha + space + dash + slash, up to 40 chars
+  if (!/^[a-z0-9 \-/]{1,40}$/.test(s)) return null;
+  return s;
 }
 
 function sanitizeChaperone(c, validStudentIds) {
   if (!c || typeof c !== 'object') return null;
   const name = String(c.name || '').trim();
   const phone = String(c.phone || '').trim();
-  const relation = String(c.relation || 'other').trim().toLowerCase();
+  const relation = sanitizeRelation(c.relation);
+  if (relation === null) return null;
   if (!name || name.length < 2 || name.length > 80) return null;
   if (!phone || phone.length > 24) return null;
-  if (!ALLOWED_RELATIONS.has(relation)) return null;
   const auth = Array.isArray(c.authorizedStudentIds)
     ? c.authorizedStudentIds.filter((s) => validStudentIds.has(String(s)))
     : [];
   if (auth.length === 0) return null;
   const facePaths = Array.isArray(c.facePaths)
-    ? c.facePaths.filter((p) => typeof p === 'string' && p.startsWith('tenants/')).slice(0, 8)
+    ? c.facePaths.filter((p) => typeof p === 'string' && p.startsWith('tenants/')).slice(0, 3)
     : [];
+  if (facePaths.length === 0) return null;   // ≥1 photo required (Phase 3)
   return {
     tempId: String(c.tempId || '').slice(0, 64) || null,
     name,
@@ -67,8 +84,21 @@ function sanitizeChaperone(c, validStudentIds) {
   };
 }
 
+function formNumberFor(seq) {
+  const year = new Date().getUTCFullYear();
+  return `PKP-${year}-${String(seq).padStart(5, '0')}`;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const rl = enforceRateLimit('pickup:onboarding-submit', clientIpHdr(req), { max: 5, windowMs: 60 * 60_000 });
+  if (!rl.allowed) {
+    res.setHeader('Retry-After', rl.retryAfter);
+    return res.status(429).json({ error: 'rate_limited', retryAfter: rl.retryAfter,
+      message: 'Too many submissions from your network. Please try again later.' });
+  }
+
   const body = req.body || {};
   const claims = verifyPickupOnboardingToken(body.token || '');
   if (!claims) return res.status(401).json({ error: 'invalid or expired token' });
@@ -88,19 +118,11 @@ export default async function handler(req, res) {
   if (consentSignature.toLowerCase() !== guardianName.toLowerCase()) {
     return res.status(400).json({ error: 'typed signature must match guardian name' });
   }
-  if (students.length === 0 || students.length > 10) {
-    return res.status(400).json({ error: 'students: 1–10 required' });
+  if (students.length === 0 || students.length > MAX_STUDENTS) {
+    return res.status(400).json({ error: `students: 1–${MAX_STUDENTS} required` });
   }
-  if (chaperones.length === 0 || chaperones.length > 10) {
-    return res.status(400).json({ error: 'chaperones: 1–10 required' });
-  }
-
-  const validStudentIds = new Set(
-    students.map((s) => String(s && s.id || '').trim()).filter(Boolean),
-  );
-  // If token was scoped to a single student, that one must be present
-  if (claims.sid && !validStudentIds.has(String(claims.sid))) {
-    return res.status(400).json({ error: 'token-bound student must be in submission' });
+  if (chaperones.length === 0 || chaperones.length > MAX_CHAPERONES) {
+    return res.status(400).json({ error: `chaperones: 1–${MAX_CHAPERONES} required` });
   }
 
   const cleanStudents = students.map((s) => ({
@@ -109,45 +131,120 @@ export default async function handler(req, res) {
     homeroom: s.homeroom ? String(s.homeroom).trim().slice(0, 32) : null,
   })).filter((s) => s.id);
 
+  if (cleanStudents.length === 0) return res.status(400).json({ error: 'no valid students' });
+
+  const validStudentIds = new Set(cleanStudents.map((s) => s.id));
+  if (claims.sid && !validStudentIds.has(String(claims.sid))) {
+    return res.status(400).json({ error: 'token-bound student must be in submission' });
+  }
+
   const cleanChaperones = chaperones
     .map((c) => sanitizeChaperone(c, validStudentIds))
     .filter(Boolean);
   if (cleanChaperones.length === 0) {
-    return res.status(400).json({ error: 'at least one valid chaperone required' });
+    return res.status(400).json({ error: 'at least one valid chaperone with ≥1 face photo required' });
   }
-  if (cleanChaperones.some((c) => c.facePaths.length < 1)) {
-    return res.status(400).json({ error: 'every chaperone needs at least 1 face photo' });
-  }
+
+  const studentNames = cleanStudents.map((s) => s.name).filter(Boolean);
 
   try {
     initializeFirebase();
     const db = admin.firestore();
+    const tid = claims.tid;
     const recordId = crypto.randomBytes(12).toString('hex');
-    const ref = db.doc(`${tenancy.pickupOnboardingPath(claims.tid)}/${recordId}`);
-    const now = new Date().toISOString();
-    await ref.set({
-      tenantId: claims.tid,
-      status: 'pending',
-      submittedAt: now,
-      submittedFromIp: clientIp(req),
-      userAgent: req.headers['user-agent'] || null,
-      tokenSid: claims.sid || null,
-      tokenExp: claims.exp,
-      guardian: {
-        name: guardianName,
-        email: guardianEmail,
-        phone: guardianPhone,
-        signatureRef: consentSignature,
-      },
-      students: cleanStudents,
-      chaperones: cleanChaperones,
-      reviewedAt: null,
-      reviewedBy: null,
-      approvalNotes: null,
+    const recRef = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
+    const counterRef = db.doc(tenancy.idAllocationsDoc('pickup-form-counter', tid));
+    const lockRefs = cleanStudents.map((s) => db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${s.id}`));
+
+    const txOut = await db.runTransaction(async (tx) => {
+      // Reads first (Firestore txn rule)
+      const lockSnaps = await Promise.all(lockRefs.map((r) => tx.get(r)));
+      const conflicts = [];
+      lockSnaps.forEach((snap, i) => {
+        if (!snap.exists) return;
+        const d = snap.data() || {};
+        if (d.status && d.status !== 'rejected') {
+          conflicts.push({
+            studentId: cleanStudents[i].id,
+            studentName: d.studentName || cleanStudents[i].name,
+            formNumber: d.formNumber || null,
+            status: d.status,
+          });
+        }
+      });
+      if (conflicts.length > 0) return { conflict: true, conflicts };
+
+      const counterSnap = await tx.get(counterRef);
+      const lastSeq = counterSnap.exists ? Number((counterSnap.data() || {}).last || FIRST_FORM_SEQ) : FIRST_FORM_SEQ;
+      const nextSeq = lastSeq + 1;
+      const formNumber = formNumberFor(nextSeq);
+      const now = new Date().toISOString();
+
+      tx.set(counterRef, {
+        last: nextSeq,
+        lastFormNumber: formNumber,
+        tenantId: tid,
+        updatedAt: now,
+      }, { merge: true });
+
+      tx.set(recRef, {
+        tenantId: tid,
+        formNumber,
+        formSeq: nextSeq,
+        status: 'pending',
+        submittedAt: now,
+        submittedFromIp: clientIpHdr(req),
+        userAgent: req.headers['user-agent'] || null,
+        tokenSid: claims.sid || null,
+        tokenExp: claims.exp,
+        guardian: {
+          name: guardianName,
+          email: guardianEmail,
+          phone: guardianPhone,
+          signatureRef: consentSignature,
+        },
+        students: cleanStudents,
+        studentNames,
+        chaperones: cleanChaperones,
+        reviewedAt: null,
+        reviewedBy: null,
+        approvalNotes: null,
+      });
+
+      cleanStudents.forEach((s, i) => {
+        tx.set(lockRefs[i], {
+          studentId: s.id,
+          studentName: s.name,
+          homeroom: s.homeroom || null,
+          recordId,
+          formNumber,
+          status: 'pending',
+          guardianName,
+          guardianEmail,
+          guardianPhone,
+          submittedAt: now,
+          tenantId: tid,
+        }, { merge: false });
+      });
+
+      return { conflict: false, formNumber };
     });
-    return res.status(200).json({ ok: true, recordId });
+
+    if (txOut.conflict) {
+      const names = txOut.conflicts.map((c) => c.studentName).join(', ');
+      return res.status(409).json({
+        error: 'student-already-registered',
+        message:
+          `A pickup registration already exists for ${names}. ` +
+          `For any changes (chaperone updates, photo replacement, etc.) please ` +
+          `visit ACOP on the 3rd floor.`,
+        conflicts: txOut.conflicts,
+      });
+    }
+
+    return res.status(200).json({ ok: true, recordId, formNumber: txOut.formNumber });
   } catch (err) {
-    console.error('[pickup/onboarding/submit]', err.message);
+    console.error('[pickup/onboarding/submit]', err.message, err.stack);
     return res.status(500).json({ error: 'internal' });
   }
 }

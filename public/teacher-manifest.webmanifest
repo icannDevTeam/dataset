@@ -1,0 +1,24 @@
+{
+  "name": "BINUS Teacher Pickup",
+  "short_name": "Teacher Pickup",
+  "description": "Teacher release desk for BINUS PickupGuard",
+  "start_url": "/pickup/teacher",
+  "scope": "/pickup/teacher",
+  "display": "standalone",
+  "background_color": "#070B14",
+  "theme_color": "#8B1538",
+  "icons": [
+    {
+      "src": "/pwa/teacher-icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa/teacher-icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

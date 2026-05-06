@@ -35,6 +35,18 @@ async function handler(req, res) {
       reviewedBy: req.headers['x-admin-user'] || 'api-key',
       rejectionReason: reason.trim(),
     }, { merge: true });
+    // Phase 3: release per-student locks so the family can re-submit.
+    try {
+      const rec = snap.data();
+      await Promise.all((rec.students || []).map((s) => {
+        if (!s || !s.id) return null;
+        return db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${s.id}`).set({
+          status: 'rejected',
+          rejectedAt: new Date().toISOString(),
+          rejectionReason: reason.trim(),
+        }, { merge: true });
+      }));
+    } catch (e) { console.error('[reject] lock update', e.message); }
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('[pickup/admin/reject]', err.message);

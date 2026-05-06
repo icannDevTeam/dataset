@@ -36,6 +36,8 @@ const NAV_SECTIONS = [
     items: [
       { href: '/v2/pickup-admin', icon: 'ph-hand-waving', label: 'Onboarding Review', badgeKey: 'pickupPending' },
       { href: '/v2/pickup-admin?view=kiosks', icon: 'ph-television-simple', label: 'TV Kiosks' },
+      { href: '/v2/terminals', icon: 'ph-fingerprint', label: 'Terminals' },
+      { href: '/v2/release-groups', icon: 'ph-device-tablet-speaker', label: 'Release Groups (iPads)' },
       { href: '/v2/pickup-admin?view=settings', icon: 'ph-sliders', label: 'Pickup Settings' },
       { href: '/v2/chaperones', icon: 'ph-users-three', label: 'Chaperones' },
       { href: '/v2/officer-overrides', icon: 'ph-shield-check', label: 'Officer Overrides' },

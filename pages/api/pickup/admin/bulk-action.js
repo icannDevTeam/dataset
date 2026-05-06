@@ -124,6 +124,17 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
     allocatedChaperones: created,
   }, { merge: true });
 
+  // Phase 3: flip per-student locks (best-effort).
+  try {
+    await Promise.all((rec.students || []).map((s) => {
+      if (!s || !s.id) return null;
+      return db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${s.id}`).set({
+        status: 'approved',
+        approvedAt: now,
+      }, { merge: true });
+    }));
+  } catch (e) { console.error('[bulk-approve] lock update', e.message); }
+
   let enrollment = [];
   try {
     enrollment = await enrollChaperones(db, bucket, tid, created.map((c) => c.chaperoneId));
@@ -147,6 +158,17 @@ async function rejectOne(db, tid, recordId, reason, reviewer) {
     reviewedBy: reviewer,
     rejectionReason: reason.trim(),
   }, { merge: true });
+  // Phase 3: release per-student locks (best-effort).
+  try {
+    await Promise.all((rec.students || []).map((s) => {
+      if (!s || !s.id) return null;
+      return db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${s.id}`).set({
+        status: 'rejected',
+        rejectedAt: new Date().toISOString(),
+        rejectionReason: reason.trim(),
+      }, { merge: true });
+    }));
+  } catch (e) { console.error('[bulk-reject] lock update', e.message); }
 }
 
 async function handler(req, res) {

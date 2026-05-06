@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="BINUS Teacher Pickup">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5D0E27"/>
+      <stop offset="100%" stop-color="#8B1538"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="38" fill="url(#bg)"/>
+  <circle cx="96" cy="72" r="28" fill="#FCBF11"/>
+  <path d="M46 148c7-23 24-35 50-35s43 12 50 35" fill="none" stroke="#FCBF11" stroke-width="12" stroke-linecap="round"/>
+  <rect x="122" y="120" width="44" height="44" rx="10" fill="#FCBF11"/>
+  <path d="M133 142h22M144 131v22" stroke="#5D0E27" stroke-width="5" stroke-linecap="round"/>
+</svg>

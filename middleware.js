@@ -14,10 +14,23 @@ import { NextResponse } from 'next/server';
 const PUBLIC_PATHS = ['/login'];
 
 // Prefixes that don't require auth (whole subtrees)
-const PUBLIC_PREFIXES = ['/consent/', '/pickup/onboarding/', '/pickup/tv', '/pickup/gate'];
+// /pickup/teacher uses its own device-token auth (not Firebase session),
+// so it must be public at the middleware layer.
+const PUBLIC_PREFIXES = ['/consent/', '/pickup/onboarding/', '/pickup/tv', '/pickup/gate', '/pickup/teacher'];
 
 // Prefixes to skip (static assets, API routes, Next.js internals)
-const SKIP_PREFIXES = ['/_next', '/api/', '/favicon', '/models/', '/sw.js', '/manifest.json', '/binus-logo'];
+const SKIP_PREFIXES = [
+  '/_next',
+  '/api/',
+  '/favicon',
+  '/models/',
+  '/sw.js',
+  '/manifest.json',
+  '/binus-logo',
+  '/teacher-sw.js',
+  '/teacher-manifest.webmanifest',
+  '/pwa/',
+];
 
 export async function middleware(request) {
   const { pathname } = request.nextUrl;

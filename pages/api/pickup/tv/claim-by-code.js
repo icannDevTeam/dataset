@@ -17,6 +17,7 @@ import { initializeFirebase } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
 const td = require('../../../../lib/tv-devices');
 const kp = require('../../../../lib/kiosk-profiles');
+const { maybeSeedPickupDemoOnClaim } = require('../../../../lib/pickup-demo-seeder');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
 
 export default async function handler(req, res) {
@@ -75,12 +76,37 @@ export default async function handler(req, res) {
       claimedVia: 'kioskCode',
     });
 
+    let demoSeed = null;
+    try {
+      demoSeed = await maybeSeedPickupDemoOnClaim({
+        db,
+        tid,
+        profileId: profile.id,
+        profileName: profile.name,
+        claimedBy: 'kioskCode',
+      });
+      if (demoSeed?.triggered) {
+        await devCol.doc(deviceId).set({
+          demoSeed: {
+            batchId: demoSeed.batchId,
+            eventCount: demoSeed.eventCount,
+            classScopes: demoSeed.classScopes,
+            seededAt: admin.firestore.FieldValue.serverTimestamp(),
+            source: 'claim_by_code',
+          },
+        }, { merge: true });
+      }
+    } catch (seedErr) {
+      console.error('[pickup/tv/claim-by-code] demo seed failed', seedErr.message);
+    }
+
     return res.status(201).json({
       ok: true,
       deviceId,
       deviceToken,
       profileId: profile.id,
       profileName: profile.name,
+      demoSeed,
     });
   } catch (e) {
     console.error('[pickup/tv/claim-by-code]', e.message);

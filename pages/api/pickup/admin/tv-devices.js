@@ -16,6 +16,7 @@ import { withAuth } from '../../../../lib/auth-middleware';
 const tenancy = require('../../../../lib/tenancy');
 const td = require('../../../../lib/tv-devices');
 const kp = require('../../../../lib/kiosk-profiles');
+const { maybeSeedPickupDemoOnClaim } = require('../../../../lib/pickup-demo-seeder');
 
 async function handler(req, res) {
   initializeFirebase();
@@ -70,8 +71,38 @@ async function handler(req, res) {
       };
       if (deviceLabel) patch.deviceLabel = deviceLabel;
       await doc.ref.set(patch, { merge: true });
+
+      let demoSeed = null;
+      try {
+        demoSeed = await maybeSeedPickupDemoOnClaim({
+          db,
+          tid,
+          profileId,
+          profileName: profile.data().name,
+          claimedBy: 'pairingCode',
+        });
+        if (demoSeed?.triggered) {
+          await doc.ref.set({
+            demoSeed: {
+              batchId: demoSeed.batchId,
+              eventCount: demoSeed.eventCount,
+              classScopes: demoSeed.classScopes,
+              seededAt: admin.firestore.FieldValue.serverTimestamp(),
+              source: 'admin_pair_claim',
+            },
+          }, { merge: true });
+        }
+      } catch (seedErr) {
+        console.error('[pickup/admin/tv-devices] demo seed failed', seedErr.message);
+      }
+
       const updated = (await doc.ref.get()).data();
-      return res.status(200).json({ ok: true, device: td.publicDevice(doc.id, updated), profileName: profile.data().name });
+      return res.status(200).json({
+        ok: true,
+        device: td.publicDevice(doc.id, updated),
+        profileName: profile.data().name,
+        demoSeed,
+      });
     }
 
     if (req.method === 'PUT') {

@@ -12,6 +12,7 @@ const PUBLIC_PATHNAME_PREFIXES = [
   '/pickup/onboarding/',
   '/pickup/tv',
   '/pickup/gate',
+  '/pickup/teacher',
   '/consent/',
 ];
 
