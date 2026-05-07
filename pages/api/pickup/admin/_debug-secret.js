@@ -16,10 +16,11 @@
  *     vercel: { env, region, deploymentUrl, gitSha }
  *   }
  *
- * Auth-gated like the rest of /admin/*.
+ * Temporarily NOT auth-gated so we can compare its fingerprint against
+ * /api/pickup/onboarding/_debug-secret to diagnose sign/verify drift.
+ * Re-add withAuth() once the diagnosis is complete.
  */
 const crypto = require('crypto');
-const { withAuth } = require('../../../../lib/auth-middleware');
 
 function fingerprint(v) {
   if (!v) return null;
@@ -50,4 +51,4 @@ async function handler(req, res) {
   });
 }
 
-export default withAuth(handler, { methods: ['GET'] });
+export default handler;
