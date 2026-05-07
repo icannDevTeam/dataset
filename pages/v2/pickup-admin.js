@@ -2155,6 +2155,8 @@ function InviteLinksManager({ pushToast }) {
   const [showCreate, setShowCreate] = useState(false);
   const [previewInvite, setPreviewInvite] = useState(null); // {invite, qr}
   const [confirmRevoke, setConfirmRevoke] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [sendInvite, setSendInvite] = useState(null);   // {invite, qr}
   const [showSettings, setShowSettings] = useState(false);
 
@@ -2225,6 +2227,21 @@ function InviteLinksManager({ pushToast }) {
     }
   }
 
+  async function deleteInvite(id) {
+    try {
+      const r = await fetch(`/api/pickup/admin/invite-links?id=${encodeURIComponent(id)}&hard=1`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      pushToast('success', 'Link permanently deleted.', 'Done');
+      setConfirmDelete(null);
+      await reload();
+    } catch (e) {
+      pushToast('error', e.message, 'Delete failed');
+    }
+  }
+
   async function showQr(invite) {
     if (invite.qrDataUrl) {
       setPreviewInvite({ invite, qr: invite.qrDataUrl });
@@ -2265,11 +2282,17 @@ function InviteLinksManager({ pushToast }) {
     const list = items || [];
     return {
       total: list.length,
-      active: list.filter((i) => i.enabled && !i.revoked).length,
-      revoked: list.filter((i) => i.revoked || !i.enabled).length,
+      active: list.filter((i) => i.enabled && !i.revoked && !i.archived).length,
+      revoked: list.filter((i) => (i.revoked || !i.enabled) && !i.archived).length,
+      archived: list.filter((i) => i.archived).length,
       uses: list.reduce((acc, i) => acc + Number(i.useCount || 0), 0),
     };
   }, [items]);
+
+  const visibleItems = useMemo(() => {
+    const list = items || [];
+    return showArchived ? list.filter((i) => i.archived) : list.filter((i) => !i.archived);
+  }, [items, showArchived]);
 
   return (
     <div className="max-w-6xl">
@@ -2284,6 +2307,16 @@ function InviteLinksManager({ pushToast }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setShowArchived((v) => !v)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${
+              showArchived
+                ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                : 'bg-white/5 border-slate-800 text-slate-300 hover:bg-white/10'
+            }`}
+            title={showArchived ? 'Hide archived links' : 'Show archived links'}>
+            <i className={`ph ${showArchived ? 'ph-eye-slash' : 'ph-archive'} mr-1`}></i>
+            {showArchived ? `Viewing archive (${stats.archived})` : `Archive (${stats.archived})`}
+          </button>
           <button onClick={() => setShowSettings(true)}
             className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
             <i className="ph ph-gear-six mr-1"></i>Integrations
@@ -2309,21 +2342,27 @@ function InviteLinksManager({ pushToast }) {
 
       {items === null ? (
         <div className="text-slate-400 text-sm">Loading…</div>
-      ) : items.length === 0 ? (
+      ) : visibleItems.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-700 bg-white/5 px-8 py-14 text-center">
-          <i className="ph ph-link-simple text-4xl text-slate-500"></i>
-          <p className="mt-3 text-slate-300 font-medium">No invite links yet.</p>
-          <p className="text-xs text-slate-500 mt-1 mb-4">
-            Create one and share it with all parents — the link is reusable.
+          <i className={`ph ${showArchived ? 'ph-archive' : 'ph-link-simple'} text-4xl text-slate-500`}></i>
+          <p className="mt-3 text-slate-300 font-medium">
+            {showArchived ? 'No archived links.' : 'No invite links yet.'}
           </p>
-          <button onClick={() => setShowCreate(true)}
-            className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white">
-            <i className="ph ph-plus-circle mr-1.5"></i>Create first link
-          </button>
+          <p className="text-xs text-slate-500 mt-1 mb-4">
+            {showArchived
+              ? 'Archived links are hidden from the main list but can be restored at any time.'
+              : 'Create one and share it with all parents — the link is reusable.'}
+          </p>
+          {!showArchived && (
+            <button onClick={() => setShowCreate(true)}
+              className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white">
+              <i className="ph ph-plus-circle mr-1.5"></i>Create first link
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {items.map((inv) => (
+          {visibleItems.map((inv) => (
             <InviteLinkCard
               key={inv.id}
               invite={inv}
@@ -2333,6 +2372,8 @@ function InviteLinksManager({ pushToast }) {
               onPreview={() => window.open(inv.url, '_blank', 'noopener')}
               onToggle={(enabled) => patchInvite(inv.id, { enabled })}
               onRevoke={() => setConfirmRevoke(inv)}
+              onArchive={() => patchInvite(inv.id, { archived: !inv.archived })}
+              onDelete={() => setConfirmDelete(inv)}
               onRename={(name) => patchInvite(inv.id, { name })}
             />
           ))}
@@ -2401,17 +2442,57 @@ function InviteLinksManager({ pushToast }) {
           </div>
         </div>
       )}
+
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+             onClick={() => setConfirmDelete(null)}>
+          <div className="bg-slate-900 border border-rose-500/40 rounded-xl max-w-md w-full p-6"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-rose-500/20 flex items-center justify-center flex-shrink-0">
+                <i className="ph ph-trash text-rose-400 text-xl"></i>
+              </div>
+              <div>
+                <h3 className="text-white font-semibold">Permanently delete invite link?</h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  &ldquo;<span className="text-white">{confirmDelete.name}</span>&rdquo; and all of its
+                  metadata (usage stats, QR cache, signed token) will be erased forever.
+                  This cannot be undone. Consider <span className="text-amber-300">archiving</span> instead
+                  if you want to keep the audit trail.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmDelete(null)}
+                className="px-4 py-2 text-sm rounded-lg bg-slate-700 hover:bg-slate-600 text-white">Cancel</button>
+              <button onClick={() => deleteInvite(confirmDelete.id)}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-rose-600 hover:bg-rose-500 text-white">
+                <i className="ph ph-trash mr-1.5"></i>Delete forever
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle, onRevoke, onRename }) {
+function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle, onRevoke, onArchive, onDelete, onRename }) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(invite.name);
+  const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => { setDraftName(invite.name); }, [invite.name]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [menuOpen]);
 
   const now = Date.now();
-  const status = invite.revoked
+  const status = invite.archived
+    ? { label: 'Archived', tone: 'bg-amber-500/15 text-amber-300 border-amber-500/30', dot: 'bg-amber-400' }
+    : invite.revoked
     ? { label: 'Revoked', tone: 'bg-rose-500/15 text-rose-300 border-rose-500/30', dot: 'bg-rose-400' }
     : !invite.enabled
     ? { label: 'Paused',  tone: 'bg-amber-500/15 text-amber-300 border-amber-500/30', dot: 'bg-amber-400' }
@@ -2546,12 +2627,33 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle,
               {invite.enabled ? 'Pause' : 'Resume'}
             </button>
           )}
-          {!invite.revoked && (
+          {!invite.revoked && !invite.archived && (
             <button onClick={onRevoke}
               className="px-3 py-1.5 text-xs font-medium rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20">
               <i className="ph ph-prohibit mr-1"></i>Revoke
             </button>
           )}
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setMenuOpen((v) => !v)}
+              className="px-2 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-300 hover:bg-white/10"
+              title="More actions">
+              <i className="ph ph-dots-three-vertical"></i>
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 bottom-full mb-1 w-48 rounded-lg bg-slate-900 border border-slate-700 shadow-xl py-1 z-20">
+                <button onClick={() => { setMenuOpen(false); onArchive && onArchive(); }}
+                  className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-white/5 flex items-center gap-2">
+                  <i className={`ph ${invite.archived ? 'ph-arrow-counter-clockwise' : 'ph-archive'} text-amber-300`}></i>
+                  {invite.archived ? 'Restore from archive' : 'Archive (hide from list)'}
+                </button>
+                <button onClick={() => { setMenuOpen(false); onDelete && onDelete(); }}
+                  className="w-full text-left px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 flex items-center gap-2">
+                  <i className="ph ph-trash"></i>
+                  Delete forever
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -2640,26 +2742,82 @@ function CreateInviteModal({ busy, onCancel, onSubmit }) {
                 onClick={() => { setWindowOpenAt(''); setWindowCloseAt(''); }}
                 className="text-[11px] text-slate-400 hover:text-white">Clear</button>
             </div>
+
+            {/* Quick presets ─ one-tap date ranges, no calendar wrestling */}
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { label: 'Today', open: 'todayStart', close: 'todayEnd' },
+                { label: 'Tomorrow', open: 'tomorrowStart', close: 'tomorrowEnd' },
+                { label: 'This week', open: 'todayStart', close: 'weekEnd' },
+                { label: 'Next 7 days', open: 'now', close: 'plus7' },
+                { label: 'Next 30 days', open: 'now', close: 'plus30' },
+              ].map((p) => (
+                <button key={p.label} type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const fmt = (d) => {
+                      const pad = (n) => String(n).padStart(2, '0');
+                      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                    };
+                    const presets = {
+                      now: () => now,
+                      todayStart: () => { const d = new Date(now); d.setHours(7,0,0,0); return d; },
+                      todayEnd: () => { const d = new Date(now); d.setHours(18,0,0,0); return d; },
+                      tomorrowStart: () => { const d = new Date(now); d.setDate(d.getDate()+1); d.setHours(7,0,0,0); return d; },
+                      tomorrowEnd: () => { const d = new Date(now); d.setDate(d.getDate()+1); d.setHours(18,0,0,0); return d; },
+                      weekEnd: () => { const d = new Date(now); d.setDate(d.getDate() + (7 - d.getDay())); d.setHours(18,0,0,0); return d; },
+                      plus7: () => { const d = new Date(now); d.setDate(d.getDate()+7); return d; },
+                      plus30: () => { const d = new Date(now); d.setDate(d.getDate()+30); return d; },
+                    };
+                    setWindowOpenAt(fmt(presets[p.open]()));
+                    setWindowCloseAt(fmt(presets[p.close]()));
+                  }}
+                  className="px-2.5 py-1 text-[11px] rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:border-slate-600">
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] font-medium text-slate-400 mb-1">Opens</label>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                  <i className="ph ph-arrow-up-right mr-1 text-emerald-400"></i>Opens
+                </label>
                 <input type="datetime-local" value={windowOpenAt}
                   onChange={(e) => setWindowOpenAt(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
+                             [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/40
+                             cursor-pointer hover:border-slate-600" />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-400 mb-1">Closes</label>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                  <i className="ph ph-clock-countdown mr-1 text-amber-400"></i>Closes
+                </label>
                 <input type="datetime-local" value={windowCloseAt}
+                  min={windowOpenAt || undefined}
                   onChange={(e) => setWindowCloseAt(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
+                             [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/40
+                             cursor-pointer hover:border-slate-600" />
               </div>
             </div>
+            {(windowOpenAt || windowCloseAt) && !windowError && (
+              <div className="rounded-md bg-slate-900/60 border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300 flex items-center gap-2">
+                <i className="ph ph-info text-slate-400"></i>
+                <span>
+                  {windowOpenAt && <>Opens <strong className="text-emerald-300">{new Date(windowOpenAt).toLocaleString('en-GB', { weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</strong></>}
+                  {windowOpenAt && windowCloseAt && ' · '}
+                  {windowCloseAt && <>Closes <strong className="text-amber-300">{new Date(windowCloseAt).toLocaleString('en-GB', { weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</strong></>}
+                </span>
+              </div>
+            )}
             {windowError && (
               <p className="text-[11px] text-rose-300"><i className="ph ph-warning mr-1"></i>{windowError}</p>
             )}
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              Outside this window the form refuses new submissions and shows the parent
-              the next opening time. Leave blank to allow submissions any time before
+              Click a preset above for a one-tap date range, or use the calendar pickers
+              for custom times. Outside this window the form refuses new submissions and
+              shows parents the next opening time. Leave blank to allow any time before
               the link expires.
             </p>
           </div>
