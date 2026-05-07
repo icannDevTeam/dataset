@@ -201,76 +201,51 @@ async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // ─── bulk import ─────────────────────────────────────────────────
+  // ─── bulk import (emails only) ───────────────────────────────────
+  // Pulls every email-shaped token from the pasted blob, regardless of
+  // the surrounding text (commas, semicolons, newlines, "Name <email>",
+  // CSV cells, …). Names default to the local part. No phones, no
+  // headers, no groups — just emails.
   if (action === 'import') {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
     const body = req.body || {};
     const text = String(body.text || '');
-    const group = body.group ? String(body.group).trim().slice(0, 80) : null;
     if (!text.trim()) return res.status(400).json({ error: 'text required' });
 
-    // Accept: CSV with optional header (name,email,phone,group,studentName,studentId)
-    // Or: line-delimited "Name <email>" / "Name +6212345" / "+6212…" / "alice@x.com"
-    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const parsed = [];
-    let header = null;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      // CSV row?
-      if (line.includes(',')) {
-        const cells = line.split(',').map((s) => s.trim());
-        // Detect header on first row only
-        if (!header && i === 0 && cells.some((c) => /name|email|phone|group|student/i.test(c))) {
-          header = cells.map((c) => c.toLowerCase());
-          continue;
-        }
-        const row = header
-          ? Object.fromEntries(header.map((k, j) => [k, cells[j] || '']))
-          : { name: cells[0] || '', email: cells[1] || '', phone: cells[2] || '',
-              group: cells[3] || '', studentname: cells[4] || '', studentid: cells[5] || '' };
-        parsed.push({
-          name: row.name, email: row.email, phone: row.phone,
-          group: row.group || group,
-          studentName: row.studentname || row['student name'] || null,
-          studentId: row.studentid || row['student id'] || null,
-        });
-        continue;
-      }
-      // "Name <email>"
-      const m1 = line.match(/^(.*?)\s*<\s*([^<>\s]+@[^<>\s]+)\s*>\s*$/);
-      if (m1) { parsed.push({ name: m1[1].trim() || m1[2], email: m1[2], group }); continue; }
-      // "Name +6212345"
-      const m2 = line.match(/^(.+?)\s+([+\d][\d\s().-]{5,})$/);
-      if (m2) { parsed.push({ name: m2[1].trim(), phone: m2[2], group }); continue; }
-      // bare email
-      if (/@/.test(line) && !/\s/.test(line)) { parsed.push({ name: line.split('@')[0], email: line, group }); continue; }
-      // bare phone
-      if (/^[+\d][\d\s().-]{5,}$/.test(line)) { parsed.push({ name: line, phone: line, group }); continue; }
-      // fallback: treat as plain name (no contact info → skip)
+    const EMAIL_RE = /[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/gi;
+    const found = (text.match(EMAIL_RE) || []).map((e) => e.toLowerCase());
+    const seen = new Set();
+    const emails = [];
+    for (const e of found) {
+      if (!seen.has(e) && normEmail(e)) { seen.add(e); emails.push(e); }
     }
 
+    // Skip duplicates already in Firestore
+    const existingSnap = await contactsCol.where('email', '!=', null).select('email').get().catch(() => null);
+    const existing = new Set();
+    if (existingSnap) existingSnap.forEach((d) => { const v = (d.data().email || '').toLowerCase(); if (v) existing.add(v); });
+
     const results = { added: 0, skipped: 0, errors: [] };
-    const batch = db.batch();
+    let batch = db.batch();
     let pending = 0;
-    for (const p of parsed) {
-      const name  = String(p.name || '').trim().slice(0, 120);
-      const email = normEmail(p.email);
-      const phone = normPhone(p.phone);
-      if (!name || (!email && !phone)) { results.skipped++; continue; }
-      const channel = email && phone ? 'both' : email ? 'email' : 'whatsapp';
+    for (const email of emails) {
+      if (existing.has(email)) { results.skipped++; continue; }
       const ref = contactsCol.doc();
       batch.set(ref, {
-        name, email, phone, channel,
-        group: p.group || group || null,
-        studentName: p.studentName || null,
-        studentId: p.studentId || null,
+        name: email.split('@')[0],
+        email,
+        phone: null,
+        channel: 'email',
+        group: null,
+        studentName: null,
+        studentId: null,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         createdBy: actor,
         importedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       results.added++; pending++;
-      if (pending >= 400) { await batch.commit(); pending = 0; }
+      if (pending >= 400) { await batch.commit(); batch = db.batch(); pending = 0; }
     }
     if (pending > 0) await batch.commit();
     return res.status(200).json({ ok: true, ...results });

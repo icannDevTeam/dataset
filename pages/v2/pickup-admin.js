@@ -3158,7 +3158,6 @@ function IntegrationsSettingsModal({ onClose, pushToast }) {
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [importText, setImportText] = useState('');
-  const [importGroup, setImportGroup] = useState('');
   const [showImport, setShowImport] = useState(false);
 
   const reload = useCallback(async () => {
@@ -3198,12 +3197,12 @@ function IntegrationsSettingsModal({ onClose, pushToast }) {
       const r = await fetch('/api/pickup/admin/integrations?action=import', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: importText, group: importGroup || null }),
+        body: JSON.stringify({ text: importText }),
       });
       const j = await r.json();
       if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       pushToast('success', `Added ${j.added}, skipped ${j.skipped}.`, 'Import done');
-      setImportText(''); setImportGroup(''); setShowImport(false);
+      setImportText(''); setShowImport(false);
       await reload();
     } catch (e) { pushToast('error', e.message, 'Import failed'); }
     finally { setBusy(false); }
@@ -3298,22 +3297,19 @@ function IntegrationsSettingsModal({ onClose, pushToast }) {
 
               {showImport && (
                 <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 p-4 space-y-3">
-                  <div className="text-sm text-white font-semibold">Bulk import</div>
+                  <div className="text-sm text-white font-semibold">Bulk import emails</div>
                   <div className="text-xs text-slate-400 leading-relaxed">
-                    Paste one per line or CSV. Accepted formats:<br />
-                    <code className="text-slate-300">Alice Tan &lt;alice@x.com&gt;</code> · <code className="text-slate-300">Budi +628123…</code> ·{' '}
-                    <code className="text-slate-300">name,email,phone,group,studentName,studentId</code> (with header)
+                    Paste any block of text containing email addresses — one per line, comma-separated, copied
+                    from a sheet, or even <code className="text-slate-300">Name &lt;alice@x.com&gt;</code>.
+                    Everything that isn&apos;t a valid email is ignored. Duplicates are skipped automatically.
                   </div>
                   <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={6}
-                    placeholder={'Alice Tan <alice@x.com>\nBudi Santoso +6281234567890\nname,email,phone,group\nCharlie,charlie@x.com,,Grade 4'}
+                    placeholder={'alice@example.com\nbob@example.com, carol@example.com\nDavid Tan <david@example.com>'}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono" />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input value={importGroup} onChange={(e) => setImportGroup(e.target.value)}
-                      placeholder="Default group (optional)"
-                      className="flex-1 min-w-[200px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                  <div className="flex justify-end">
                     <button onClick={importContacts} disabled={busy || !importText.trim()}
                       className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white disabled:opacity-40">
-                      {busy ? 'Importing…' : 'Add contacts'}
+                      {busy ? 'Importing…' : 'Import emails'}
                     </button>
                   </div>
                 </div>
