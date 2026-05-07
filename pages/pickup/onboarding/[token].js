@@ -618,7 +618,20 @@ export default function PickupOnboardingPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token, studentId: 'PROBE-INVALID-FORMAT-zz' }),
         });
-        if (probe.status === 401) throw new Error('Link is invalid or has expired. Please request a new one.');
+        if (probe.status === 401) {
+          let reason = null;
+          try { reason = (await probe.clone().json())?.reason || null; } catch { /* ignore */ }
+          const msg =
+            reason === 'expired'        ? 'This link has expired. Please request a new one from the school.' :
+            reason === 'bad_signature'  ? 'This link is not valid (signature mismatch). It may have been mistyped or tampered with.' :
+            reason === 'wrong_purpose'  ? 'This link is not valid for the pickup onboarding form.' :
+            reason === 'malformed' ||
+            reason === 'bad_payload' ||
+            reason === 'token_missing'  ? 'This link is malformed. Please check the URL and try again.' :
+            reason === 'secret_missing' ? 'The server is misconfigured. Please contact the school office.' :
+                                          'This link is invalid or has expired. Please request a new one.';
+          throw new Error(msg);
+        }
         try {
           const body = token.split('.')[0];
           const padded = body + '='.repeat((4 - body.length % 4) % 4);

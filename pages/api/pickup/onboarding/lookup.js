@@ -15,7 +15,7 @@ import { initializeFirebase } from '../../../../lib/firebase-admin';
 import admin from 'firebase-admin';
 
 const tenancy = require('../../../../lib/tenancy');
-const { verifyPickupOnboardingToken } = require('../../../../lib/pickup-token');
+const { inspectPickupOnboardingToken } = require('../../../../lib/pickup-token');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
 const inviteLinks = require('../../../../lib/onboarding-invites');
 
@@ -51,8 +51,14 @@ export default async function handler(req, res) {
   }
 
   const { token, studentId } = req.body || {};
-  const claims = verifyPickupOnboardingToken(token || '');
-  if (!claims) return res.status(401).json({ error: 'invalid or expired token' });
+  const inspected = inspectPickupOnboardingToken(token || '');
+  if (!inspected.ok) {
+    return res.status(401).json({
+      error: inspected.reason === 'expired' ? 'token expired' : 'invalid token',
+      reason: inspected.reason,
+    });
+  }
+  const claims = inspected.claims;
   if (!studentId || typeof studentId !== 'string') {
     return res.status(400).json({ error: 'studentId required' });
   }

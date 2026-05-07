@@ -13,7 +13,7 @@
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
-const { verifyPickupOnboardingToken } = require('../../../../lib/pickup-token');
+const { inspectPickupOnboardingToken } = require('../../../../lib/pickup-token');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
 const inviteLinks = require('../../../../lib/onboarding-invites');
 
@@ -41,8 +41,14 @@ export default async function handler(req, res) {
   }
 
   const token = (req.method === 'GET' ? req.query.token : req.body?.token) || '';
-  const claims = verifyPickupOnboardingToken(String(token));
-  if (!claims) return res.status(401).json({ error: 'invalid or expired token' });
+  const inspected = inspectPickupOnboardingToken(String(token));
+  if (!inspected.ok) {
+    return res.status(401).json({
+      error: inspected.reason === 'expired' ? 'token expired' : 'invalid token',
+      reason: inspected.reason,
+    });
+  }
+  const claims = inspected.claims;
 
   // Tokens without a link-id are legacy / unmanaged: usable until exp.
   if (!claims.lid) {
