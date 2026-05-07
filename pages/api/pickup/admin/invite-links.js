@@ -63,20 +63,6 @@ async function handler(req, res) {
       } catch (qrErr) {
         console.warn('[invite-links] QR generation failed:', qrErr.message);
       }
-      // DIAG: report which secret this Lambda actually used to sign.
-      // Compare to /api/pickup/onboarding/_debug-verify to diagnose drift.
-      const _crypto = require('crypto');
-      const _fp = (v) => v ? _crypto.createHmac('sha256','fp').update(String(v)).digest('hex').slice(0,12) : null;
-      const _sec = process.env.CONSENT_SIGNING_SECRET || process.env.SESSION_SECRET || process.env.DASHBOARD_API_KEY || null;
-      inv._diag = {
-        secretFingerprint: _fp(_sec),
-        secretSource: _sec === process.env.CONSENT_SIGNING_SECRET ? 'CONSENT_SIGNING_SECRET'
-          : _sec === process.env.SESSION_SECRET ? 'SESSION_SECRET'
-          : _sec === process.env.DASHBOARD_API_KEY ? 'DASHBOARD_API_KEY' : null,
-        secretLength: (_sec || '').length,
-        gitSha: (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0,7) || null,
-        region: process.env.VERCEL_REGION || null,
-      };
       return res.status(201).json({ ok: true, invite: inv });
     }
 
