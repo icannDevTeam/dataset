@@ -122,7 +122,7 @@ export default function PickupAdminPage() {
   useEffect(() => {
     if (!router.isReady) return;
     const v = String(router.query.view || '').toLowerCase();
-    setView(v === 'kiosks' ? 'kiosks' : v === 'settings' ? 'settings' : 'onboarding');
+    setView(v === 'kiosks' ? 'kiosks' : v === 'settings' ? 'settings' : v === 'invites' ? 'invites' : 'onboarding');
   }, [router.isReady, router.query.view]);
 
   // ─── Pickup settings state ──────────────────────────────────────────────
@@ -568,6 +568,8 @@ export default function PickupAdminPage() {
               <p className="text-sm text-slate-400 mt-1">
                 {view === 'kiosks'
                   ? 'Manage TV kiosk profiles — one per screen, filtered by gate and grade.'
+                  : view === 'invites'
+                  ? 'Generate and manage open-ended onboarding links to share with parents.'
                   : 'Review parent-submitted authorizations. Approve to allocate a chaperone ID and push the face to all pickup terminals.'}
               </p>
             </div>
@@ -583,6 +585,8 @@ export default function PickupAdminPage() {
 
           {view === 'kiosks' ? (
             <KioskManager showToast={kioskToast} />
+          ) : view === 'invites' ? (
+            <InviteLinksManager pushToast={pushToast} />
           ) : view === 'settings' ? (
             <div className="max-w-4xl">
               <h2 className="text-lg font-semibold text-white mb-1">Pickup Settings</h2>
@@ -2130,6 +2134,534 @@ function Field({ label, value, mono }) {
     <div className="flex border-b border-slate-200 py-1.5 text-sm">
       <div className="w-48 text-slate-600 text-xs uppercase tracking-wider pt-0.5">{label}</div>
       <div className={`flex-1 text-slate-900 ${mono ? 'font-mono' : 'font-medium'}`}>{value || '—'}</div>
+    </div>
+  );
+}
+
+// ─── Invite Links Manager ───────────────────────────────────────────────────
+//
+// Open-ended onboarding link administration. One link can serve any number
+// of parents — what matters is the data inside the form. Admins can:
+//   • Generate new named links with optional TTL / max-uses / description
+//   • Preview the form (opens in new tab)
+//   • Copy URL, copy short token, show QR
+//   • Pause / resume / revoke
+//   • See live useCount + last-used time
+//
+// All changes are immediate and applied tenant-wide.
+function InviteLinksManager({ pushToast }) {
+  const [items, setItems] = useState(null);   // null = loading
+  const [busy, setBusy] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [previewInvite, setPreviewInvite] = useState(null); // {invite, qr}
+  const [confirmRevoke, setConfirmRevoke] = useState(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const r = await fetch('/api/pickup/admin/invite-links', { credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setItems(j.invites || []);
+    } catch (e) {
+      pushToast('error', e.message, 'Could not load invite links');
+      setItems([]);
+    }
+  }, [pushToast]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  async function createInvite(form) {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/pickup/admin/invite-links', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setShowCreate(false);
+      setPreviewInvite({ invite: j.invite, qr: j.invite.qrDataUrl || null });
+      pushToast('success', `“${j.invite.name}” is ready to share.`, 'Invite link created');
+      await reload();
+    } catch (e) {
+      pushToast('error', e.message, 'Create failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function patchInvite(id, patch) {
+    try {
+      const r = await fetch(`/api/pickup/admin/invite-links?id=${encodeURIComponent(id)}`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      await reload();
+      return j.invite;
+    } catch (e) {
+      pushToast('error', e.message, 'Update failed');
+      return null;
+    }
+  }
+
+  async function revokeInvite(id) {
+    try {
+      const r = await fetch(`/api/pickup/admin/invite-links?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      pushToast('success', 'Link revoked. Existing tokens will be rejected on next use.', 'Done');
+      setConfirmRevoke(null);
+      await reload();
+    } catch (e) {
+      pushToast('error', e.message, 'Revoke failed');
+    }
+  }
+
+  async function showQr(invite) {
+    if (invite.qrDataUrl) {
+      setPreviewInvite({ invite, qr: invite.qrDataUrl });
+      return;
+    }
+    try {
+      const r = await fetch(`/api/pickup/admin/invite-links?id=${encodeURIComponent(invite.id)}&qr=1`, { credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setPreviewInvite({ invite: j.invite, qr: j.invite.qrDataUrl || null });
+    } catch (e) {
+      pushToast('error', e.message, 'Could not load QR');
+    }
+  }
+
+  function copyText(text, label) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(
+      () => pushToast('success', label || 'Copied to clipboard', 'Copied'),
+      () => pushToast('error', 'Clipboard blocked. Select the URL manually.', 'Copy failed'),
+    );
+  }
+
+  const stats = useMemo(() => {
+    const list = items || [];
+    return {
+      total: list.length,
+      active: list.filter((i) => i.enabled && !i.revoked).length,
+      revoked: list.filter((i) => i.revoked || !i.enabled).length,
+      uses: list.reduce((acc, i) => acc + Number(i.useCount || 0), 0),
+    };
+  }, [items]);
+
+  return (
+    <div className="max-w-6xl">
+      <div className="flex items-end justify-between flex-wrap gap-3 mb-5">
+        <div>
+          <h2 className="text-lg font-semibold text-white mb-1">Onboarding Invite Links</h2>
+          <p className="text-sm text-slate-400 max-w-2xl">
+            One link can be sent to every parent. Each submission is identified by the form
+            data — not the link itself — so you don&apos;t need to mint a per-parent URL.
+            Use multiple links to track campaigns (e.g. <em>Grade 4 Newsletter</em>,
+            <em> WhatsApp Broadcast</em>) and revoke any of them instantly.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={reload}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
+            <i className="ph ph-arrows-clockwise mr-1"></i>Refresh
+          </button>
+          <button onClick={() => setShowCreate(true)}
+            className="px-4 py-2 text-sm font-semibold rounded-lg bg-gradient-to-r from-brand-500 to-emerald-500 hover:from-brand-400 hover:to-emerald-400 text-white shadow-lg shadow-emerald-900/30">
+            <i className="ph ph-plus-circle mr-1.5"></i>New invite link
+          </button>
+        </div>
+      </div>
+
+      {/* Stat strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <StatCard label="Total links" value={stats.total} icon="ph-link" tone="slate" />
+        <StatCard label="Active" value={stats.active} icon="ph-check-circle" tone="emerald" />
+        <StatCard label="Revoked / paused" value={stats.revoked} icon="ph-pause-circle" tone="rose" />
+        <StatCard label="Total submissions" value={stats.uses} icon="ph-paper-plane-tilt" tone="amber" />
+      </div>
+
+      {items === null ? (
+        <div className="text-slate-400 text-sm">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-700 bg-white/5 px-8 py-14 text-center">
+          <i className="ph ph-link-simple text-4xl text-slate-500"></i>
+          <p className="mt-3 text-slate-300 font-medium">No invite links yet.</p>
+          <p className="text-xs text-slate-500 mt-1 mb-4">
+            Create one and share it with all parents — the link is reusable.
+          </p>
+          <button onClick={() => setShowCreate(true)}
+            className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white">
+            <i className="ph ph-plus-circle mr-1.5"></i>Create first link
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {items.map((inv) => (
+            <InviteLinkCard
+              key={inv.id}
+              invite={inv}
+              onCopy={copyText}
+              onShowQr={() => showQr(inv)}
+              onPreview={() => window.open(inv.url, '_blank', 'noopener')}
+              onToggle={(enabled) => patchInvite(inv.id, { enabled })}
+              onRevoke={() => setConfirmRevoke(inv)}
+              onRename={(name) => patchInvite(inv.id, { name })}
+            />
+          ))}
+        </div>
+      )}
+
+      {showCreate && (
+        <CreateInviteModal
+          busy={busy}
+          onCancel={() => setShowCreate(false)}
+          onSubmit={createInvite}
+        />
+      )}
+
+      {previewInvite && (
+        <InvitePreviewModal
+          invite={previewInvite.invite}
+          qr={previewInvite.qr}
+          onClose={() => setPreviewInvite(null)}
+          onCopy={copyText}
+        />
+      )}
+
+      {confirmRevoke && (
+        <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+             onClick={() => setConfirmRevoke(null)}>
+          <div className="bg-slate-900 border border-rose-500/40 rounded-xl max-w-md w-full p-6"
+               onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-rose-500/20 flex items-center justify-center flex-shrink-0">
+                <i className="ph ph-warning text-rose-400 text-xl"></i>
+              </div>
+              <div>
+                <h3 className="text-white font-semibold">Revoke invite link?</h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  &ldquo;<span className="text-white">{confirmRevoke.name}</span>&rdquo; will stop accepting
+                  new submissions immediately. Existing approved chaperones are not affected.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmRevoke(null)}
+                className="px-4 py-2 text-sm rounded-lg bg-slate-700 hover:bg-slate-600 text-white">Cancel</button>
+              <button onClick={() => revokeInvite(confirmRevoke.id)}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-rose-600 hover:bg-rose-500 text-white">
+                <i className="ph ph-prohibit mr-1.5"></i>Revoke link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InviteLinkCard({ invite, onCopy, onShowQr, onPreview, onToggle, onRevoke, onRename }) {
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState(invite.name);
+  useEffect(() => { setDraftName(invite.name); }, [invite.name]);
+
+  const status = invite.revoked
+    ? { label: 'Revoked', tone: 'bg-rose-500/15 text-rose-300 border-rose-500/30', dot: 'bg-rose-400' }
+    : !invite.enabled
+    ? { label: 'Paused',  tone: 'bg-amber-500/15 text-amber-300 border-amber-500/30', dot: 'bg-amber-400' }
+    : invite.expiresAt && invite.expiresAt < Date.now()
+    ? { label: 'Expired', tone: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30', dot: 'bg-zinc-400' }
+    : invite.maxUses != null && invite.useCount >= invite.maxUses
+    ? { label: 'Full',    tone: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30', dot: 'bg-zinc-400' }
+    : { label: 'Active',  tone: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-400' };
+
+  const expIso = invite.expiresAt ? new Date(invite.expiresAt).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : null;
+  const lastUsedAgo = invite.lastUsedAt ? timeAgo(new Date(invite.lastUsedAt).toISOString()) : null;
+  const usageLabel = invite.maxUses != null
+    ? `${invite.useCount} / ${invite.maxUses} uses`
+    : `${invite.useCount} use${invite.useCount === 1 ? '' : 's'}`;
+
+  return (
+    <div className="rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-950/80 border border-slate-800 hover:border-slate-700 transition p-5 flex flex-col gap-4">
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          {editingName ? (
+            <div className="flex items-center gap-1.5">
+              <input value={draftName} onChange={(e) => setDraftName(e.target.value)}
+                autoFocus
+                className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { onRename(draftName.trim()); setEditingName(false); }
+                  if (e.key === 'Escape') { setDraftName(invite.name); setEditingName(false); }
+                }} />
+              <button onClick={() => { onRename(draftName.trim()); setEditingName(false); }}
+                className="p-1.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300">
+                <i className="ph ph-check"></i>
+              </button>
+              <button onClick={() => { setDraftName(invite.name); setEditingName(false); }}
+                className="p-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300">
+                <i className="ph ph-x"></i>
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setEditingName(true)}
+              className="text-base font-semibold text-white truncate text-left hover:text-brand-300 transition flex items-center gap-1.5 w-full">
+              {invite.name}
+              <i className="ph ph-pencil-simple text-xs text-slate-500 opacity-0 group-hover:opacity-100"></i>
+            </button>
+          )}
+          <div className="text-xs text-slate-500 mt-0.5 font-mono">{invite.id}</div>
+        </div>
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full border ${status.tone}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>
+          {status.label}
+        </span>
+      </div>
+
+      {/* Metrics */}
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="bg-white/5 rounded-lg py-2">
+          <div className="text-xs text-slate-500">Submissions</div>
+          <div className="text-sm font-bold text-white mt-0.5">{usageLabel}</div>
+        </div>
+        <div className="bg-white/5 rounded-lg py-2">
+          <div className="text-xs text-slate-500">Last used</div>
+          <div className="text-sm font-bold text-white mt-0.5">{lastUsedAgo || '—'}</div>
+        </div>
+        <div className="bg-white/5 rounded-lg py-2">
+          <div className="text-xs text-slate-500">Expires</div>
+          <div className="text-sm font-bold text-white mt-0.5">{expIso || 'Never'}</div>
+        </div>
+      </div>
+
+      {/* URL preview */}
+      <div className="bg-black/40 border border-slate-800 rounded-lg p-2.5 flex items-center gap-2 group">
+        <i className="ph ph-link text-slate-500"></i>
+        <code className="flex-1 text-[11px] text-slate-300 truncate font-mono">{invite.url}</code>
+        <button onClick={() => onCopy(invite.url, 'Invite URL copied')}
+          title="Copy URL"
+          className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-white/10">
+          <i className="ph ph-copy"></i>
+        </button>
+      </div>
+
+      {/* Actions */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => onCopy(invite.url, 'Invite URL copied')}
+          className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white">
+          <i className="ph ph-copy mr-1"></i>Copy link
+        </button>
+        <button onClick={onPreview}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
+          <i className="ph ph-arrow-square-out mr-1"></i>Preview
+        </button>
+        <button onClick={onShowQr}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
+          <i className="ph ph-qr-code mr-1"></i>QR
+        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {!invite.revoked && (
+            <button
+              onClick={() => onToggle(!invite.enabled)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${
+                invite.enabled
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
+                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+              }`}
+              title={invite.enabled ? 'Pause new submissions' : 'Resume submissions'}>
+              <i className={`ph ${invite.enabled ? 'ph-pause' : 'ph-play'} mr-1`}></i>
+              {invite.enabled ? 'Pause' : 'Resume'}
+            </button>
+          )}
+          {!invite.revoked && (
+            <button onClick={onRevoke}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20">
+              <i className="ph ph-prohibit mr-1"></i>Revoke
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CreateInviteModal({ busy, onCancel, onSubmit }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [ttlDays, setTtlDays] = useState(90);
+  const [maxUses, setMaxUses] = useState('');
+
+  const canSubmit = name.trim().length >= 2 && !busy;
+
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+         onClick={onCancel}>
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl"
+           onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 rounded-full bg-brand-500/20 flex items-center justify-center">
+            <i className="ph ph-link-simple text-brand-300 text-xl"></i>
+          </div>
+          <div>
+            <h3 className="text-white font-semibold">New onboarding invite link</h3>
+            <p className="text-xs text-slate-400">One URL — share it with as many parents as you like.</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Name *</label>
+            <input value={name} onChange={(e) => setName(e.target.value)}
+              maxLength={80} autoFocus
+              placeholder="e.g. Grade 4 — March 2026 broadcast"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
+            <p className="text-[11px] text-slate-500 mt-1">Internal label only — never shown to parents.</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Description (optional)</label>
+            <input value={description} onChange={(e) => setDescription(e.target.value)}
+              maxLength={280}
+              placeholder="Notes for your team — channel, audience, etc."
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Valid for</label>
+              <select value={ttlDays} onChange={(e) => setTtlDays(Number(e.target.value))}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                <option value={7}>7 days</option>
+                <option value={30}>30 days</option>
+                <option value={90}>90 days</option>
+                <option value={180}>180 days</option>
+                <option value={365}>1 year</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Max submissions</label>
+              <input type="number" min="1" value={maxUses}
+                onChange={(e) => setMaxUses(e.target.value)}
+                placeholder="Unlimited"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-slate-800/50 border border-slate-700 px-3 py-2.5 text-xs text-slate-400 leading-relaxed">
+            <i className="ph ph-info text-slate-500 mr-1"></i>
+            The link is signed and tracked individually — you can revoke or pause it
+            at any time. Per-IP rate limits guard the form against abuse.
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 mt-6">
+          <button onClick={onCancel} disabled={busy}
+            className="px-4 py-2 text-sm rounded-lg bg-slate-700 hover:bg-slate-600 text-white disabled:opacity-50">
+            Cancel
+          </button>
+          <button
+            onClick={() => onSubmit({
+              name: name.trim(),
+              description: description.trim(),
+              ttlDays: Number(ttlDays),
+              maxUses: maxUses === '' ? null : Number(maxUses),
+            })}
+            disabled={!canSubmit}
+            className="px-4 py-2 text-sm font-semibold rounded-lg bg-gradient-to-r from-brand-500 to-emerald-500 hover:from-brand-400 hover:to-emerald-400 text-white disabled:opacity-40 disabled:cursor-not-allowed">
+            {busy ? <><i className="ph ph-spinner-gap animate-spin mr-1"></i>Generating…</> : <><i className="ph ph-link-simple mr-1.5"></i>Generate link</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InvitePreviewModal({ invite, qr, onClose, onCopy }) {
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+         onClick={onClose}>
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full shadow-2xl my-8"
+           onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-emerald-500/20 flex items-center justify-center">
+              <i className="ph ph-check-circle text-emerald-300 text-lg"></i>
+            </div>
+            <div>
+              <h3 className="text-white font-semibold leading-tight">{invite.name}</h3>
+              <p className="text-xs text-slate-400">Ready to share with parents</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl"><i className="ph ph-x"></i></button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Big copyable URL */}
+          <div>
+            <div className="text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Invite URL</div>
+            <div className="bg-black/50 border border-slate-700 rounded-lg p-3 flex items-center gap-2">
+              <code className="flex-1 text-xs text-emerald-300 break-all font-mono">{invite.url}</code>
+              <button onClick={() => onCopy(invite.url, 'Invite URL copied')}
+                className="px-3 py-2 text-xs font-semibold rounded bg-brand-500 hover:bg-brand-400 text-white whitespace-nowrap">
+                <i className="ph ph-copy mr-1"></i>Copy
+              </button>
+            </div>
+          </div>
+
+          {/* QR */}
+          {qr && (
+            <div className="flex flex-col items-center gap-2">
+              <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Scan to open</div>
+              <div className="bg-white p-3 rounded-xl">
+                <img src={qr} alt="Invite QR code" className="w-56 h-56" />
+              </div>
+              <a href={qr} download={`invite-${invite.id}.png`}
+                className="text-xs text-brand-300 hover:text-brand-200">
+                <i className="ph ph-download-simple mr-1"></i>Download PNG
+              </a>
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-white/5 rounded-lg py-2">
+              <div className="text-[10px] text-slate-500 uppercase">Expires</div>
+              <div className="text-sm font-bold text-white mt-0.5">
+                {invite.expiresAt ? new Date(invite.expiresAt).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : 'Never'}
+              </div>
+            </div>
+            <div className="bg-white/5 rounded-lg py-2">
+              <div className="text-[10px] text-slate-500 uppercase">Cap</div>
+              <div className="text-sm font-bold text-white mt-0.5">
+                {invite.maxUses != null ? `${invite.maxUses} max` : 'Unlimited'}
+              </div>
+            </div>
+            <div className="bg-white/5 rounded-lg py-2">
+              <div className="text-[10px] text-slate-500 uppercase">Uses</div>
+              <div className="text-sm font-bold text-white mt-0.5">{invite.useCount || 0}</div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <a href={invite.url} target="_blank" rel="noopener"
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
+              <i className="ph ph-arrow-square-out mr-1.5"></i>Open in new tab
+            </a>
+            <button onClick={onClose}
+              className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white">
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

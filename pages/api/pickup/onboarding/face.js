@@ -14,9 +14,11 @@
  * Rate-limited (30/min per IP). Max payload: 1 MB (post-base64).
  */
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
+import admin from 'firebase-admin';
 
 const { verifyPickupOnboardingToken } = require('../../../../lib/pickup-token');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
+const inviteLinks = require('../../../../lib/onboarding-invites');
 
 const MAX_BYTES = 600 * 1024;        // 600 KB per photo (matches client compressor)
 const MAX_PHOTO_INDEX = 2;            // 0,1,2 → up to 3 photos
@@ -69,6 +71,12 @@ export default async function handler(req, res) {
 
   try {
     initializeFirebase();
+    if (claims.lid) {
+      const usable = await inviteLinks.assertInviteUsable(admin.firestore(), tid, claims.lid);
+      if (!usable.ok) {
+        return res.status(usable.status || 403).json({ error: usable.reason });
+      }
+    }
     const bucket = getFirebaseStorage().bucket();
     await bucket.file(path).save(img.buf, {
       contentType: img.contentType,

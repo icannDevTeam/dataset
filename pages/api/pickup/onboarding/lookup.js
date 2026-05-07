@@ -17,6 +17,7 @@ import admin from 'firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
 const { verifyPickupOnboardingToken } = require('../../../../lib/pickup-token');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
+const inviteLinks = require('../../../../lib/onboarding-invites');
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_MAX = 5000;
@@ -71,6 +72,12 @@ export default async function handler(req, res) {
   try {
     initializeFirebase();
     const db = admin.firestore();
+    if (claims.lid) {
+      const usable = await inviteLinks.assertInviteUsable(db, claims.tid, claims.lid);
+      if (!usable.ok) {
+        return res.status(usable.status || 403).json({ error: usable.reason });
+      }
+    }
     let data = null;
     const tenantSnap = await db.doc(`${tenancy.studentsPath(claims.tid)}/${sid}`).get();
     if (tenantSnap.exists) {

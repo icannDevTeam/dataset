@@ -155,6 +155,15 @@ export default async function handler(req, res) {
     initializeFirebase();
     const db = admin.firestore();
     const tid = claims.tid;
+    if (claims.lid) {
+      const usable = await inviteLinks.assertInviteUsable(db, tid, claims.lid);
+      if (!usable.ok) {
+        return res.status(usable.status || 403).json({
+          error: usable.reason,
+          message: 'This invite link is no longer accepting submissions. Please contact the school for a new link.',
+        });
+      }
+    }
     const recordId = crypto.randomBytes(12).toString('hex');
     const recRef = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
     const counterRef = db.doc(tenancy.idAllocationsDoc('pickup-form-counter', tid));
@@ -200,6 +209,7 @@ export default async function handler(req, res) {
         submittedFromIp: clientIpHdr(req),
         userAgent: req.headers['user-agent'] || null,
         tokenSid: claims.sid || null,
+        tokenLid: claims.lid || null,
         tokenExp: claims.exp,
         guardian: {
           name: guardianName,
@@ -246,6 +256,10 @@ export default async function handler(req, res) {
       });
     }
 
+    if (claims.lid) {
+      // Best-effort analytics — never block the success response.
+      inviteLinks.recordUse(db, tid, claims.lid).catch(() => {});
+    }
     return res.status(200).json({ ok: true, recordId, formNumber: txOut.formNumber });
   } catch (err) {
     console.error('[pickup/onboarding/submit]', err.message, err.stack);

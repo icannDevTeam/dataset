@@ -35,6 +35,7 @@ const NAV_SECTIONS = [
     label: 'PickupGuard',
     items: [
       { href: '/v2/pickup-admin', icon: 'ph-hand-waving', label: 'Onboarding Review', badgeKey: 'pickupPending' },
+      { href: '/v2/pickup-admin?view=invites', icon: 'ph-link-simple', label: 'Invite Links' },
       { href: '/v2/pickup-enroll', icon: 'ph-fingerprint', label: 'Chaperone Enrolment' },
       { href: '/v2/pickup-admin?view=kiosks', icon: 'ph-television-simple', label: 'TV Kiosks' },
       { href: '/v2/terminals', icon: 'ph-fingerprint', label: 'Terminals' },
@@ -107,7 +108,8 @@ export default function V2Layout({ children }) {
     }
     // Plain path: must match and NOT be the kiosks variant of pickup-admin
     if (href === '/v2/pickup-admin') {
-      return router.pathname.startsWith(href) && String(router.query.view ?? '') !== 'kiosks' && String(router.query.view ?? '') !== 'settings';
+      const v = String(router.query.view ?? '');
+      return router.pathname.startsWith(href) && v !== 'kiosks' && v !== 'settings' && v !== 'invites';
     }
     return router.pathname.startsWith(href);
   };
