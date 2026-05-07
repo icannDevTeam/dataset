@@ -498,6 +498,79 @@ function ChaperoneFaceCapture({ tempId, token, onPhotos, disabled }) {
 }
 
 // ─── Page ───────────────────────────────────────────────────────────
+
+/**
+ * Compact, non-distracting banner showing the submission window for the
+ * current invite link. Renders nothing when no window is set, the link
+ * is unmanaged, or the API call failed (best-effort UX).
+ *
+ * Visual states:
+ *   • not_yet_open  → soft sky tint, "Opens [date]"
+ *   • closed        → soft amber tint, "This form has closed"
+ *   • usable + closeAt within 7 days → amber accent emphasising countdown
+ *   • usable + closeAt > 7 days     → muted navy, friendly "Open until [date]"
+ */
+function WindowBanner({ info }) {
+  if (!info) return null;
+  const { windowOpenAt, windowCloseAt, status } = info;
+  if (!windowOpenAt && !windowCloseAt) return null;
+
+  const fmt = (ms) => new Date(ms).toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  const now = Date.now();
+  const closingSoon = windowCloseAt && (windowCloseAt - now) > 0 && (windowCloseAt - now) < 7 * 86400_000;
+
+  let tone = { bg: '#EEF4FB', border: '#BFD7EE', accent: BRAND.navy, label: 'Submission window' };
+  let title = '';
+  let body = '';
+  let icon = '🗓️';
+
+  if (status === 'not_yet_open') {
+    tone = { bg: '#EFF6FF', border: '#BFDBFE', accent: '#1D4ED8', label: 'Opens soon' };
+    icon = '⏳';
+    title = 'This form is not open yet.';
+    body = `It opens on ${fmt(windowOpenAt)}. Please check back then.`;
+  } else if (status === 'closed') {
+    tone = { bg: '#FEF3C7', border: '#FCD34D', accent: '#92400E', label: 'Window closed' };
+    icon = '🔒';
+    title = 'The submission window for this form has closed.';
+    body = windowCloseAt ? `It closed on ${fmt(windowCloseAt)}. Please contact the school office for assistance.` : 'Please contact the school office for assistance.';
+  } else if (closingSoon) {
+    tone = { bg: '#FFF7ED', border: '#FED7AA', accent: BRAND.orange, label: 'Closing soon' };
+    icon = '⏰';
+    title = 'Submission window closes soon';
+    body = `Please complete and submit this form before ${fmt(windowCloseAt)}.`;
+  } else {
+    title = 'Submission window';
+    const parts = [];
+    if (windowOpenAt && windowOpenAt < now) parts.push(`Open since ${fmt(windowOpenAt)}`);
+    else if (windowOpenAt) parts.push(`Opens ${fmt(windowOpenAt)}`);
+    if (windowCloseAt) parts.push(`Closes ${fmt(windowCloseAt)}`);
+    body = parts.join(' · ');
+  }
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'flex-start', gap: 12,
+      background: tone.bg, border: `1px solid ${tone.border}`,
+      borderRadius: 12, padding: '12px 16px', marginBottom: 18,
+    }}>
+      <div style={{ fontSize: 20, lineHeight: 1, marginTop: 1 }} aria-hidden>{icon}</div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, letterSpacing: 0.6,
+          textTransform: 'uppercase', color: tone.accent, marginBottom: 2,
+        }}>{tone.label}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: BRAND.text, lineHeight: 1.35 }}>{title}</div>
+        {body && (
+          <div style={{ fontSize: 13, color: BRAND.textMuted, marginTop: 2, lineHeight: 1.5 }}>{body}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PickupOnboardingPage() {
   const router = useRouter();
   const { token } = router.query;
@@ -528,6 +601,10 @@ export default function PickupOnboardingPage() {
   // Phase 3: welcome modal + dedupe conflict surfacing.
   const [welcomeAcked, setWelcomeAcked] = useState(true);   // default true; flipped after token validates
   const [conflict, setConflict] = useState(null);
+  // Window-aware invite metadata (name, open/close, status). Populated from
+  // /api/pickup/onboarding/info once the token validates. Drives the friendly
+  // banner above the form and the close-date footer on the success screen.
+  const [inviteInfo, setInviteInfo] = useState(null);
 
   // Validate token + auto-fill primary student
   useEffect(() => {
@@ -559,6 +636,20 @@ export default function PickupOnboardingPage() {
             const acked = typeof window !== 'undefined' && sessionStorage.getItem(key) === '1';
             setWelcomeAcked(!!acked);
           } catch { setWelcomeAcked(false); }
+          // Best-effort fetch of invite metadata so we can render the
+          // submission window. Failures here are non-fatal — the form
+          // still works against an unmanaged token.
+          try {
+            const infoRes = await fetch('/api/pickup/onboarding/info', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token }),
+            });
+            if (infoRes.ok) {
+              const info = await infoRes.json();
+              if (!cancel) setInviteInfo(info);
+            }
+          } catch { /* non-fatal */ }
         }
       } catch (e) {
         if (!cancel) setError(e.message);
@@ -600,11 +691,24 @@ export default function PickupOnboardingPage() {
       ]);
 
       let student = null;
+      let alreadyRegistered = null;
       if (tenantRes.status === 'fulfilled' && tenantRes.value.ok) {
         student = tenantRes.value.body.student;
+        alreadyRegistered = tenantRes.value.body.alreadyRegistered || null;
       } else if (binusRes.status === 'fulfilled' && binusRes.value.ok && binusRes.value.body.success) {
         const b = binusRes.value.body;
         student = { id: sid, name: b.name, homeroom: b.homeroom, photoUrl: null };
+      }
+
+      // Hard-stop if a non-rejected pickup record already exists for this
+      // student in our system. The server enforces the same constraint at
+      // submit time (HTTP 409 + per-student lock), but blocking up-front
+      // gives the parent a friendlier message.
+      if (alreadyRegistered) {
+        const fn = alreadyRegistered.formNumber ? ` (form #${alreadyRegistered.formNumber})` : '';
+        const who = student?.name ? `${student.name}` : `Student ${sid}`;
+        setError(`${who} already has a pickup form on file${fn}. Status: ${alreadyRegistered.status}. Please contact the school office if you need to change anything.`);
+        return;
       }
 
       if (!student) {
@@ -997,11 +1101,29 @@ export default function PickupOnboardingPage() {
                 <strong>ACOP office on the 3rd floor</strong>. This form can only be
                 submitted once per student.
               </p>
+
+              {inviteInfo?.windowCloseAt && (
+                <p style={{
+                  color: '#166534', fontSize: 12, marginTop: 14, marginBottom: 0,
+                  paddingTop: 12, borderTop: '1px dashed #86EFAC',
+                }}>
+                  <span style={{ opacity: 0.75 }}>Submission window closes</span>{' '}
+                  <strong>
+                    {new Date(inviteInfo.windowCloseAt).toLocaleString('en-GB', {
+                      day: '2-digit', month: 'long', year: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </strong>
+                </p>
+              )}
             </div>
           )}
 
           {!loading && tokenOk && !done && (
             <>
+              {/* ── Submission window banner (only when admin has set dates) ── */}
+              <WindowBanner info={inviteInfo} />
+
               <div style={{
                 display: 'flex', gap: 8, marginBottom: 22,
                 background: BRAND.surface, padding: 8, borderRadius: 12,

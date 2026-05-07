@@ -95,10 +95,30 @@ export default async function handler(req, res) {
       homeroom: data.homeroom || data.className || null,
       photoUrl: data.photoUrl || null,
     };
+
+    // Surface any prior lock so the form can refuse to add an
+    // already-registered student up-front (rather than only blocking
+    // at submit time). Locks live at pickup_student_locks/{sid}.
+    let alreadyRegistered = null;
+    try {
+      const lockSnap = await db.doc(`${tenancy.pickupStudentLocksPath(claims.tid)}/${sid}`).get();
+      if (lockSnap.exists) {
+        const lock = lockSnap.data() || {};
+        if (lock.status && lock.status !== 'rejected') {
+          alreadyRegistered = {
+            status: lock.status,
+            formNumber: lock.formNumber || null,
+            guardianName: lock.guardianName || null,
+            submittedAt: lock.submittedAt || null,
+          };
+        }
+      }
+    } catch { /* non-fatal — lock check is informational */ }
+
     cacheSet(cacheKey, student);
     res.setHeader('Cache-Control', 'private, max-age=600');
     res.setHeader('X-Cache', 'MISS');
-    return res.status(200).json({ ok: true, student });
+    return res.status(200).json({ ok: true, student, alreadyRegistered });
   } catch (err) {
     console.error('[pickup/onboarding/lookup]', err.message);
     return res.status(500).json({ error: 'internal' });

@@ -52,6 +52,8 @@ async function handler(req, res) {
         description: body.description,
         ttlDays: body.ttlDays,
         maxUses: body.maxUses,
+        windowOpenAt: body.windowOpenAt,
+        windowCloseAt: body.windowCloseAt,
         createdBy,
       });
       // Return a QR code with the freshly minted link so admin can

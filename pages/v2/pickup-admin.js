@@ -2373,12 +2373,17 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onPreview, onToggle, onRevok
   const [draftName, setDraftName] = useState(invite.name);
   useEffect(() => { setDraftName(invite.name); }, [invite.name]);
 
+  const now = Date.now();
   const status = invite.revoked
     ? { label: 'Revoked', tone: 'bg-rose-500/15 text-rose-300 border-rose-500/30', dot: 'bg-rose-400' }
     : !invite.enabled
     ? { label: 'Paused',  tone: 'bg-amber-500/15 text-amber-300 border-amber-500/30', dot: 'bg-amber-400' }
-    : invite.expiresAt && invite.expiresAt < Date.now()
+    : invite.expiresAt && invite.expiresAt < now
     ? { label: 'Expired', tone: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30', dot: 'bg-zinc-400' }
+    : invite.windowOpenAt && invite.windowOpenAt > now
+    ? { label: 'Scheduled', tone: 'bg-sky-500/15 text-sky-300 border-sky-500/30', dot: 'bg-sky-400' }
+    : invite.windowCloseAt && invite.windowCloseAt < now
+    ? { label: 'Window closed', tone: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30', dot: 'bg-zinc-400' }
     : invite.maxUses != null && invite.useCount >= invite.maxUses
     ? { label: 'Full',    tone: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30', dot: 'bg-zinc-400' }
     : { label: 'Active',  tone: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-400' };
@@ -2443,6 +2448,24 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onPreview, onToggle, onRevok
         </div>
       </div>
 
+      {/* Submission window (if set) */}
+      {(invite.windowOpenAt || invite.windowCloseAt) && (
+        <div className="grid grid-cols-2 gap-2 -mt-1">
+          <div className="rounded-lg bg-sky-500/5 border border-sky-500/20 px-3 py-2">
+            <div className="text-[11px] text-sky-300/70 flex items-center gap-1"><i className="ph ph-arrow-up-right"></i>Opens</div>
+            <div className="text-xs font-semibold text-white mt-0.5">
+              {invite.windowOpenAt ? new Date(invite.windowOpenAt).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : 'Now'}
+            </div>
+          </div>
+          <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2">
+            <div className="text-[11px] text-amber-300/70 flex items-center gap-1"><i className="ph ph-clock-countdown"></i>Closes</div>
+            <div className="text-xs font-semibold text-white mt-0.5">
+              {invite.windowCloseAt ? new Date(invite.windowCloseAt).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : 'Open-ended'}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* URL preview */}
       <div className="bg-black/40 border border-slate-800 rounded-lg p-2.5 flex items-center gap-2 group">
         <i className="ph ph-link text-slate-500"></i>
@@ -2499,8 +2522,17 @@ function CreateInviteModal({ busy, onCancel, onSubmit }) {
   const [description, setDescription] = useState('');
   const [ttlDays, setTtlDays] = useState(90);
   const [maxUses, setMaxUses] = useState('');
+  const [windowOpenAt, setWindowOpenAt] = useState('');
+  const [windowCloseAt, setWindowCloseAt] = useState('');
 
-  const canSubmit = name.trim().length >= 2 && !busy;
+  const windowError = useMemo(() => {
+    if (!windowOpenAt || !windowCloseAt) return null;
+    return new Date(windowCloseAt).getTime() <= new Date(windowOpenAt).getTime()
+      ? 'Close time must be after open time.'
+      : null;
+  }, [windowOpenAt, windowCloseAt]);
+
+  const canSubmit = name.trim().length >= 2 && !busy && !windowError;
 
   return (
     <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
@@ -2556,6 +2588,41 @@ function CreateInviteModal({ busy, onCancel, onSubmit }) {
             </div>
           </div>
 
+          {/* Submission window (optional) ------------------------------ */}
+          <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                <i className="ph ph-calendar-blank text-slate-400"></i>
+                Submission window <span className="text-slate-500 font-normal">(optional)</span>
+              </label>
+              <button type="button"
+                onClick={() => { setWindowOpenAt(''); setWindowCloseAt(''); }}
+                className="text-[11px] text-slate-400 hover:text-white">Clear</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">Opens</label>
+                <input type="datetime-local" value={windowOpenAt}
+                  onChange={(e) => setWindowOpenAt(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">Closes</label>
+                <input type="datetime-local" value={windowCloseAt}
+                  onChange={(e) => setWindowCloseAt(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+              </div>
+            </div>
+            {windowError && (
+              <p className="text-[11px] text-rose-300"><i className="ph ph-warning mr-1"></i>{windowError}</p>
+            )}
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Outside this window the form refuses new submissions and shows the parent
+              the next opening time. Leave blank to allow submissions any time before
+              the link expires.
+            </p>
+          </div>
+
           <div className="rounded-lg bg-slate-800/50 border border-slate-700 px-3 py-2.5 text-xs text-slate-400 leading-relaxed">
             <i className="ph ph-info text-slate-500 mr-1"></i>
             The link is signed and tracked individually — you can revoke or pause it
@@ -2574,6 +2641,8 @@ function CreateInviteModal({ busy, onCancel, onSubmit }) {
               description: description.trim(),
               ttlDays: Number(ttlDays),
               maxUses: maxUses === '' ? null : Number(maxUses),
+              windowOpenAt:  windowOpenAt  ? new Date(windowOpenAt).toISOString()  : null,
+              windowCloseAt: windowCloseAt ? new Date(windowCloseAt).toISOString() : null,
             })}
             disabled={!canSubmit}
             className="px-4 py-2 text-sm font-semibold rounded-lg bg-gradient-to-r from-brand-500 to-emerald-500 hover:from-brand-400 hover:to-emerald-400 text-white disabled:opacity-40 disabled:cursor-not-allowed">
@@ -2649,6 +2718,32 @@ function InvitePreviewModal({ invite, qr, onClose, onCopy }) {
               <div className="text-sm font-bold text-white mt-0.5">{invite.useCount || 0}</div>
             </div>
           </div>
+
+          {/* Submission window */}
+          {(invite.windowOpenAt || invite.windowCloseAt) && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-sky-500/5 border border-sky-500/20 px-3 py-2.5">
+                <div className="text-[10px] text-sky-300/70 uppercase tracking-wider flex items-center gap-1">
+                  <i className="ph ph-arrow-up-right"></i>Window opens
+                </div>
+                <div className="text-sm font-semibold text-white mt-0.5">
+                  {invite.windowOpenAt
+                    ? new Date(invite.windowOpenAt).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+                    : 'Now (no opening date)'}
+                </div>
+              </div>
+              <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2.5">
+                <div className="text-[10px] text-amber-300/70 uppercase tracking-wider flex items-center gap-1">
+                  <i className="ph ph-clock-countdown"></i>Window closes
+                </div>
+                <div className="text-sm font-semibold text-white mt-0.5">
+                  {invite.windowCloseAt
+                    ? new Date(invite.windowCloseAt).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+                    : 'Open-ended (until expiry)'}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <a href={invite.url} target="_blank" rel="noopener"
