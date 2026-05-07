@@ -390,7 +390,7 @@ export default function PickupTV() {
   return (
     <>
       <Head>
-        <title>BINUS PickupGuard · TV Display</title>
+        <title>BINUS Pickup System · TV Display</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
       <div className="tv-root">
@@ -405,8 +405,8 @@ export default function PickupTV() {
               <div className="tv-brand">BINUS School Simprug</div>
               <div className="tv-sub">
                 {profile?.name
-                  ? <>PickupGuard · <span style={{color:'var(--binus-gold)'}}>{profile.name}</span></>
-                  : <>PickupGuard · Verification Display{gate ? ` · ${gate}` : ''}</>}
+                  ? <>Pickup System · <span style={{color:'var(--binus-gold)'}}>{profile.name}</span></>
+                  : <>Pickup System · Verification Display{gate ? ` · ${gate}` : ''}</>}
               </div>
             </div>
           </div>
@@ -1601,7 +1601,7 @@ function TvEntryScreen({ bootError, onAdopt }) {
         <img src="/binus-logo.jpg" alt="BINUS" style={{ width: 90, height: 90, borderRadius: 16, background: '#fff', padding: 6, marginBottom: 32 }} />
         <h1 style={{ fontSize: '3.2rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em' }}>Pair this TV</h1>
         <p style={{ opacity: 0.75, fontSize: '1.4rem', margin: '12px 0 48px' }}>
-          On the admin dashboard → <b>PickupGuard Admin → TV Kiosks → Pair a TV</b>, enter:
+          On the admin dashboard → <b>Pickup System Admin → TV Kiosks → Pair a TV</b>, enter:
         </p>
         <div style={{ background: 'rgba(0,0,0,0.35)', border: '4px solid #FCBF11', borderRadius: 28, padding: '40px 80px', marginBottom: 48 }}>
           <div style={{ fontSize: '8rem', fontWeight: 900, fontFamily: 'ui-monospace, monospace', letterSpacing: '0.06em', color: '#FCBF11', lineHeight: 1 }}>{display}</div>
@@ -1625,7 +1625,7 @@ function TvEntryScreen({ bootError, onAdopt }) {
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #5D0E27 0%, #8B1538 100%)', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '5vw' }}>
       <img src="/binus-logo.jpg" alt="BINUS" style={{ width: 90, height: 90, borderRadius: 16, background: '#fff', padding: 6, marginBottom: 28 }} />
-      <h1 style={{ fontSize: '2.6rem', fontWeight: 800, margin: 0 }}>PickupGuard TV</h1>
+      <h1 style={{ fontSize: '2.6rem', fontWeight: 800, margin: 0 }}>Pickup System TV</h1>
       <p style={{ opacity: 0.75, fontSize: '1.15rem', margin: '8px 0 40px' }}>Set up this screen — type the kiosk code or pair from the dashboard.</p>
 
       <form onSubmit={submitCode} style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 20, padding: 28, width: 'min(560px, 90vw)', textAlign: 'center' }}>
@@ -1991,7 +1991,7 @@ function Screensaver({ clock, profile }) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/binus-logo.jpg" alt="" className="ss-logo" />
         <div className="ss-title">BINUS School Simprug</div>
-        <div className="ss-sub">PickupGuard standing by</div>
+        <div className="ss-sub">Pickup System standing by</div>
         <div className="ss-clock">
           {clock ? clock.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }) : '--:--'}
         </div>

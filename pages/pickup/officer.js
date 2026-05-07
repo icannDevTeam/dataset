@@ -70,7 +70,7 @@ export default function OfficerPage() {
   return (
     <>
       <Head>
-        <title>Gate Officer · PickupGuard</title>
+        <title>Gate Officer · Pickup System</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
       </Head>
       <div className="page">
@@ -78,7 +78,7 @@ export default function OfficerPage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/binus-logo.jpg" alt="" />
           <div>
-            <div className="hd-t">PickupGuard</div>
+            <div className="hd-t">Pickup System</div>
             <div className="hd-s">Gate Officer Override</div>
           </div>
         </header>

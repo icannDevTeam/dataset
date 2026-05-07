@@ -604,7 +604,7 @@ export default function SettingsPage() {
                               <select value={inviteRole} onChange={e => setInviteRole(e.target.value)}
                                 className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white appearance-none focus:outline-none focus:border-brand-500 cursor-pointer">
                                 <option value="viewer">Viewer</option>
-                                <option value="guard">Guard (PickupGuard)</option>
+                                <option value="guard">Guard (Pickup System)</option>
                                 <option value="admin">Admin</option>
                                 {role === 'owner' && <option value="owner">Owner</option>}
                               </select>
@@ -816,7 +816,7 @@ export default function SettingsPage() {
                             <select value={editingPerms.role} onChange={e => changeEditRole(e.target.value)}
                               className="bg-slate-950/50 border border-slate-700 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-brand-500 cursor-pointer">
                               <option value="viewer">Viewer</option>
-                              <option value="guard">Guard (PickupGuard)</option>
+                              <option value="guard">Guard (Pickup System)</option>
                               <option value="admin">Admin</option>
                               <option value="owner">Owner</option>
                             </select>

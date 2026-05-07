@@ -77,7 +77,7 @@ Your API_KEY should be the base64 encoded string from your Binus School API:
 
 ## 🌐 Deploy to Vercel
 
-### Recommended: Standalone PickupGuard Project
+### Recommended: Standalone Pickup System Project
 
 Deploy this folder as its own Vercel project (same approach as the mobile app):
 

@@ -190,7 +190,7 @@ export default function TerminalsPage() {
 
   return (
     <V2Layout>
-      <Head><title>Hikvision Terminals · PickupGuard</title></Head>
+      <Head><title>Hikvision Terminals · Pickup System</title></Head>
 
       <div className="space-y-5">
         {/* Hero header */}

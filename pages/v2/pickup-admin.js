@@ -1,7 +1,7 @@
 /**
  * /v2/pickup-admin
  *
- * Admin review queue for PickupGuard parent submissions. Pro-grade UX:
+ * Admin review queue for Pickup System parent submissions. Pro-grade UX:
  *   - Search + sort + per-tab counts
  *   - Bulk select + bulk approve / bulk reject (with reason)
  *   - Inline reject form (no browser prompts)
@@ -563,7 +563,7 @@ export default function PickupAdminPage() {
             <div>
               <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-3">
                 <i className="ph ph-hand-waving text-brand-400"></i>
-                PickupGuard Admin
+                Pickup System Admin
               </h1>
               <p className="text-sm text-slate-400 mt-1">
                 {view === 'kiosks'
@@ -590,7 +590,7 @@ export default function PickupAdminPage() {
           ) : view === 'settings' ? (
             <div className="max-w-4xl">
               <h2 className="text-lg font-semibold text-white mb-1">Pickup Settings</h2>
-              <p className="text-sm text-slate-400 mb-6">Tenant-level configuration for PickupGuard behaviour.</p>
+              <p className="text-sm text-slate-400 mb-6">Tenant-level configuration for Pickup System behaviour.</p>
 
               {/* Per-terminal gate control + schedule (live state, admin override) */}
               <div className="mb-4">
@@ -1983,7 +1983,7 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
       <div className="pg-print bg-white text-slate-900 rounded-xl max-w-3xl w-full p-8 shadow-2xl">
         {/* Toolbar — hidden in print */}
         <div className="pg-no-print flex items-center justify-between mb-6">
-          <div className="text-xs text-slate-500">Filled-form preview · BINUS PickupGuard</div>
+          <div className="text-xs text-slate-500">Filled-form preview · BINUS Pickup System</div>
           <div className="flex gap-2">
             <button onClick={() => window.print()}
               className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-900 text-white hover:bg-slate-700">
@@ -2001,7 +2001,7 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs uppercase tracking-[0.2em] text-orange-600 font-bold">BINUS School Simprug</div>
-              <div className="text-2xl font-bold mt-1">PickupGuard Authorization Form</div>
+              <div className="text-2xl font-bold mt-1">Pickup System Authorization Form</div>
             </div>
             <div className="text-right text-xs text-slate-600">
               <div>Submission ID:&nbsp;<span className="font-mono">{rec.id}</span></div>
@@ -2113,7 +2113,7 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
         </Section>
 
         <div className="text-[10px] text-slate-400 text-center mt-8 pt-4 border-t border-slate-200">
-          BINUS School Simprug · PickupGuard · Generated {fmtTime(new Date().toISOString())}
+          BINUS School Simprug · Pickup System · Generated {fmtTime(new Date().toISOString())}
         </div>
       </div>
     </div>

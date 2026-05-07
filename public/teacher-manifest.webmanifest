@@ -1,7 +1,7 @@
 {
   "name": "BINUS Teacher Pickup",
   "short_name": "Teacher Pickup",
-  "description": "Teacher release desk for BINUS PickupGuard",
+  "description": "Teacher release desk for BINUS Pickup System",
   "start_url": "/pickup/teacher",
   "scope": "/pickup/teacher",
   "display": "standalone",

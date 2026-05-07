@@ -162,7 +162,7 @@ export default function PickupEnrollPage() {
 
   return (
     <V2Layout>
-      <Head><title>Chaperone Enrolment · BINUS PickupGuard</title></Head>
+      <Head><title>Chaperone Enrolment · BINUS Pickup System</title></Head>
 
       <div className="space-y-5">
         {/* ── Header ───────────────────────────────────────── */}

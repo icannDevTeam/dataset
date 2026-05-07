@@ -1,5 +1,5 @@
 /**
- * Admin endpoint for PickupGuard onboarding invite links.
+ * Admin endpoint for Pickup System onboarding invite links.
  *
  *   GET    /api/pickup/admin/invite-links            → list all
  *   POST   /api/pickup/admin/invite-links            → create

@@ -275,7 +275,7 @@ export default function DashboardV2() {
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'pickup' ? 'bg-orange-500/20 text-orange-200 shadow-sm border border-orange-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
             <i className="ph ph-hand-waving"></i>
-            PickupGuard
+            Pickup System
           </button>
         </div>
 
@@ -285,7 +285,7 @@ export default function DashboardV2() {
               <div className="flex items-start gap-3">
                 <i className="ph ph-warning-diamond text-red-300 text-xl mt-0.5"></i>
                 <div>
-                  <p className="text-sm font-semibold text-red-200 tracking-wide uppercase">PickupGuard Attention Needed</p>
+                  <p className="text-sm font-semibold text-red-200 tracking-wide uppercase">Pickup System Attention Needed</p>
                   <p className="text-sm text-red-100/90 mt-0.5">
                     {pickupAlerts.pending > 0 && <span>{pickupAlerts.pending} waiting for release/override</span>}
                     {pickupAlerts.pending > 0 && pickupAlerts.flaggedReleases > 0 && <span> · </span>}
@@ -776,7 +776,7 @@ function DashboardPickupView({ data, loading, error, onRefresh }) {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-orange-500"></span>
             </span>
-            <span className="text-sm font-medium text-orange-400 tracking-wide uppercase">PickupGuard Today</span>
+            <span className="text-sm font-medium text-orange-400 tracking-wide uppercase">Pickup System Today</span>
           </div>
           <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white">Pickup Overview</h1>
           <p className="text-slate-400 mt-2">{today}</p>
@@ -873,7 +873,7 @@ function DashboardPickupView({ data, loading, error, onRefresh }) {
           <div className="flex">
             <a href="/v2/reports?module=pickup" className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1 transition-colors">
               <i className="ph ph-arrow-right"></i>
-              View full PickupGuard report
+              View full Pickup System report
             </a>
           </div>
         </>

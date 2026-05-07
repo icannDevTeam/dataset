@@ -14,7 +14,7 @@ export default function PickupKiosksRedirect() {
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
       color: '#94a3b8', fontFamily: 'system-ui, sans-serif', background: '#0f172a',
     }}>
-      Redirecting to PickupGuard Admin…
+      Redirecting to Pickup System Admin…
     </div>
   );
 }

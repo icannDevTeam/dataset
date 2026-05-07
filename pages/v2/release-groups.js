@@ -115,7 +115,7 @@ export default function ReleaseGroupsPage() {
 
   return (
     <V2Layout>
-      <Head><title>Release Groups · PickupGuard</title></Head>
+      <Head><title>Release Groups · Pickup System</title></Head>
       <div className="p-6 max-w-7xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-slate-100">Release Groups</h1>

@@ -50,7 +50,7 @@ function exportPickupCSV(data, fromDate, toDate) {
   if (!data) return;
   const generated = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
   const rows = [];
-  rows.push(['BINUS PickupGuard — Analytics Report']);
+  rows.push(['BINUS Pickup System — Analytics Report']);
   rows.push(['Date Range', `${fromDate} → ${toDate}`]);
   rows.push(['Total Days', data.range?.totalDays ?? '']);
   rows.push(['Generated At', generated]);
@@ -103,7 +103,7 @@ function exportPickupCSV(data, fromDate, toDate) {
     r.note || '',
     (r.students || []).map(s => `${s.name}${s.homeroom ? ` (${s.homeroom})` : ''}`).join(' | '),
   ]));
-  downloadCSV(`pickupguard-report-${fromDate}-to-${toDate}.csv`, rows);
+  downloadCSV(`pickup-system-report-${fromDate}-to-${toDate}.csv`, rows);
 }
 
 
@@ -315,7 +315,7 @@ export default function ReportsPage() {
             <div>
               <div style={{ fontSize: '11px', letterSpacing: '0.1em', color: '#8B1538', fontWeight: 600 }}>BINUS SCHOOL SIMPRUG</div>
               <div style={{ fontSize: '20px', fontWeight: 700, color: 'black', marginTop: '2px' }}>
-                {module === 'pickup' ? 'PickupGuard Analytics Report' : 'Facial Attendance Report'}
+                {module === 'pickup' ? 'Pickup System Analytics Report' : 'Facial Attendance Report'}
               </div>
               <div style={{ fontSize: '11px', color: '#475569', marginTop: '4px' }}>
                 Range: {fromDate} → {toDate}
@@ -344,7 +344,7 @@ export default function ReportsPage() {
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'pickup' ? 'bg-orange-500/20 text-orange-200 shadow-sm border border-orange-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
             <i className="ph ph-hand-waving"></i>
-            PickupGuard
+            Pickup System
           </button>
         </div>
 
@@ -354,7 +354,7 @@ export default function ReportsPage() {
             <div className="flex items-center gap-2 mb-1">
               <i className={`ph ${module === 'pickup' ? 'ph-hand-waving text-orange-400' : 'ph-file-text text-brand-500'}`}></i>
               <span className={`text-sm font-medium tracking-wide uppercase ${module === 'pickup' ? 'text-orange-400' : 'text-brand-500'}`}>
-                {module === 'pickup' ? 'PickupGuard Analytics' : 'Attendance Reports'}
+                {module === 'pickup' ? 'Pickup System Analytics' : 'Attendance Reports'}
               </span>
             </div>
             <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white print-title">

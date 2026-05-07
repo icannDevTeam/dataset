@@ -32,7 +32,7 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    label: 'PickupGuard',
+    label: 'Pickup System',
     items: [
       { href: '/v2/pickup-admin', icon: 'ph-hand-waving', label: 'Onboarding Review', badgeKey: 'pickupPending' },
       { href: '/v2/pickup-admin?view=invites', icon: 'ph-link-simple', label: 'Invite Links' },

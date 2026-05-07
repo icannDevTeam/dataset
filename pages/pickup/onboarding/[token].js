@@ -929,7 +929,7 @@ export default function PickupOnboardingPage() {
                 BINUS School Simprug
               </div>
               <div className="pog-header-sub" style={{ fontSize: 13, opacity: 0.85, marginTop: 2 }}>
-                PickupGuard · Authorized Pickup Registration
+                Pickup System · Authorized Pickup Registration
               </div>
             </div>
           </div>
@@ -1368,7 +1368,7 @@ export default function PickupOnboardingPage() {
             marginTop: 24,
           }}>
             BINUS School Simprug · {tenantId || '—'} ·
-            <span style={{ color: BRAND.orange, fontWeight: 600 }}> PickupGuard</span>
+            <span style={{ color: BRAND.orange, fontWeight: 600 }}> Pickup System</span>
           </p>
         </main>
       </div>

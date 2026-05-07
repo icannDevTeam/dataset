@@ -115,7 +115,7 @@ function PairingScreen({ onPaired }) {
         textAlign: 'center',
       }}>
         <div style={{ fontSize: 14, color: BINUS_MAROON, fontWeight: 800, letterSpacing: 2, marginBottom: 8 }}>
-          BINUS · PICKUPGUARD
+          BINUS · PICKUP SYSTEM
         </div>
         <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: '0 0 4px' }}>Pair this iPad</h1>
         <p style={{ fontSize: 14, color: '#64748b', margin: '0 0 24px' }}>
@@ -542,7 +542,7 @@ export default function TeacherTabletPage() {
     return (
       <>
         <Head>
-          <title>Pair · BINUS PickupGuard</title>
+          <title>Pair · BINUS Pickup System</title>
           <link rel="manifest" href="/teacher-manifest.webmanifest" />
           <meta name="theme-color" content={BINUS_MAROON} />
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -563,7 +563,7 @@ export default function TeacherTabletPage() {
   return (
     <>
       <Head>
-        <title>{identity?.releaseGroupName || 'Teacher'} · BINUS PickupGuard</title>
+        <title>{identity?.releaseGroupName || 'Teacher'} · BINUS Pickup System</title>
         <link rel="manifest" href="/teacher-manifest.webmanifest" />
         <meta name="theme-color" content={BINUS_MAROON} />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -580,7 +580,7 @@ export default function TeacherTabletPage() {
           borderBottom: `3px solid ${BINUS_GOLD}`,
         }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 800, color: BINUS_GOLD, letterSpacing: 2 }}>BINUS · PICKUPGUARD</div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: BINUS_GOLD, letterSpacing: 2 }}>BINUS · PICKUP SYSTEM</div>
             <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', marginTop: 2 }}>
               {identity?.releaseGroupName || '—'}
               {identity?.gradeLabel && <span style={{ fontSize: 13, color: '#fcd34d', marginLeft: 10 }}>{identity.gradeLabel}</span>}

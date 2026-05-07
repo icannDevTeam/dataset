@@ -222,7 +222,7 @@ export default function AnalyticsPage() {
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'pickup' ? 'bg-orange-500/20 text-orange-200 shadow-sm border border-orange-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
           >
             <i className="ph ph-hand-waving"></i>
-            PickupGuard
+            Pickup System
           </button>
         </div>
 
@@ -822,7 +822,7 @@ function PickupAnalyticsPanel({ data, loading, error, days, setDays, onRefresh }
         <div>
           <div className="flex items-center gap-2 mb-1">
             <i className="ph ph-hand-waving text-orange-400"></i>
-            <span className="text-sm font-medium text-orange-400 tracking-wide uppercase">PickupGuard Analytics</span>
+            <span className="text-sm font-medium text-orange-400 tracking-wide uppercase">Pickup System Analytics</span>
           </div>
           <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white">Pickup Trends</h1>
           <p className="text-slate-400 mt-2 max-w-2xl">
