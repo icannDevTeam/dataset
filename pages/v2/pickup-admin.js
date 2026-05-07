@@ -2155,6 +2155,8 @@ function InviteLinksManager({ pushToast }) {
   const [showCreate, setShowCreate] = useState(false);
   const [previewInvite, setPreviewInvite] = useState(null); // {invite, qr}
   const [confirmRevoke, setConfirmRevoke] = useState(null);
+  const [sendInvite, setSendInvite] = useState(null);   // {invite, qr}
+  const [showSettings, setShowSettings] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -2238,6 +2240,19 @@ function InviteLinksManager({ pushToast }) {
     }
   }
 
+  /** Open the send-invite modal for `invite`, fetching QR if needed. */
+  async function openSend(invite) {
+    if (invite.qrDataUrl) { setSendInvite({ invite, qr: invite.qrDataUrl }); return; }
+    try {
+      const r = await fetch(`/api/pickup/admin/invite-links?id=${encodeURIComponent(invite.id)}&qr=1`, { credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setSendInvite({ invite: j.invite, qr: j.invite.qrDataUrl || null });
+    } catch (e) {
+      pushToast('error', e.message, 'Could not open send dialog');
+    }
+  }
+
   function copyText(text, label) {
     if (!text) return;
     navigator.clipboard.writeText(text).then(
@@ -2269,6 +2284,10 @@ function InviteLinksManager({ pushToast }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => setShowSettings(true)}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
+            <i className="ph ph-gear-six mr-1"></i>Integrations
+          </button>
           <button onClick={reload}
             className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
             <i className="ph ph-arrows-clockwise mr-1"></i>Refresh
@@ -2310,6 +2329,7 @@ function InviteLinksManager({ pushToast }) {
               invite={inv}
               onCopy={copyText}
               onShowQr={() => showQr(inv)}
+              onSend={() => openSend(inv)}
               onPreview={() => window.open(inv.url, '_blank', 'noopener')}
               onToggle={(enabled) => patchInvite(inv.id, { enabled })}
               onRevoke={() => setConfirmRevoke(inv)}
@@ -2333,6 +2353,23 @@ function InviteLinksManager({ pushToast }) {
           qr={previewInvite.qr}
           onClose={() => setPreviewInvite(null)}
           onCopy={copyText}
+        />
+      )}
+
+      {sendInvite && (
+        <SendInviteModal
+          invite={sendInvite.invite}
+          qr={sendInvite.qr}
+          onClose={() => setSendInvite(null)}
+          onCopy={copyText}
+          pushToast={pushToast}
+        />
+      )}
+
+      {showSettings && (
+        <IntegrationsSettingsModal
+          onClose={() => setShowSettings(false)}
+          pushToast={pushToast}
         />
       )}
 
@@ -2368,7 +2405,7 @@ function InviteLinksManager({ pushToast }) {
   );
 }
 
-function InviteLinkCard({ invite, onCopy, onShowQr, onPreview, onToggle, onRevoke, onRename }) {
+function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle, onRevoke, onRename }) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(invite.name);
   useEffect(() => { setDraftName(invite.name); }, [invite.name]);
@@ -2482,6 +2519,10 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onPreview, onToggle, onRevok
         <button onClick={() => onCopy(invite.url, 'Invite URL copied')}
           className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white">
           <i className="ph ph-copy mr-1"></i>Copy link
+        </button>
+        <button onClick={onSend}
+          className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white">
+          <i className="ph ph-paper-plane-tilt mr-1"></i>Send
         </button>
         <button onClick={onPreview}
           className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
@@ -2755,6 +2796,632 @@ function InvitePreviewModal({ invite, qr, onClose, onCopy }) {
               Done
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Send-invite modal: Email / WhatsApp / Toddle / QR tabs.
+//
+// Strategy: keep credentials out of the server. We pull the contact
+// list and the integration settings from the API, then build:
+//   • mailto:?bcc=…&subject=…&body=…   (opens admin's mail client)
+//   • https://wa.me/<E.164>?text=…     (opens WhatsApp Web/app)
+//   • Plain copy-text for Toddle / generic broadcast
+//   • QR PNG (already on the invite payload)
+// This avoids storing SMTP / WhatsApp Business creds in the repo and
+// works with whatever account the admin is signed into locally.
+// ─────────────────────────────────────────────────────────────────────
+function SendInviteModal({ invite, qr, onClose, onCopy, pushToast }) {
+  const CHANNELS = [
+    { key: 'email',    label: 'Email',    icon: 'ph-envelope-simple', tone: 'sky' },
+    { key: 'whatsapp', label: 'WhatsApp', icon: 'ph-whatsapp-logo',   tone: 'emerald' },
+    { key: 'toddle',   label: 'Toddle',   icon: 'ph-graduation-cap',  tone: 'amber' },
+    { key: 'qr',       label: 'QR Code',  icon: 'ph-qr-code',         tone: 'violet' },
+  ];
+  const [tab, setTab] = useState('email');
+  const [contacts, setContacts] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [groupFilter, setGroupFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(() => new Set());
+  const [settings, setSettings] = useState(null);
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        const [cRes, sRes] = await Promise.all([
+          fetch(`/api/pickup/admin/integrations?action=contacts&channel=${tab === 'whatsapp' ? 'whatsapp' : 'email'}`,
+                { credentials: 'include' }),
+          fetch('/api/pickup/admin/integrations?action=settings', { credentials: 'include' }),
+        ]);
+        const cJ = await cRes.json();
+        const sJ = await sRes.json();
+        if (cancel) return;
+        if (cRes.ok && cJ.ok) { setContacts(cJ.contacts); setGroups(cJ.groups || []); }
+        if (sRes.ok && sJ.ok) {
+          setSettings(sJ.settings);
+          if (!subject) setSubject(applyTemplate(sJ.settings.defaultEmailSubject, invite));
+          if (!body)    setBody(applyTemplate(sJ.settings.defaultMessageBody, invite));
+        }
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancel = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  function applyTemplate(t, inv) {
+    if (!t) return '';
+    const closeDate = inv.windowCloseAt
+      ? new Date(inv.windowCloseAt).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+      : (inv.expiresAt ? new Date(inv.expiresAt).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }) : '—');
+    return t
+      .replace(/\{url\}/g, inv.url || '')
+      .replace(/\{name\}/g, '{name}')                  // left for per-recipient if WA per-person
+      .replace(/\{studentName\}/g, '{studentName}')
+      .replace(/\{closeDate\}/g, closeDate)
+      .replace(/\{ttl\}/g, inv.expiresAt ? `until ${new Date(inv.expiresAt).toLocaleDateString('en-GB')}` : '');
+  }
+
+  const filtered = useMemo(() => {
+    if (!contacts) return [];
+    const q = search.trim().toLowerCase();
+    return contacts.filter((c) => {
+      if (groupFilter && (c.group || '') !== groupFilter) return false;
+      if (q && !`${c.name} ${c.email || ''} ${c.phone || ''} ${c.studentName || ''}`.toLowerCase().includes(q)) return false;
+      if (tab === 'email' && !c.email) return false;
+      if (tab === 'whatsapp' && !c.phone) return false;
+      return true;
+    });
+  }, [contacts, search, groupFilter, tab]);
+
+  function toggle(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function toggleAll() {
+    if (filtered.every((c) => selected.has(c.id))) {
+      setSelected((prev) => { const n = new Set(prev); filtered.forEach((c) => n.delete(c.id)); return n; });
+    } else {
+      setSelected((prev) => { const n = new Set(prev); filtered.forEach((c) => n.add(c.id)); return n; });
+    }
+  }
+
+  const selectedContacts = useMemo(() =>
+    (contacts || []).filter((c) => selected.has(c.id)),
+    [contacts, selected]);
+
+  // ── Email send ────────────────────────────────────────────────────
+  function sendEmail() {
+    const targets = selectedContacts.filter((c) => c.email);
+    if (!targets.length) { pushToast('error', 'Select at least one contact with an email.', 'No recipients'); return; }
+    if (targets.length > 200) { pushToast('error', 'Most mail clients cap at ~100 BCC. Send in batches.', 'Too many recipients'); return; }
+    const bcc = targets.map((c) => c.email).join(',');
+    const url = `mailto:?bcc=${encodeURIComponent(bcc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    if (url.length > 1900) { pushToast('error', 'Mail link too long — copy the body and use Compose manually.', 'Too long'); return; }
+    window.location.href = url;
+    pushToast('success', `Opening your mail app with ${targets.length} BCC recipient${targets.length===1?'':'s'}.`, 'Email');
+  }
+
+  // ── WhatsApp send (per-contact tab opener) ────────────────────────
+  function sendWhatsApp() {
+    const targets = selectedContacts.filter((c) => c.phone);
+    if (!targets.length) { pushToast('error', 'Select at least one contact with a phone number.', 'No recipients'); return; }
+    if (targets.length > 30) {
+      if (!confirm(`This will open ${targets.length} WhatsApp tabs. Continue?`)) return;
+    }
+    targets.forEach((c, i) => {
+      const personal = body.replace(/\{name\}/g, c.name).replace(/\{studentName\}/g, c.studentName || c.name);
+      const phone = c.phone.replace(/\D/g, '');
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(personal)}`;
+      // Stagger so popup blocker doesn't kill them
+      setTimeout(() => window.open(url, '_blank', 'noopener'), i * 250);
+    });
+    pushToast('success', `Opening ${targets.length} WhatsApp chat${targets.length===1?'':'s'}.`, 'WhatsApp');
+  }
+
+  // ── WhatsApp broadcast (single click → admin's WA Business URL) ──
+  function openBroadcast() {
+    const url = settings?.whatsappBroadcastUrl;
+    if (!url) { pushToast('error', 'Set the WhatsApp broadcast URL in Integrations Settings first.', 'Not configured'); return; }
+    window.open(url, '_blank', 'noopener');
+  }
+
+  // ── Toddle copy ───────────────────────────────────────────────────
+  function copyForToddle() {
+    const text = body.replace(/\{name\}/g, 'parents').replace(/\{studentName\}/g, 'your child');
+    onCopy(text, 'Toddle message copied — paste into Announcements');
+  }
+  function openToddle() {
+    const url = settings?.toddleAccountUrl;
+    if (!url) { pushToast('error', 'Set your Toddle account URL in Integrations Settings.', 'Not configured'); return; }
+    window.open(url, '_blank', 'noopener');
+  }
+
+  // ── Layout helpers ────────────────────────────────────────────────
+  const allFilteredSelected = filtered.length > 0 && filtered.every((c) => selected.has(c.id));
+
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+         onClick={onClose}>
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full shadow-2xl my-8"
+           onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-emerald-500/20 flex items-center justify-center">
+              <i className="ph ph-paper-plane-tilt text-emerald-300 text-lg"></i>
+            </div>
+            <div>
+              <h3 className="text-white font-semibold leading-tight">Send invite</h3>
+              <p className="text-xs text-slate-400">{invite.name}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl"><i className="ph ph-x"></i></button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-slate-800 bg-slate-950/50 px-3">
+          {CHANNELS.map((c) => {
+            const active = tab === c.key;
+            return (
+              <button key={c.key} onClick={() => setTab(c.key)}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition ${
+                  active ? 'border-emerald-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}>
+                <i className={`ph ${c.icon}`}></i>
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="p-6 space-y-4">
+          {/* QR tab — simple, no contacts */}
+          {tab === 'qr' && (
+            <div className="flex flex-col items-center gap-3">
+              {qr ? (
+                <>
+                  <div className="bg-white p-4 rounded-xl"><img src={qr} alt="Invite QR" className="w-64 h-64" /></div>
+                  <a href={qr} download={`invite-${invite.id}.png`}
+                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-violet-600 hover:bg-violet-500 text-white">
+                    <i className="ph ph-download-simple mr-1.5"></i>Download PNG
+                  </a>
+                  <p className="text-xs text-slate-400 text-center max-w-md">
+                    Print or display the QR. Parents scanning it land on the same secure invite URL.
+                  </p>
+                </>
+              ) : (
+                <div className="text-slate-400 text-sm">QR not available.</div>
+              )}
+            </div>
+          )}
+
+          {/* Toddle tab */}
+          {tab === 'toddle' && (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-3 text-sm text-amber-100 leading-relaxed">
+                <i className="ph ph-info mr-1"></i>
+                Toddle doesn&apos;t expose a public send-API, so we generate a polished
+                announcement you can paste into the <strong>Announcements</strong> module.
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-300 mb-1 block">Message</label>
+                <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono leading-relaxed" />
+              </div>
+              <div className="flex flex-wrap gap-2 justify-end">
+                <button onClick={copyForToddle}
+                  className="px-4 py-2 text-sm font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-900">
+                  <i className="ph ph-copy mr-1.5"></i>Copy message
+                </button>
+                <button onClick={openToddle}
+                  className="px-4 py-2 text-sm font-semibold rounded-lg bg-slate-700 hover:bg-slate-600 text-white">
+                  <i className="ph ph-arrow-square-out mr-1.5"></i>Open Toddle
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Email + WhatsApp share most of the same UI */}
+          {(tab === 'email' || tab === 'whatsapp') && (
+            <div className="space-y-4">
+              {/* Filter + select-all */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex-1 min-w-[200px] flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-lg px-3">
+                  <i className="ph ph-magnifying-glass text-slate-500"></i>
+                  <input value={search} onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search by name, email or phone…"
+                    className="flex-1 bg-transparent py-2 text-sm text-white placeholder:text-slate-500 outline-none" />
+                </div>
+                {groups.length > 0 && (
+                  <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}
+                    className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                    <option value="">All groups</option>
+                    {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                )}
+                <button onClick={toggleAll} disabled={!filtered.length}
+                  className="px-3 py-2 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-300 hover:bg-white/10 disabled:opacity-40">
+                  {allFilteredSelected ? 'Deselect all' : 'Select all'} ({filtered.length})
+                </button>
+              </div>
+
+              {/* Contact list */}
+              <div className="border border-slate-800 rounded-lg max-h-56 overflow-y-auto bg-black/20">
+                {contacts === null ? (
+                  <div className="p-4 text-sm text-slate-400">Loading contacts…</div>
+                ) : filtered.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-slate-400">
+                    No contacts {tab === 'email' ? 'with email' : 'with phone'} yet.{' '}
+                    <span className="text-slate-500">Use Integrations Settings to import.</span>
+                  </div>
+                ) : (
+                  filtered.map((c) => (
+                    <label key={c.id}
+                      className="flex items-center gap-3 px-3 py-2 hover:bg-white/5 cursor-pointer border-b border-slate-800/50 last:border-0">
+                      <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)}
+                        className="rounded text-emerald-500 focus:ring-emerald-400" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm text-white truncate">{c.name}</div>
+                        <div className="text-xs text-slate-400 truncate">
+                          {tab === 'email' ? c.email : c.phone}
+                          {c.group && <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-700/60 text-[10px] text-slate-300">{c.group}</span>}
+                          {c.studentName && <span className="ml-2 text-slate-500">· {c.studentName}</span>}
+                        </div>
+                      </div>
+                    </label>
+                  ))
+                )}
+              </div>
+              <div className="text-xs text-slate-500">
+                {selected.size} of {(contacts || []).length} contacts selected
+              </div>
+
+              {/* Subject (email only) */}
+              {tab === 'email' && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 mb-1 block">Subject</label>
+                  <input value={subject} onChange={(e) => setSubject(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                </div>
+              )}
+
+              {/* Body */}
+              <div>
+                <label className="text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                  <span>Message</span>
+                  <span className="text-[10px] font-normal text-slate-500 font-mono">
+                    placeholders: {'{url}'} {'{name}'} {'{studentName}'} {'{closeDate}'}
+                  </span>
+                </label>
+                <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono leading-relaxed" />
+              </div>
+
+              {/* Action row */}
+              <div className="flex flex-wrap gap-2 justify-end pt-2 border-t border-slate-800">
+                {tab === 'whatsapp' && settings?.whatsappBroadcastUrl && (
+                  <button onClick={openBroadcast}
+                    className="px-4 py-2 text-sm font-medium rounded-lg bg-white/5 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10">
+                    <i className="ph ph-broadcast mr-1.5"></i>Open broadcast tool
+                  </button>
+                )}
+                <button onClick={() => onCopy(body, 'Message copied')}
+                  className="px-4 py-2 text-sm font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
+                  <i className="ph ph-copy mr-1.5"></i>Copy message
+                </button>
+                {tab === 'email' && (
+                  <button onClick={sendEmail} disabled={!selected.size}
+                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40">
+                    <i className="ph ph-paper-plane-tilt mr-1.5"></i>Open in mail app ({selected.size})
+                  </button>
+                )}
+                {tab === 'whatsapp' && (
+                  <button onClick={sendWhatsApp} disabled={!selected.size}
+                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40">
+                    <i className="ph ph-whatsapp-logo mr-1.5"></i>Send via WhatsApp ({selected.size})
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Integrations Settings modal — manages contacts (paste/CSV import)
+// and per-tenant integration URLs (WhatsApp broadcast / Toddle).
+// ─────────────────────────────────────────────────────────────────────
+function IntegrationsSettingsModal({ onClose, pushToast }) {
+  const TABS = [
+    { key: 'contacts',     label: 'Contacts',     icon: 'ph-address-book' },
+    { key: 'integrations', label: 'Integrations', icon: 'ph-plugs-connected' },
+    { key: 'templates',    label: 'Templates',    icon: 'ph-text-aa' },
+  ];
+  const [tab, setTab] = useState('contacts');
+  const [settings, setSettings] = useState(null);
+  const [counts, setCounts] = useState(null);
+  const [contacts, setContacts] = useState(null);
+  const [groups, setGroups] = useState([]);
+  const [search, setSearch] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importGroup, setImportGroup] = useState('');
+  const [showImport, setShowImport] = useState(false);
+
+  const reload = useCallback(async () => {
+    try {
+      const [s, c] = await Promise.all([
+        fetch('/api/pickup/admin/integrations?action=settings', { credentials: 'include' }).then((r) => r.json()),
+        fetch('/api/pickup/admin/integrations?action=contacts', { credentials: 'include' }).then((r) => r.json()),
+      ]);
+      if (s.ok) { setSettings(s.settings); setCounts(s.counts); }
+      if (c.ok) { setContacts(c.contacts); setGroups(c.groups || []); }
+    } catch (e) {
+      pushToast('error', e.message, 'Load failed');
+    }
+  }, [pushToast]);
+  useEffect(() => { reload(); }, [reload]);
+
+  async function saveSettings() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/pickup/admin/integrations?action=settings', {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      pushToast('success', 'Integration settings saved.', 'Saved');
+      await reload();
+    } catch (e) { pushToast('error', e.message, 'Save failed'); }
+    finally { setBusy(false); }
+  }
+
+  async function importContacts() {
+    if (!importText.trim()) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/pickup/admin/integrations?action=import', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: importText, group: importGroup || null }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      pushToast('success', `Added ${j.added}, skipped ${j.skipped}.`, 'Import done');
+      setImportText(''); setImportGroup(''); setShowImport(false);
+      await reload();
+    } catch (e) { pushToast('error', e.message, 'Import failed'); }
+    finally { setBusy(false); }
+  }
+
+  async function deleteContact(id) {
+    if (!confirm('Remove this contact?')) return;
+    try {
+      const r = await fetch(`/api/pickup/admin/integrations?action=contacts&id=${encodeURIComponent(id)}`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      await reload();
+    } catch (e) { pushToast('error', e.message, 'Delete failed'); }
+  }
+
+  const filtered = useMemo(() => {
+    if (!contacts) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return contacts;
+    return contacts.filter((c) =>
+      `${c.name} ${c.email || ''} ${c.phone || ''} ${c.group || ''} ${c.studentName || ''}`.toLowerCase().includes(q));
+  }, [contacts, search]);
+
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+         onClick={onClose}>
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full shadow-2xl my-8"
+           onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-brand-500/20 flex items-center justify-center">
+              <i className="ph ph-gear-six text-brand-300 text-lg"></i>
+            </div>
+            <div>
+              <h3 className="text-white font-semibold leading-tight">Integrations Settings</h3>
+              <p className="text-xs text-slate-400">Contacts, WhatsApp, Toddle &amp; message templates</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white text-xl"><i className="ph ph-x"></i></button>
+        </div>
+
+        <div className="flex border-b border-slate-800 bg-slate-950/50 px-3">
+          {TABS.map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition ${
+                tab === t.key ? 'border-brand-400 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}>
+              <i className={`ph ${t.icon}`}></i>{t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="p-6">
+          {/* CONTACTS */}
+          {tab === 'contacts' && (
+            <div className="space-y-4">
+              {counts && (
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <div className="bg-white/5 rounded-lg py-2">
+                    <div className="text-[10px] text-slate-500 uppercase">Total</div>
+                    <div className="text-lg font-bold text-white">{counts.total}</div>
+                  </div>
+                  <div className="bg-sky-500/10 rounded-lg py-2">
+                    <div className="text-[10px] text-sky-300 uppercase">Email</div>
+                    <div className="text-lg font-bold text-white">{counts.email + counts.both}</div>
+                  </div>
+                  <div className="bg-emerald-500/10 rounded-lg py-2">
+                    <div className="text-[10px] text-emerald-300 uppercase">WhatsApp</div>
+                    <div className="text-lg font-bold text-white">{counts.whatsapp + counts.both}</div>
+                  </div>
+                  <div className="bg-violet-500/10 rounded-lg py-2">
+                    <div className="text-[10px] text-violet-300 uppercase">Both</div>
+                    <div className="text-lg font-bold text-white">{counts.both}</div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex-1 min-w-[200px] flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-lg px-3">
+                  <i className="ph ph-magnifying-glass text-slate-500"></i>
+                  <input value={search} onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search contacts…"
+                    className="flex-1 bg-transparent py-2 text-sm text-white placeholder:text-slate-500 outline-none" />
+                </div>
+                <button onClick={() => setShowImport((v) => !v)}
+                  className="px-3 py-2 text-xs font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white">
+                  <i className="ph ph-upload-simple mr-1"></i>Import
+                </button>
+              </div>
+
+              {showImport && (
+                <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 p-4 space-y-3">
+                  <div className="text-sm text-white font-semibold">Bulk import</div>
+                  <div className="text-xs text-slate-400 leading-relaxed">
+                    Paste one per line or CSV. Accepted formats:<br />
+                    <code className="text-slate-300">Alice Tan &lt;alice@x.com&gt;</code> · <code className="text-slate-300">Budi +628123…</code> ·{' '}
+                    <code className="text-slate-300">name,email,phone,group,studentName,studentId</code> (with header)
+                  </div>
+                  <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={6}
+                    placeholder={'Alice Tan <alice@x.com>\nBudi Santoso +6281234567890\nname,email,phone,group\nCharlie,charlie@x.com,,Grade 4'}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono" />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input value={importGroup} onChange={(e) => setImportGroup(e.target.value)}
+                      placeholder="Default group (optional)"
+                      className="flex-1 min-w-[200px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                    <button onClick={importContacts} disabled={busy || !importText.trim()}
+                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white disabled:opacity-40">
+                      {busy ? 'Importing…' : 'Add contacts'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="border border-slate-800 rounded-lg max-h-72 overflow-y-auto bg-black/20">
+                {contacts === null ? (
+                  <div className="p-4 text-sm text-slate-400">Loading…</div>
+                ) : filtered.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-slate-400">No contacts yet.</div>
+                ) : (
+                  filtered.map((c) => (
+                    <div key={c.id}
+                      className="flex items-center gap-3 px-3 py-2 border-b border-slate-800/50 last:border-0 hover:bg-white/5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm text-white truncate flex items-center gap-2">
+                          {c.name}
+                          {c.channel === 'both' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200">EMAIL+WA</span>}
+                          {c.channel === 'email' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-200">EMAIL</span>}
+                          {c.channel === 'whatsapp' && <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200">WA</span>}
+                        </div>
+                        <div className="text-xs text-slate-400 truncate">
+                          {c.email && <span className="mr-2">{c.email}</span>}
+                          {c.phone && <span>{c.phone}</span>}
+                          {c.group && <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-700/60 text-[10px]">{c.group}</span>}
+                        </div>
+                      </div>
+                      <button onClick={() => deleteContact(c.id)}
+                        className="p-1.5 text-slate-500 hover:text-rose-400">
+                        <i className="ph ph-trash"></i>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* INTEGRATIONS */}
+          {tab === 'integrations' && settings && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-300 mb-1 block flex items-center gap-1.5">
+                  <i className="ph ph-whatsapp-logo text-emerald-400"></i>
+                  WhatsApp broadcast URL
+                </label>
+                <input value={settings.whatsappBroadcastUrl}
+                  onChange={(e) => setSettings({ ...settings, whatsappBroadcastUrl: e.target.value })}
+                  placeholder="https://app.wati.io/… or https://business.facebook.com/…"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Used by the &quot;Open broadcast tool&quot; button in the WhatsApp tab.
+                  Leave blank to send 1-by-1 via wa.me.
+                </p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-300 mb-1 block flex items-center gap-1.5">
+                  <i className="ph ph-graduation-cap text-amber-400"></i>
+                  Toddle account URL
+                </label>
+                <input value={settings.toddleAccountUrl}
+                  onChange={(e) => setSettings({ ...settings, toddleAccountUrl: e.target.value })}
+                  placeholder="https://app.toddleapp.com/o/your-school/announcements"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Opens directly when admin clicks &quot;Open Toddle&quot; in the send dialog.
+                </p>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button onClick={saveSettings} disabled={busy}
+                  className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white disabled:opacity-40">
+                  {busy ? 'Saving…' : 'Save integrations'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TEMPLATES */}
+          {tab === 'templates' && settings && (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-slate-800/50 border border-slate-700 px-3 py-2 text-xs text-slate-400">
+                Placeholders: <code className="text-slate-200">{'{url}'}</code>{' '}
+                <code className="text-slate-200">{'{name}'}</code>{' '}
+                <code className="text-slate-200">{'{studentName}'}</code>{' '}
+                <code className="text-slate-200">{'{closeDate}'}</code>{' '}
+                <code className="text-slate-200">{'{ttl}'}</code>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-300 mb-1 block">Default email subject</label>
+                <input value={settings.defaultEmailSubject}
+                  onChange={(e) => setSettings({ ...settings, defaultEmailSubject: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-300 mb-1 block">Default message body</label>
+                <textarea value={settings.defaultMessageBody} rows={10}
+                  onChange={(e) => setSettings({ ...settings, defaultMessageBody: e.target.value })}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white font-mono" />
+              </div>
+              <div className="flex justify-end pt-2">
+                <button onClick={saveSettings} disabled={busy}
+                  className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white disabled:opacity-40">
+                  {busy ? 'Saving…' : 'Save templates'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
