@@ -510,19 +510,10 @@ export default function PickupAdminPage() {
   }
 
   // ─── Bulk actions ───────────────────────────────────────────────────────
-  // Bulk approve mirrors per-record gating: every selected record must have
-  // a photo for every student before the button activates.
-  const recordHasAllStudentPhotos = useCallback((rec) => {
-    const students = rec?.students || [];
-    if (students.length === 0) return false;
-    return students.every((s) =>
-      !!(s.photoUrl || thumbnails[s.id] || thumbnails[`name:${s.name}`]));
-  }, [thumbnails]);
-  const blockedSelectedIds = selectedIds.filter((id) => {
-    const rec = records.find((r) => r.id === id);
-    return rec && !recordHasAllStudentPhotos(rec);
-  });
-  const bulkApproveBlocked = blockedSelectedIds.length > 0;
+  // Photos are no longer required at the student level — chaperone photos
+  // are the only biometric the gate uses for verification.
+  const blockedSelectedIds = [];
+  const bulkApproveBlocked = false;
 
   async function bulkApprove() {
     if (selectedIds.length === 0) return;
@@ -1444,14 +1435,9 @@ function RecordCard(props) {
     photoUrl: s.photoUrl || thumbnails[s.id] || thumbnails[`name:${s.name}`] || null,
   }));
 
-  // Approve is gated on every student having an admin-uploaded photo. The
-  // chaperone face-enrolment depends on the canonical student image; without
-  // it the approval flow would create chaperones that can never be matched
-  // back to a verifiable child at the gate.
-  const allStudentsHavePhotos =
-    enrichedStudents.length > 0 && enrichedStudents.every((s) => !!s.photoUrl);
-  const missingPhotoCount = enrichedStudents.filter((s) => !s.photoUrl).length;
-  const approveBlocked = rec.status === 'pending' && !allStudentsHavePhotos;
+  // Student photos are not required for approval — only chaperone face
+  // photos drive verification at the pickup gate.
+  const approveBlocked = false;
 
   // Per-record device-enrollment summary
   const enrollSummary = useMemo(() => {
@@ -1516,8 +1502,8 @@ function RecordCard(props) {
             <i className="ph ph-printer mr-1"></i>Form
           </button>
           {rec.status === 'pending' && (
-            <button onClick={onApprove} disabled={!!busy || approveBlocked}
-              title={approveBlocked ? 'Upload a photo for every student before approving' : 'Approve and allocate chaperone IDs'}
+            <button onClick={onApprove} disabled={!!busy}
+              title={'Approve and allocate chaperone IDs'}
               className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50">
               {busy === 'approve' ? '…' : <><i className="ph ph-check mr-1"></i>Approve</>}
             </button>
@@ -1546,7 +1532,7 @@ function RecordCard(props) {
             {enrichedStudents.length > 1 && (
               <p className="text-[11px] text-slate-500 -mt-1 mb-3">
                 <i className="ph ph-info mr-1"></i>
-                {enrichedStudents.length} siblings on a single submission — upload a photo for each child below.
+                {enrichedStudents.length} siblings on a single submission.
               </p>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1556,8 +1542,6 @@ function RecordCard(props) {
                   s={s}
                   index={i}
                   total={enrichedStudents.length}
-                  onPhoto={onPhoto}
-                  onUpload={onUploadStudentPhoto ? (file) => onUploadStudentPhoto(s.id, file) : null}
                   canEdit={rec.status === 'pending' && !!onOnboardingEdit}
                   canDelete={rec.status === 'pending' && !!onOnboardingEdit && enrichedStudents.length > 1}
                   onEdit={(patch) => onOnboardingEdit({ recordId: rec.id, target: 'student', id: s.id, action: 'update', patch })}
@@ -1631,18 +1615,12 @@ function RecordCard(props) {
               </div>
             ) : (
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800 flex-wrap">
-                {approveBlocked && (
-                  <div className="text-xs text-amber-300 mr-auto">
-                    <i className="ph ph-warning mr-1"></i>
-                    Upload {missingPhotoCount} more student photo{missingPhotoCount === 1 ? '' : 's'} to enable approval.
-                  </div>
-                )}
                 <button onClick={onStartReject} disabled={!!busy}
                   className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 disabled:opacity-50">
                   <i className="ph ph-x mr-1"></i>Reject
                 </button>
                 <button onClick={onApprove} disabled={!!busy || approveBlocked}
-                  title={approveBlocked ? 'Upload a photo for every student before approving' : 'Approve & enrol'}
+                  title={'Approve & enrol'}
                   className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">
                   {busy === 'approve' ? 'Approving…' : <><i className="ph ph-check mr-1"></i>Approve & enrol</>}
                 </button>
@@ -1685,19 +1663,10 @@ function RecordCard(props) {
   );
 }
 
-function StudentTile({ s, index, total, onPhoto, onUpload, canEdit, canDelete, onEdit, onDelete }) {
-  const inputRef = useRef(null);
-  const [busy, setBusy] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
+function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({ name: s.name || '', homeroom: s.homeroom || '' });
   const [savingEdit, setSavingEdit] = useState(false);
-
-  const handleFile = useCallback(async (file) => {
-    if (!file || !onUpload) return;
-    setBusy(true);
-    try { await onUpload(file); } finally { setBusy(false); }
-  }, [onUpload]);
 
   const submitEdit = async () => {
     if (!onEdit) return;
@@ -1718,40 +1687,15 @@ function StudentTile({ s, index, total, onPhoto, onUpload, canEdit, canDelete, o
     await onDelete();
   };
 
-  const onChange = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    await handleFile(file);
-  };
-
-  const onDrop = async (e) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer?.files?.[0];
-    await handleFile(file);
-  };
-
-  const hasPhoto = !!s.photoUrl;
   const isSibling = total > 1;
 
   return (
-    <div
-      onDragOver={(e) => { if (onUpload) { e.preventDefault(); setDragOver(true); } }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={onDrop}
-      className={`group relative rounded-xl border bg-gradient-to-br from-white/5 to-white/[0.02] overflow-hidden transition-all ${
-        dragOver ? 'border-brand-400 ring-2 ring-brand-500/40 bg-brand-500/5' : 'border-slate-800 hover:border-slate-700'
-      }`}
-    >
+    <div className="relative rounded-xl border border-slate-800 hover:border-slate-700 bg-gradient-to-br from-white/5 to-white/[0.02] overflow-hidden transition-all">
       {/* Status bar */}
-      <div className={`px-3 py-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider border-b ${
-        hasPhoto
-          ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
-          : 'bg-amber-500/10 text-amber-300 border-amber-500/20'
-      }`}>
+      <div className="px-3 py-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider border-b bg-slate-900/40 border-slate-800 text-slate-400">
         <span className="flex items-center gap-1.5">
-          <i className={`ph ${hasPhoto ? 'ph-check-circle-fill' : 'ph-warning-circle-fill'}`}></i>
-          {hasPhoto ? 'Photo on file' : 'Photo required'}
+          <i className="ph ph-graduation-cap text-brand-400"></i>
+          Student
         </span>
         <div className="flex items-center gap-2">
           {isSibling && (
@@ -1802,108 +1746,42 @@ function StudentTile({ s, index, total, onPhoto, onUpload, canEdit, canDelete, o
         </div>
       )}
 
-      <div className="p-4 flex gap-4">
-        {/* Photo zone */}
-        <div className="relative flex-shrink-0">
-          {hasPhoto ? (
-            <button
-              type="button"
-              onClick={() => onPhoto(s.photoUrl, `${s.name} · ID ${s.id}${s.homeroom ? ` · ${s.homeroom}` : ''}`)}
-              className="block w-24 h-24 rounded-xl overflow-hidden border-2 border-slate-700 hover:border-brand-400 transition-colors cursor-zoom-in"
-              title="View full size"
-            >
-              <img src={s.photoUrl} alt={s.name} className="w-full h-full object-cover" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onUpload && inputRef.current?.click()}
-              disabled={!onUpload || busy}
-              className="w-24 h-24 rounded-xl border-2 border-dashed border-slate-700 hover:border-brand-400 hover:bg-brand-500/5 transition-colors flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-brand-300 disabled:opacity-50"
-              title="Click or drop a photo"
-            >
-              <i className="ph ph-image-square text-3xl"></i>
-              <span className="text-[9px] uppercase tracking-wider font-bold">No photo</span>
-            </button>
-          )}
-
-          {onUpload && (
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              disabled={busy}
-              title={hasPhoto ? 'Replace photo' : 'Upload photo'}
-              className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-brand-500 hover:bg-brand-400 text-white flex items-center justify-center border-2 border-slate-900 shadow-lg disabled:opacity-50"
-            >
-              {busy
-                ? <i className="ph ph-spinner-gap animate-spin"></i>
-                : <i className={`ph ${hasPhoto ? 'ph-pencil-simple' : 'ph-plus'}`}></i>}
-            </button>
-          )}
-
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            className="hidden"
-            onChange={onChange}
-          />
+      <div className="p-4 flex flex-col gap-1.5">
+        <div className="text-base font-bold text-white leading-tight truncate" title={s.name}>
+          {s.name || '—'}
         </div>
 
-        {/* Info zone */}
-        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1.5">
-          <div className="text-base font-bold text-white leading-tight truncate" title={s.name}>
-            {s.name || '—'}
+        {s.dbName && s.dbName !== s.name && (
+          <div className="text-[10px] text-amber-400 -mt-0.5" title="Name on file in BINUS DB differs from form">
+            <i className="ph ph-warning mr-0.5"></i>DB: {s.dbName}
           </div>
+        )}
 
-          {s.dbName && s.dbName !== s.name && (
-            <div className="text-[10px] text-amber-400 -mt-0.5" title="Name on file in BINUS DB differs from form">
-              <i className="ph ph-warning mr-0.5"></i>DB: {s.dbName}
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+          <span
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/60 border border-slate-700 text-[10px] font-mono text-slate-300"
+            title="BINUS Student ID"
+          >
+            <i className="ph ph-identification-card text-slate-500"></i>
+            {s.id}
+          </span>
+          {s.homeroom ? (
             <span
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/60 border border-slate-700 text-[10px] font-mono text-slate-300"
-              title="BINUS Student ID"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand-500/15 border border-brand-500/30 text-[10px] font-bold text-brand-200"
+              title="Homeroom class"
             >
-              <i className="ph ph-identification-card text-slate-500"></i>
-              {s.id}
+              <i className="ph ph-chalkboard-teacher"></i>
+              {s.homeroom}
             </span>
-            {s.homeroom ? (
-              <span
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand-500/15 border border-brand-500/30 text-[10px] font-bold text-brand-200"
-                title="Homeroom class"
-              >
-                <i className="ph ph-chalkboard-teacher"></i>
-                {s.homeroom}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/40 border border-slate-700/50 text-[10px] text-slate-500 italic">
-                no class
-              </span>
-            )}
-          </div>
-
-          {onUpload && (
-            <div className="text-[10px] text-slate-500 mt-1 leading-snug">
-              {hasPhoto
-                ? <span><i className="ph ph-info mr-0.5"></i>Click photo to view · pencil to replace</span>
-                : <span><i className="ph ph-arrow-down mr-0.5"></i>Drop a photo here or click <b className="text-brand-300">+</b> to upload</span>}
-              <div className="text-slate-600 mt-0.5">JPEG / PNG / WebP, ≤ 800 KB</div>
-            </div>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/40 border border-slate-700/50 text-[10px] text-slate-500 italic">
+              no class
+            </span>
           )}
         </div>
       </div>
 
-      {/* Drag overlay */}
-      {dragOver && (
-        <div className="absolute inset-0 bg-brand-500/20 border-2 border-dashed border-brand-400 rounded-xl flex items-center justify-center pointer-events-none">
-          <div className="text-brand-200 font-bold text-sm flex items-center gap-2">
-            <i className="ph ph-upload-simple text-2xl"></i>Drop to upload
-          </div>
-        </div>
-      )}
+      {/* Drag overlay (kept hidden – no upload) */}
     </div>
   );
 }
@@ -1975,9 +1853,9 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
   };
 
   const handleDeleteFace = async (path) => {
-    if (!onDeleteFace) return;
-    if (!confirm(`Delete this face photo for ${c.name}?`)) return;
-    await onDeleteFace(path);
+    if (!onDeleteFace) return false;
+    if (!confirm(`Delete this face photo for ${c.name}?`)) return false;
+    return await onDeleteFace(path);
   };
 
   const toggleAuthStudent = (sid) => {
@@ -2215,7 +2093,7 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
 
           <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
             {slots.map((url, j) => url ? (
-              <div key={j} className="relative aspect-square">
+              <div key={j} className="group/face relative aspect-square">
                 <button
                   type="button"
                   onClick={() => onPhoto(url, `${c.name} · face ${j + 1}/${filled}`)}
@@ -2228,12 +2106,30 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
                   </span>
                 </button>
                 {canEdit && onDeleteFace && (c.facePaths || [])[j] && (
-                  <button type="button"
-                    onClick={() => handleDeleteFace((c.facePaths || [])[j])}
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 hover:bg-red-400 text-white text-[10px] flex items-center justify-center border border-slate-900 shadow"
-                    title="Delete this face photo">
-                    <i className="ph ph-x"></i>
-                  </button>
+                  <div className="absolute inset-x-0 bottom-0 p-1 flex justify-center gap-1 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover/face:opacity-100 transition-opacity pointer-events-none">
+                    <button type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!confirm(`Replace face photo ${j + 1} for ${c.name}?\n\nThe current photo will be deleted, then pick a new one to upload.`)) return;
+                        const ok = await onDeleteFace((c.facePaths || [])[j]);
+                        if (ok !== false) addInputRef.current?.click();
+                      }}
+                      className="pointer-events-auto w-6 h-6 rounded-full bg-blue-500 hover:bg-blue-400 text-white flex items-center justify-center shadow text-[10px]"
+                      title="Replace this face photo">
+                      <i className="ph ph-pencil-simple"></i>
+                    </button>
+                    <button type="button"
+                      onClick={(e) => { e.stopPropagation(); handleDeleteFace((c.facePaths || [])[j]); }}
+                      className="pointer-events-auto w-6 h-6 rounded-full bg-red-500 hover:bg-red-400 text-white flex items-center justify-center shadow text-[10px]"
+                      title="Delete this face photo">
+                      <i className="ph ph-trash"></i>
+                    </button>
+                  </div>
+                )}
+                {canEdit && onDeleteFace && (c.facePaths || [])[j] && (
+                  <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-900 text-slate-300 border border-slate-700 flex items-center justify-center text-[9px] pointer-events-none">
+                    <i className="ph ph-pencil-simple"></i>
+                  </span>
                 )}
               </div>
             ) : (
