@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const POLL_MS = 2500;
 const TOKEN_KEY = 'pickup.tablet.deviceToken';
+const IDENTITY_KEY = 'pickup.tablet.identity';
 const BINUS_MAROON = '#8B1538';
 const BINUS_GOLD = '#FCBF11';
 
@@ -97,6 +98,7 @@ function PairingScreen({ onPaired }) {
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       localStorage.setItem(TOKEN_KEY, j.deviceToken);
+      try { localStorage.setItem(IDENTITY_KEY, JSON.stringify(j)); } catch {}
       onPaired(j);
     } catch (e2) {
       setErr(e2.message);
@@ -527,11 +529,16 @@ export default function TeacherTabletPage() {
   const [showInstall, setShowInstall] = useState(false);
   const pollRef = useRef(null);
 
-  // Load token from localStorage
+  // Load token + last-known identity from localStorage so the iPad reopens
+  // straight to its assigned class — no code re-entry between launches.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const t = localStorage.getItem(TOKEN_KEY);
     if (t) setToken(t);
+    try {
+      const cached = localStorage.getItem(IDENTITY_KEY);
+      if (cached) setIdentity(JSON.parse(cached));
+    } catch {}
   }, []);
 
   // PWA: register service worker + install prompt
@@ -558,7 +565,10 @@ export default function TeacherTabletPage() {
     };
   }, []);
 
-  // whoami: validate token, get release group + terminals
+  // whoami: validate token, get release group + terminals.
+  // Persistence policy: clear local pairing ONLY on a hard 401 (admin
+  // unpaired the device from the dashboard). Network errors / 5xx leave
+  // the cached identity in place so the iPad keeps working offline-ish.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
@@ -566,17 +576,29 @@ export default function TeacherTabletPage() {
       try {
         const r = await fetch(`/api/pickup/tablet/whoami`, {
           headers: { 'x-tablet-device-token': token },
+          cache: 'no-store',
         });
-        const j = await r.json();
-        if (!r.ok) {
-          if (r.status === 401) {
-            localStorage.removeItem(TOKEN_KEY);
-            if (!cancelled) setToken(null);
+        if (r.status === 401) {
+          // Admin unpaired this iPad — fall back to pair screen.
+          localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(IDENTITY_KEY);
+          if (!cancelled) {
+            setToken(null);
+            setIdentity(null);
+            setErr(null);
           }
-          throw new Error(j.error || `HTTP ${r.status}`);
+          return;
         }
-        if (!cancelled) { setIdentity(j); setErr(null); }
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        if (!cancelled) {
+          setIdentity(j);
+          try { localStorage.setItem(IDENTITY_KEY, JSON.stringify(j)); } catch {}
+          setErr(null);
+        }
       } catch (e) {
+        // Transient (offline, server hiccup) — keep the cached identity
+        // and just surface a soft error. Do NOT log the iPad out.
         if (!cancelled) setErr(e.message);
       }
     })();
@@ -669,6 +691,7 @@ export default function TeacherTabletPage() {
   const unpair = () => {
     if (!confirm('Unpair this iPad? You will need a new code from the admin.')) return;
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(IDENTITY_KEY);
     setToken(null);
     setIdentity(null);
     setFeed({ active: [], held: [], todayReleased: 0 });
@@ -678,15 +701,16 @@ export default function TeacherTabletPage() {
     return (
       <>
         <Head>
-          <title>Pair · BINUS Pickup System</title>
+          <title>Pair · BINUS Pick-Up System</title>
           <link rel="manifest" href="/teacher-manifest.webmanifest" />
+          <link rel="icon" type="image/png" sizes="192x192" href="/pwa/teacher-icon-192.png" />
           <meta name="theme-color" content={BINUS_MAROON} />
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
           <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
           <meta name="apple-mobile-web-app-capable" content="yes" />
           <meta name="mobile-web-app-capable" content="yes" />
           <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-          <meta name="apple-mobile-web-app-title" content="Teacher Pickup" />
+          <meta name="apple-mobile-web-app-title" content="Pick-Up System" />
         </Head>
         <PairingScreen onPaired={(payload) => {
           setToken(payload.deviceToken);
@@ -704,15 +728,16 @@ export default function TeacherTabletPage() {
   return (
     <>
       <Head>
-        <title>{identity?.releaseGroupName || 'Teacher'} · BINUS Pickup System</title>
+        <title>{identity?.releaseGroupName || 'Teacher'} · BINUS Pick-Up System</title>
         <link rel="manifest" href="/teacher-manifest.webmanifest" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/pwa/teacher-icon-192.png" />
         <meta name="theme-color" content={BINUS_MAROON} />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="Teacher Pickup" />
+        <meta name="apple-mobile-web-app-title" content="Pick-Up System" />
       </Head>
       <div style={{
         minHeight: '100vh', background: '#0f172a',

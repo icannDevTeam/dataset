@@ -1,12 +1,12 @@
 {
-  "name": "BINUS Teacher Pickup",
-  "short_name": "Teacher Pickup",
-  "description": "Teacher release desk for BINUS Pickup System",
+  "name": "BINUS Pick-Up System",
+  "short_name": "Pick-Up System",
+  "description": "BINUS Pick-Up System teacher release desk",
   "start_url": "/pickup/teacher",
   "scope": "/pickup/teacher",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#0f172a",
+  "background_color": "#8B1538",
   "theme_color": "#8B1538",
   "icons": [
     {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'teacher-pwa-v4';
+const CACHE_NAME = 'teacher-pwa-v5';
 const PRECACHE = [
   '/teacher-manifest.webmanifest',
   '/binus-logo.jpg',
