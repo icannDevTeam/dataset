@@ -829,7 +829,7 @@ export default function PickupOnboardingPage() {
     e.preventDefault();
     setError(null);
     setConflict(null);
-    if (chaperones.length > 3) return setError('Maximum 3 authorized people.');
+    if (chaperones.length > 5) return setError('Maximum 5 authorized people.');
     if (!guardianName.trim()) return setError('Your full name is required.');
     if (signature.trim().toLowerCase() !== guardianName.trim().toLowerCase()) {
       return setError('Type your full name exactly as the signature.');
@@ -1443,10 +1443,10 @@ export default function PickupOnboardingPage() {
                   ))}
 
                   <button type="button" style={btnSecondary()} onClick={addChaperone}
-                    disabled={students.length === 0 || chaperones.length >= 3}>
-                    {chaperones.length >= 3
-                      ? 'Maximum 3 people'
-                      : '+ Add another person (max 3)'}
+                    disabled={students.length === 0 || chaperones.length >= 5}>
+                    {chaperones.length >= 5
+                      ? 'Maximum 5 people'
+                      : '+ Add another person (max 5)'}
                   </button>
                 </div>
 

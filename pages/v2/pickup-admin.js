@@ -380,6 +380,30 @@ export default function PickupAdminPage() {
     }
   }, [reload]);
 
+  // Edit / delete chaperone or student inside a pending onboarding record.
+  // Used by the per-section Edit / Delete action buttons.
+  const submitOnboardingEdit = useCallback(async (payload) => {
+    try {
+      const r = await fetch('/api/pickup/admin/onboarding-edit', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || j.error || 'edit failed');
+      const verb = payload.action === 'delete' ? 'removed'
+        : payload.action === 'delete-face' ? 'photo removed'
+        : 'updated';
+      pushToast('success', `${payload.target === 'chaperone' ? 'Chaperone' : 'Student'} ${verb}.`);
+      reload();
+      return true;
+    } catch (e) {
+      pushToast('error', `Edit failed: ${e.message}`);
+      return false;
+    }
+  }, [reload]);
+
   // ─── Filtered + sorted view ─────────────────────────────────────────────
   const visibleRecords = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -862,6 +886,7 @@ export default function PickupAdminPage() {
                   onPrint={() => setPrintRec(rec)}
                   onUploadStudentPhoto={uploadStudentPhoto}
                   onUploadChaperonePhoto={uploadChaperonePhoto}
+                  onOnboardingEdit={submitOnboardingEdit}
                   busy={working[rec.id]}
                   rejecting={rejectingId === rec.id}
                   rejectReason={rejectReason}
@@ -1410,6 +1435,7 @@ function RecordCard(props) {
     rec, thumbnails, selected, onToggleSelect, expanded, onToggle,
     onApprove, onStartReject, onCancelReject, onSubmitReject, onReenroll,
     onPhoto, onPrint, onUploadStudentPhoto, onUploadChaperonePhoto,
+    onOnboardingEdit,
     busy, rejecting, rejectReason, setRejectReason, showSelect,
   } = props;
 
@@ -1532,6 +1558,10 @@ function RecordCard(props) {
                   total={enrichedStudents.length}
                   onPhoto={onPhoto}
                   onUpload={onUploadStudentPhoto ? (file) => onUploadStudentPhoto(s.id, file) : null}
+                  canEdit={rec.status === 'pending' && !!onOnboardingEdit}
+                  canDelete={rec.status === 'pending' && !!onOnboardingEdit && enrichedStudents.length > 1}
+                  onEdit={(patch) => onOnboardingEdit({ recordId: rec.id, target: 'student', id: s.id, action: 'update', patch })}
+                  onDelete={() => onOnboardingEdit({ recordId: rec.id, target: 'student', id: s.id, action: 'delete' })}
                 />
               ))}
             </div>
@@ -1544,12 +1574,18 @@ function RecordCard(props) {
               {(rec.chaperones || []).map((c, i) => {
                 const allocated = rec.allocatedChaperones?.[i];
                 const enrol = (rec.enrollment || []).find((e) => e.chaperoneId === allocated?.chaperoneId);
+                const editable = rec.status === 'pending' && !!onOnboardingEdit;
                 return (
                   <ChaperoneRow key={c.tempId || i} c={c} index={i} allocated={allocated} enrol={enrol}
                     enrichedStudents={enrichedStudents} onPhoto={onPhoto}
                     onUpload={onUploadChaperonePhoto && allocated
                       ? (file, opts) => onUploadChaperonePhoto(allocated.chaperoneId, file, opts)
-                      : null} />
+                      : null}
+                    canEdit={editable}
+                    onEdit={editable ? (patch) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'update', patch }) : null}
+                    onDelete={editable ? () => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete' }) : null}
+                    onDeleteFace={editable ? (facePath) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete-face', facePath }) : null}
+                  />
                 );
               })}
             </div>
@@ -1649,16 +1685,38 @@ function RecordCard(props) {
   );
 }
 
-function StudentTile({ s, index, total, onPhoto, onUpload }) {
+function StudentTile({ s, index, total, onPhoto, onUpload, canEdit, canDelete, onEdit, onDelete }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ name: s.name || '', homeroom: s.homeroom || '' });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const handleFile = useCallback(async (file) => {
     if (!file || !onUpload) return;
     setBusy(true);
     try { await onUpload(file); } finally { setBusy(false); }
   }, [onUpload]);
+
+  const submitEdit = async () => {
+    if (!onEdit) return;
+    const patch = {};
+    if (editForm.name.trim() && editForm.name.trim() !== s.name) patch.name = editForm.name.trim();
+    if ((editForm.homeroom || '').trim() !== (s.homeroom || '')) patch.homeroom = editForm.homeroom.trim();
+    if (Object.keys(patch).length === 0) { setEditOpen(false); return; }
+    setSavingEdit(true);
+    try {
+      const ok = await onEdit(patch);
+      if (ok) setEditOpen(false);
+    } finally { setSavingEdit(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!onDelete) return;
+    if (!confirm(`Remove ${s.name || s.id} from this onboarding submission?\n\nThis cannot be undone before approval.`)) return;
+    await onDelete();
+  };
 
   const onChange = async (e) => {
     const file = e.target.files?.[0];
@@ -1695,12 +1753,54 @@ function StudentTile({ s, index, total, onPhoto, onUpload }) {
           <i className={`ph ${hasPhoto ? 'ph-check-circle-fill' : 'ph-warning-circle-fill'}`}></i>
           {hasPhoto ? 'Photo on file' : 'Photo required'}
         </span>
-        {isSibling && (
-          <span className="text-slate-400" title="Sibling number on this form">
-            Child {index + 1}/{total}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {isSibling && (
+            <span className="text-slate-400" title="Sibling number on this form">
+              Child {index + 1}/{total}
+            </span>
+          )}
+          {canEdit && (
+            <button type="button" onClick={() => setEditOpen((v) => !v)}
+              className="text-slate-300 hover:text-white px-1.5 py-0.5 rounded bg-slate-800/60 hover:bg-slate-700"
+              title="Edit student details">
+              <i className="ph ph-pencil-simple"></i>
+            </button>
+          )}
+          {canDelete && (
+            <button type="button" onClick={handleDelete}
+              className="text-red-300 hover:text-red-200 px-1.5 py-0.5 rounded bg-red-500/15 hover:bg-red-500/25 border border-red-500/30"
+              title="Remove student from this submission">
+              <i className="ph ph-trash"></i>
+            </button>
+          )}
+        </div>
       </div>
+
+      {editOpen && canEdit && (
+        <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/60 space-y-2">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Edit student</div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <div className="text-[10px] text-slate-500 mb-0.5">Name</div>
+              <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+            </label>
+            <label className="block">
+              <div className="text-[10px] text-slate-500 mb-0.5">Homeroom</div>
+              <input value={editForm.homeroom} onChange={(e) => setEditForm((f) => ({ ...f, homeroom: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+            </label>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={() => { setEditOpen(false); setEditForm({ name: s.name || '', homeroom: s.homeroom || '' }); }}
+              className="text-[11px] px-2 py-1 rounded bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">Cancel</button>
+            <button onClick={submitEdit} disabled={savingEdit}
+              className="text-[11px] px-3 py-1 rounded bg-brand-500 text-white hover:bg-brand-400 disabled:opacity-50">
+              {savingEdit ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="p-4 flex gap-4">
         {/* Photo zone */}
@@ -1838,11 +1938,56 @@ function EnrollPill({ summary }) {
   </span>;
 }
 
-function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, onUpload }) {
+function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, onUpload, canEdit, onEdit, onDelete, onDeleteFace }) {
   const addInputRef = useRef(null);
   const replaceInputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: c.name || '', phone: c.phone || '', email: c.email || '',
+    idNumber: c.idNumber || '', relation: c.relation || 'parent',
+    authorizedStudentIds: c.authorizedStudentIds || [],
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const submitEdit = async () => {
+    if (!onEdit) return;
+    const patch = {
+      name: editForm.name.trim(),
+      phone: editForm.phone.trim(),
+      email: editForm.email.trim(),
+      idNumber: editForm.idNumber.trim(),
+      relation: editForm.relation,
+      authorizedStudentIds: editForm.authorizedStudentIds,
+    };
+    setSavingEdit(true);
+    try {
+      const ok = await onEdit(patch);
+      if (ok) setEditOpen(false);
+    } finally { setSavingEdit(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!onDelete) return;
+    if (!confirm(`Remove chaperone "${c.name}" from this submission?\n\nUploaded face photos will also be deleted. This cannot be undone before approval.`)) return;
+    await onDelete();
+  };
+
+  const handleDeleteFace = async (path) => {
+    if (!onDeleteFace) return;
+    if (!confirm(`Delete this face photo for ${c.name}?`)) return;
+    await onDeleteFace(path);
+  };
+
+  const toggleAuthStudent = (sid) => {
+    setEditForm((f) => {
+      const has = f.authorizedStudentIds.includes(sid);
+      return { ...f, authorizedStudentIds: has
+        ? f.authorizedStudentIds.filter((x) => x !== sid)
+        : [...f.authorizedStudentIds, sid] };
+    });
+  };
 
   const faces = c.faceUrls || [];
   // Admin-side cap: parents do not upload chaperone faces (Phase 2),
@@ -1927,8 +2072,83 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
               <i className="ph ph-warning mr-0.5"></i>enroll failed
             </span>
           ))}
+          {canEdit && (
+            <>
+              <button type="button" onClick={() => setEditOpen((v) => !v)}
+                className="text-[10px] px-2 py-0.5 rounded border bg-slate-800/60 border-slate-700 text-slate-200 hover:bg-slate-700"
+                title="Edit chaperone details">
+                <i className="ph ph-pencil-simple mr-1"></i>Edit
+              </button>
+              <button type="button" onClick={handleDelete}
+                className="text-[10px] px-2 py-0.5 rounded border bg-red-500/15 border-red-500/30 text-red-300 hover:bg-red-500/25"
+                title="Remove this chaperone from the submission">
+                <i className="ph ph-trash mr-1"></i>Delete
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {editOpen && canEdit && (
+        <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/60 space-y-2">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Edit chaperone</div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <div className="text-[10px] text-slate-500 mb-0.5">Name</div>
+              <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+            </label>
+            <label className="block">
+              <div className="text-[10px] text-slate-500 mb-0.5">Relation</div>
+              <select value={editForm.relation} onChange={(e) => setEditForm((f) => ({ ...f, relation: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white">
+                {Object.entries(REL_LABEL).map(([k, v]) => (<option key={k} value={k}>{v}</option>))}
+              </select>
+            </label>
+            <label className="block">
+              <div className="text-[10px] text-slate-500 mb-0.5">Phone</div>
+              <input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+            </label>
+            <label className="block">
+              <div className="text-[10px] text-slate-500 mb-0.5">Email</div>
+              <input value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+            </label>
+            <label className="block col-span-2">
+              <div className="text-[10px] text-slate-500 mb-0.5">ID Number</div>
+              <input value={editForm.idNumber} onChange={(e) => setEditForm((f) => ({ ...f, idNumber: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+            </label>
+          </div>
+          {enrichedStudents.length > 0 && (
+            <div>
+              <div className="text-[10px] text-slate-500 mb-1">Authorized to pick up</div>
+              <div className="flex flex-wrap gap-1.5">
+                {enrichedStudents.map((s) => {
+                  const on = editForm.authorizedStudentIds.includes(s.id);
+                  return (
+                    <button key={s.id} type="button" onClick={() => toggleAuthStudent(s.id)}
+                      className={`text-[11px] px-2 py-0.5 rounded-full border ${on
+                        ? 'bg-brand-500/20 border-brand-500/40 text-brand-200'
+                        : 'bg-slate-800/40 border-slate-700 text-slate-400'}`}>
+                      <i className={`ph ${on ? 'ph-check-circle' : 'ph-circle'} mr-1`}></i>{s.name || s.id}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={() => setEditOpen(false)}
+              className="text-[11px] px-2 py-1 rounded bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">Cancel</button>
+            <button onClick={submitEdit} disabled={savingEdit || !editForm.name.trim()}
+              className="text-[11px] px-3 py-1 rounded bg-brand-500 text-white hover:bg-brand-400 disabled:opacity-50">
+              {savingEdit ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="p-4 space-y-4">
         {/* Contact row */}
@@ -1995,18 +2215,27 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
 
           <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
             {slots.map((url, j) => url ? (
-              <button
-                key={j}
-                type="button"
-                onClick={() => onPhoto(url, `${c.name} · face ${j + 1}/${filled}`)}
-                className="relative aspect-square rounded-lg overflow-hidden border-2 border-orange-500/40 hover:border-orange-300 transition-colors cursor-zoom-in group/face"
-                title={`Click to view face ${j + 1}`}
-              >
-                <img src={url} alt={`${c.name} ${j + 1}`} className="w-full h-full object-cover" />
-                <span className="absolute top-0.5 left-0.5 text-[9px] font-mono px-1 py-0 rounded bg-black/60 text-white">
-                  {j + 1}
-                </span>
-              </button>
+              <div key={j} className="relative aspect-square">
+                <button
+                  type="button"
+                  onClick={() => onPhoto(url, `${c.name} · face ${j + 1}/${filled}`)}
+                  className="relative w-full h-full rounded-lg overflow-hidden border-2 border-orange-500/40 hover:border-orange-300 transition-colors cursor-zoom-in"
+                  title={`Click to view face ${j + 1}`}
+                >
+                  <img src={url} alt={`${c.name} ${j + 1}`} className="w-full h-full object-cover" />
+                  <span className="absolute top-0.5 left-0.5 text-[9px] font-mono px-1 py-0 rounded bg-black/60 text-white">
+                    {j + 1}
+                  </span>
+                </button>
+                {canEdit && onDeleteFace && (c.facePaths || [])[j] && (
+                  <button type="button"
+                    onClick={() => handleDeleteFace((c.facePaths || [])[j])}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 hover:bg-red-400 text-white text-[10px] flex items-center justify-center border border-slate-900 shadow"
+                    title="Delete this face photo">
+                    <i className="ph ph-x"></i>
+                  </button>
+                )}
+              </div>
             ) : (
               <button
                 key={j}

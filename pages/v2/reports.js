@@ -392,6 +392,13 @@ export default function ReportsPage() {
             <i className="ph ph-hand-waving"></i>
             Pickup System
           </button>
+          <button
+            onClick={() => setModule('forms')}
+            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'forms' ? 'bg-emerald-500/20 text-emerald-200 shadow-sm border border-emerald-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
+          >
+            <i className="ph ph-clipboard-text"></i>
+            Onboarding Forms
+          </button>
         </div>
 
         {/* Header */}
@@ -489,6 +496,12 @@ export default function ReportsPage() {
             setToDate={setToDate}
             onRefresh={fetchPickupReport}
           />
+        )}
+
+        {/* ═══ ONBOARDING FORMS MODULE ═══ */}
+        {module === 'forms' && (
+          <OnboardingFormsView fromDate={fromDate} toDate={toDate}
+            setFromDate={setFromDate} setToDate={setToDate} />
         )}
 
         {/* ═══ ATTENDANCE MODULE — everything below is unchanged ═══ */}
@@ -1932,6 +1945,282 @@ function PickupAnalyticsView({ data, loading, error, fromDate, toDate, setFromDa
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Onboarding Forms — filterable export of pickup_onboarding submissions.
+// ═════════════════════════════════════════════════════════════════════════════
+function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
+  const [status, setStatus] = useState('all');
+  const [grade, setGrade] = useState('');
+  const [homeroom, setHomeroom] = useState('');
+  const [studentId, setStudentId] = useState('');
+  const [search, setSearch] = useState('');
+  const [scope, setScope] = useState('school'); // school | grade | individual
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchForms = async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (status !== 'all') params.set('status', status);
+      if (scope === 'grade' && grade) params.set('grade', grade);
+      if (scope === 'individual') {
+        if (studentId.trim()) params.set('studentId', studentId.trim());
+        if (homeroom.trim()) params.set('homeroom', homeroom.trim());
+      }
+      if (fromDate) params.set('from', fromDate);
+      if (toDate) params.set('to', toDate);
+      const r = await fetch(`/api/pickup/admin/forms-export?${params.toString()}`, { credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message || j.error || 'fetch failed');
+      setData(j);
+    } catch (e) {
+      setError(e.message);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetchForms(); /* eslint-disable-next-line */ }, []);
+
+  const filtered = (data?.records || []).filter((r) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    const hay = [
+      r.guardian?.name, r.guardian?.email, r.guardian?.phone,
+      ...(r.students || []).flatMap((s) => [s.name, s.id, s.homeroom]),
+      ...(r.chaperones || []).flatMap((c) => [c.name, c.phone, c.email, c.idNumber]),
+    ].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+
+  const totals = useMemo(() => {
+    const t = { records: filtered.length, students: 0, chaperones: 0, pending: 0, approved: 0, rejected: 0 };
+    filtered.forEach((r) => {
+      t.students += (r.students || []).length;
+      t.chaperones += (r.chaperones || []).length;
+      if (r.status === 'pending') t.pending += 1;
+      if (r.status === 'approved') t.approved += 1;
+      if (r.status === 'rejected') t.rejected += 1;
+    });
+    return t;
+  }, [filtered]);
+
+  const exportCSV = () => {
+    if (!filtered.length) return;
+    const rows = [[
+      'Form ID', 'Status', 'Submitted', 'Reviewed', 'Reviewer',
+      'Guardian Name', 'Guardian Email', 'Guardian Phone',
+      'Student ID', 'Student Name', 'Homeroom',
+      'Chaperone Name', 'Relation', 'Chaperone Phone', 'Chaperone Email',
+      'Chaperone ID#', 'Allocated Employee No', 'Face Photos',
+    ]];
+    filtered.forEach((r) => {
+      const students = r.students.length ? r.students : [{}];
+      const chaperones = r.chaperones.length ? r.chaperones : [{}];
+      students.forEach((s) => {
+        chaperones.forEach((c) => {
+          rows.push([
+            r.id, r.status, r.submittedAt || '', r.reviewedAt || '', r.reviewedBy || '',
+            r.guardian?.name || '', r.guardian?.email || '', r.guardian?.phone || '',
+            s.id || '', s.name || '', s.homeroom || '',
+            c.name || '', c.relation || '', c.phone || '', c.email || '',
+            c.idNumber || '', c.allocatedId || '', c.faceCount || 0,
+          ]);
+        });
+      });
+    });
+    const scopeLabel = scope === 'school' ? 'whole-school'
+      : scope === 'grade' ? `grade-${grade || 'any'}`
+      : 'individual';
+    downloadCSV(`onboarding-forms_${scopeLabel}_${fromDate}_to_${toDate}.csv`, rows);
+  };
+
+  const handlePrint = () => window.print();
+
+  const FilterPill = ({ value, label, current, onClick }) => (
+    <button onClick={onClick}
+      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+        current === value
+          ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200'
+          : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800'
+      }`}>{label}</button>
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* Filter panel */}
+      <div className="glass-panel rounded-2xl border border-slate-800 p-5 no-print space-y-4">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Scope</div>
+          <div className="flex flex-wrap gap-2">
+            <FilterPill value="school" label="Whole school" current={scope} onClick={() => setScope('school')} />
+            <FilterPill value="grade" label="By grade" current={scope} onClick={() => setScope('grade')} />
+            <FilterPill value="individual" label="Individual / homeroom" current={scope} onClick={() => setScope('individual')} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Status</label>
+            <select value={status} onChange={(e) => setStatus(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+              <option value="all">All</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
+
+          {scope === 'grade' && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">Grade</label>
+              <select value={grade} onChange={(e) => setGrade(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                <option value="">— pick a grade —</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
+                  <option key={g} value={g}>Grade {g}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {scope === 'individual' && (
+            <>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Student ID</label>
+                <input value={studentId} onChange={(e) => setStudentId(e.target.value)}
+                  placeholder="e.g. BIN12345"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">Homeroom</label>
+                <input value={homeroom} onChange={(e) => setHomeroom(e.target.value)}
+                  placeholder="e.g. 4C"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 uppercase" />
+              </div>
+            </>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Submitted from</label>
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">Submitted to</label>
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3 items-center">
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search inside results (name / phone / email)…"
+            className="flex-1 min-w-[220px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600" />
+          <button onClick={fetchForms} disabled={loading}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50">
+            <i className="ph ph-arrows-clockwise mr-1"></i>{loading ? 'Loading…' : 'Apply filters'}
+          </button>
+          <button onClick={exportCSV} disabled={!filtered.length}
+            className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30 rounded-lg text-sm font-medium disabled:opacity-50">
+            <i className="ph ph-file-csv mr-1"></i>Download CSV ({filtered.length})
+          </button>
+          <button onClick={handlePrint} disabled={!filtered.length}
+            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg text-sm font-semibold disabled:opacity-50">
+            <i className="ph ph-printer mr-1"></i>Print
+          </button>
+        </div>
+      </div>
+
+      {/* Summary tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 print-section">
+        {[
+          { label: 'Forms', value: totals.records, color: 'text-white' },
+          { label: 'Students', value: totals.students, color: 'text-brand-300' },
+          { label: 'Chaperones', value: totals.chaperones, color: 'text-orange-300' },
+          { label: 'Pending', value: totals.pending, color: 'text-amber-300' },
+          { label: 'Approved', value: totals.approved, color: 'text-emerald-300' },
+          { label: 'Rejected', value: totals.rejected, color: 'text-red-300' },
+        ].map((t) => (
+          <div key={t.label} className="glass-panel rounded-xl border border-slate-800 px-4 py-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{t.label}</div>
+            <div className={`text-2xl font-bold ${t.color} mt-0.5`}>{t.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Results table */}
+      <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden print-section">
+        <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-white"><i className="ph ph-list-checks mr-1.5"></i>Submissions</h3>
+          <span className="text-xs text-slate-400">{filtered.length} of {data?.total || 0}</span>
+        </div>
+        {error && <div className="p-4 text-sm text-red-300">{error}</div>}
+        {loading && <div className="p-6 text-center text-sm text-slate-400">Loading…</div>}
+        {!loading && !error && filtered.length === 0 && (
+          <div className="p-10 text-center text-slate-500">
+            <i className="ph ph-tray text-4xl mb-2 block"></i>No matching submissions.
+          </div>
+        )}
+        {!loading && filtered.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-900/60 text-[10px] uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th className="text-left px-3 py-2">Submitted</th>
+                  <th className="text-left px-3 py-2">Status</th>
+                  <th className="text-left px-3 py-2">Guardian</th>
+                  <th className="text-left px-3 py-2">Students</th>
+                  <th className="text-left px-3 py-2">Chaperones</th>
+                  <th className="text-left px-3 py-2">Reviewer</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {filtered.map((r) => (
+                  <tr key={r.id} className="hover:bg-slate-800/30">
+                    <td className="px-3 py-2 text-xs text-slate-300 whitespace-nowrap">
+                      {r.submittedAt ? fmtDate(r.submittedAt.slice(0, 10)) : '—'}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded border ${
+                        r.status === 'approved' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        : r.status === 'rejected' ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                        : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                      }`}>{r.status}</span>
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      <div className="text-white font-medium">{r.guardian?.name || '—'}</div>
+                      <div className="text-slate-500">{r.guardian?.email || r.guardian?.phone || ''}</div>
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {r.students.map((s) => (
+                        <div key={s.id} className="text-slate-300">
+                          {s.name} <span className="text-slate-500 font-mono">({s.homeroom || '—'})</span>
+                        </div>
+                      ))}
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {r.chaperones.map((c, i) => (
+                        <div key={i} className="text-slate-300">
+                          {c.name} <span className="text-slate-500">· {c.relation}</span>
+                          {c.allocatedId && <span className="ml-1 font-mono text-emerald-400">#{c.allocatedId.slice(-6)}</span>}
+                        </div>
+                      ))}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">
+                      {r.reviewedBy || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
