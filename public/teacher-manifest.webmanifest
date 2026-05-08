@@ -5,20 +5,27 @@
   "start_url": "/pickup/teacher",
   "scope": "/pickup/teacher",
   "display": "standalone",
-  "background_color": "#070B14",
+  "orientation": "any",
+  "background_color": "#0f172a",
   "theme_color": "#8B1538",
   "icons": [
     {
-      "src": "/pwa/teacher-icon-192.svg",
+      "src": "/pwa/teacher-icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/pwa/teacher-icon-512.svg",
+      "src": "/pwa/teacher-icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa/teacher-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

@@ -1,9 +1,10 @@
-const CACHE_NAME = 'teacher-pwa-v3';
+const CACHE_NAME = 'teacher-pwa-v4';
 const PRECACHE = [
   '/teacher-manifest.webmanifest',
   '/binus-logo.jpg',
-  '/pwa/teacher-icon-192.svg',
-  '/pwa/teacher-icon-512.svg',
+  '/apple-touch-icon.png',
+  '/pwa/teacher-icon-192.png',
+  '/pwa/teacher-icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {

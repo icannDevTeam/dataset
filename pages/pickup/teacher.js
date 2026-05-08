@@ -515,6 +515,16 @@ export default function TeacherTabletPage() {
     const onInstalled = () => { setShowInstall(false); setInstallPromptEvent(null); };
     window.addEventListener('beforeinstallprompt', onBip);
     window.addEventListener('appinstalled', onInstalled);
+
+    // iOS Safari never fires beforeinstallprompt. Detect iOS + non-standalone
+    // and show our own "Install" affordance that opens an instruction sheet.
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+    if (isIOS && !isStandalone) setShowInstall(true);
+
     return () => {
       window.removeEventListener('beforeinstallprompt', onBip);
       window.removeEventListener('appinstalled', onInstalled);
@@ -615,11 +625,18 @@ export default function TeacherTabletPage() {
     }
   };
 
+  const [showIosHint, setShowIosHint] = useState(false);
+
   const installPwa = async () => {
-    if (!installPromptEvent) return;
-    installPromptEvent.prompt();
-    await installPromptEvent.userChoice.catch(() => {});
-    setShowInstall(false);
+    // Native (Chrome / Edge / Android) path: real beforeinstallprompt event.
+    if (installPromptEvent) {
+      installPromptEvent.prompt();
+      await installPromptEvent.userChoice.catch(() => {});
+      setShowInstall(false);
+      return;
+    }
+    // iOS: no programmatic install \u2014 show a how-to sheet.
+    setShowIosHint(true);
   };
 
   const unpair = () => {
@@ -638,6 +655,11 @@ export default function TeacherTabletPage() {
           <link rel="manifest" href="/teacher-manifest.webmanifest" />
           <meta name="theme-color" content={BINUS_MAROON} />
           <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+          <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <meta name="mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+          <meta name="apple-mobile-web-app-title" content="Teacher Pickup" />
         </Head>
         <PairingScreen onPaired={(payload) => {
           setToken(payload.deviceToken);
@@ -659,6 +681,11 @@ export default function TeacherTabletPage() {
         <link rel="manifest" href="/teacher-manifest.webmanifest" />
         <meta name="theme-color" content={BINUS_MAROON} />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Teacher Pickup" />
       </Head>
       <div style={{
         minHeight: '100vh', background: '#0f172a',
@@ -752,6 +779,59 @@ export default function TeacherTabletPage() {
           )}
         </div>
       </div>
+      {showIosHint && (
+        <div
+          onClick={() => setShowIosHint(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(2,6,23,0.75)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 9999, padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff', color: '#0f172a', borderRadius: 18,
+              maxWidth: 460, width: '100%', padding: '26px 24px',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
+              fontFamily: 'system-ui, -apple-system, sans-serif',
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 800, color: BINUS_MAROON, letterSpacing: 2 }}>
+              INSTALL ON THIS iPAD
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>
+              Add Teacher Pickup to Home Screen
+            </div>
+            <ol style={{ paddingLeft: 22, marginTop: 16, fontSize: 15, lineHeight: 1.55, color: '#334155' }}>
+              <li>Tap the <strong>Share</strong> icon in Safari&rsquo;s toolbar
+                <span style={{ marginLeft: 6, fontSize: 18 }} aria-hidden>⬆️</span>
+              </li>
+              <li>Scroll and tap <strong>&ldquo;Add to Home Screen&rdquo;</strong></li>
+              <li>Tap <strong>Add</strong> in the top-right corner</li>
+              <li>Open <strong>Teacher Pickup</strong> from the Home Screen &mdash; it will run full-screen</li>
+            </ol>
+            <div style={{
+              marginTop: 16, padding: 12, background: '#fff7ea',
+              border: '1px solid #FFD86A', borderRadius: 10,
+              fontSize: 13, color: '#7c4a03',
+            }}>
+              You must use <strong>Safari</strong> (not Chrome) to install on iPad.
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowIosHint(false)}
+              style={{
+                marginTop: 20, width: '100%', padding: '14px',
+                background: BINUS_MAROON, color: '#fff', border: 'none',
+                borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: 'pointer',
+              }}
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
