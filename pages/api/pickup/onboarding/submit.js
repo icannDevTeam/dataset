@@ -252,7 +252,7 @@ export default async function handler(req, res) {
         message:
           `A pickup registration already exists for ${names}. ` +
           `For any changes (chaperone updates, photo replacement, etc.) please ` +
-          `visit ACOP on the 3rd floor.`,
+          `visit ACOP on the 3rd floor or email inquiries.simprug@binus.edu.`,
         conflicts: txOut.conflicts,
       });
     }

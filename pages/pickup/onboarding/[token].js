@@ -938,7 +938,12 @@ export default function PickupOnboardingPage() {
                 <p style={{ margin: '0 0 10px' }}>
                   For any changes — adding or removing a chaperone, replacing a photo,
                   or correcting details — please visit the{' '}
-                  <strong style={{ color: BRAND.navy }}>ACOP office on the 3rd floor</strong>.
+                  <strong style={{ color: BRAND.navy }}>ACOP office on the 3rd floor</strong>{' '}
+                  or email{' '}
+                  <a href="mailto:inquiries.simprug@binus.edu"
+                    style={{ color: BRAND.navy, fontWeight: 700, textDecoration: 'underline' }}>
+                    inquiries.simprug@binus.edu
+                  </a>.
                 </p>
                 <p style={{ margin: 0 }}>
                   Make sure each authorized person has 1–3 clear face photos before submitting.
@@ -1010,7 +1015,12 @@ export default function PickupOnboardingPage() {
                 )}
                 <p style={{ margin: 0, fontSize: 13.5 }}>
                   For any changes please visit the{' '}
-                  <strong style={{ color: BRAND.navy }}>ACOP office on the 3rd floor</strong>.
+                  <strong style={{ color: BRAND.navy }}>ACOP office on the 3rd floor</strong>{' '}
+                  or email{' '}
+                  <a href="mailto:inquiries.simprug@binus.edu"
+                    style={{ color: BRAND.navy, fontWeight: 700, textDecoration: 'underline' }}>
+                    inquiries.simprug@binus.edu
+                  </a>.
                 </p>
               </div>
               <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
@@ -1111,8 +1121,11 @@ export default function PickupOnboardingPage() {
               </p>
               <p style={{ color: '#166534', fontSize: 13, lineHeight: 1.6, marginBottom: 0 }}>
                 <strong>Need to make changes?</strong> Please visit the{' '}
-                <strong>ACOP office on the 3rd floor</strong>. This form can only be
-                submitted once per student.
+                <strong>ACOP office on the 3rd floor</strong> or email{' '}
+                <a href="mailto:inquiries.simprug@binus.edu"
+                  style={{ color: '#166534', fontWeight: 700, textDecoration: 'underline' }}>
+                  inquiries.simprug@binus.edu
+                </a>. This form can only be submitted once per student.
               </p>
 
               {inviteInfo?.windowCloseAt && (
