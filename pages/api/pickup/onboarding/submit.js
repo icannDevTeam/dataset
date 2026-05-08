@@ -72,7 +72,8 @@ function sanitizeChaperone(c, validStudentIds) {
   const facePaths = Array.isArray(c.facePaths)
     ? c.facePaths.filter((p) => typeof p === 'string' && p.startsWith('tenants/')).slice(0, 3)
     : [];
-  if (facePaths.length === 0) return null;   // ≥1 photo required (Phase 3)
+  // Face photos are optional at submit time — admin can add them later via
+  // the pending-record edit flow before approval / device enrollment.
   return {
     tempId: String(c.tempId || '').slice(0, 64) || null,
     name,

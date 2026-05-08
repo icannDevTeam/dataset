@@ -844,9 +844,6 @@ export default function PickupOnboardingPage() {
       if (!c.name.trim()) return setError('Every chaperone needs a name.');
       if (!c.phone.trim()) return setError(`Phone number missing for ${c.name || 'a chaperone'}.`);
       if (c.authorizedStudentIds.length === 0) return setError(`${c.name} must be authorized for at least one student.`);
-      if (!Array.isArray(c.facePaths) || c.facePaths.length === 0) {
-        return setError(`${c.name || 'A chaperone'} needs at least one face photo.`);
-      }
     }
     setSubmitting(true);
     try {
@@ -877,7 +874,7 @@ export default function PickupOnboardingPage() {
   const stepDone = {
     1: !!(guardianName.trim() && guardianEmail.trim() && guardianPhone.trim()),
     2: students.length > 0,
-    3: chaperones.length > 0 && chaperones.every((c) => c.name.trim() && c.phone.trim() && c.authorizedStudentIds.length > 0 && (c.facePaths || []).length > 0),
+    3: chaperones.length > 0 && chaperones.every((c) => c.name.trim() && c.phone.trim() && c.authorizedStudentIds.length > 0),
     4: !!done,
   };
 
@@ -946,7 +943,7 @@ export default function PickupOnboardingPage() {
                   </a>.
                 </p>
                 <p style={{ margin: 0 }}>
-                  Make sure each authorized person has 1–3 clear face photos before submitting.
+                  Face photos are optional — if you skip them, ACOP staff can capture them when you visit the office.
                 </p>
               </div>
               <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
@@ -1441,8 +1438,8 @@ export default function PickupOnboardingPage() {
 
                       <div style={{ marginTop: 18 }}>
                         <label style={label()}>
-                          Face photos * <span style={{ fontWeight: 400, color: BRAND.textSubtle }}>
-                            (1–3 photos required)
+                          Face photos <span style={{ fontWeight: 400, color: BRAND.textSubtle }}>
+                            (optional now — ACOP can capture them at the office)
                           </span>
                         </label>
                         <ChaperoneFaceCapture
