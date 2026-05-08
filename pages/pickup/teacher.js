@@ -348,6 +348,85 @@ function HeldCard({ ev, onAction, busy, exiting }) {
   );
 }
 
+// Compact one-line row for held events that don't fit in the 4-card grid.
+// Shows photo, chaperone name + relation, student summary, time, Release.
+function HeldListRow({ ev, onAction, busy, exiting }) {
+  const ringColor = ev.cardState === 'red' ? '#ef4444'
+    : ev.cardState === 'yellow' ? '#f59e0b'
+    : '#22c55e';
+  const studentNames = (ev.students || []).map((s) => s.name).join(', ');
+  const minutesAgo = ev.recordedAt
+    ? Math.max(0, Math.round((Date.now() - new Date(ev.recordedAt).getTime()) / 60000))
+    : null;
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '40px 1fr auto auto',
+      alignItems: 'center',
+      gap: 12,
+      background: '#fff',
+      borderRadius: 12,
+      padding: '8px 12px',
+      borderLeft: `4px solid ${ringColor}`,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
+      opacity: exiting ? 0 : 1,
+      transform: exiting === 'release' ? 'translateX(60px)' : 'none',
+      transition: 'opacity 320ms ease, transform 320ms ease',
+    }}>
+      {ev.chaperonePhotoUrl ? (
+        <img src={ev.chaperonePhotoUrl} alt="" style={{
+          width: 40, height: 40, borderRadius: '50%', objectFit: 'cover',
+          border: `2px solid ${ringColor}`,
+        }} />
+      ) : (
+        <div style={{
+          width: 40, height: 40, borderRadius: '50%',
+          background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 14, fontWeight: 800, color: '#64748b',
+          border: `2px solid ${ringColor}`,
+        }}>{(ev.chaperone?.name || '?').slice(0, 1)}</div>
+      )}
+      <div style={{ minWidth: 0 }}>
+        <div style={{
+          fontSize: 14, fontWeight: 800, color: '#0f172a',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          {ev.chaperone?.name || 'Unknown'}
+          {ev.chaperone?.relation && (
+            <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 6 }}>
+              · {ev.chaperone.relation}
+            </span>
+          )}
+        </div>
+        <div style={{
+          fontSize: 12, color: '#475569',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          → {studentNames || 'no students'}
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap' }}>
+        {minutesAgo != null ? `${minutesAgo}m` : ''}
+      </div>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onAction(ev.id, 'release')}
+        style={{
+          background: '#16a34a', color: '#fff', border: 'none',
+          borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 800,
+          cursor: 'pointer', touchAction: 'manipulation',
+          transition: 'transform 120ms ease',
+        }}
+        onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
+        onTouchEnd={(e) => { e.currentTarget.style.transform = ''; }}
+      >
+        Release
+      </button>
+    </div>
+  );
+}
 function HeldRow({ ev, onAction, busy, exiting }) {
   // Back-compat shim — delegates to HeldCard.
   return <HeldCard ev={ev} onAction={onAction} busy={busy} exiting={exiting} />;
@@ -845,16 +924,40 @@ export default function TeacherTabletPage() {
                 }} />
               </div>
 
-              {/* Held cards: smaller, grid (3-up at wide widths, 2-up tablet, 1-up phone) */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-                gap: 14,
-              }}>
-                {feed.held.map((ev) => (
-                  <HeldCard key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} />
-                ))}
-              </div>
+              {/* First 4 held: full mini-cards in a 4-up grid.
+                  5+ overflow into a compact one-line list below. */}
+              {(() => {
+                const heldCards = feed.held.slice(0, 4);
+                const heldList = feed.held.slice(4);
+                return (
+                  <>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                      gap: 14,
+                    }}>
+                      {heldCards.map((ev) => (
+                        <HeldCard key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} />
+                      ))}
+                    </div>
+                    {heldList.length > 0 && (
+                      <div style={{ marginTop: 18 }}>
+                        <div style={{
+                          fontSize: 10, fontWeight: 800, letterSpacing: 2,
+                          color: '#94a3b8', marginBottom: 8, paddingLeft: 4,
+                        }}>
+                          + {heldList.length} MORE WAITING
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {heldList.map((ev) => (
+                            <HeldListRow key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>
