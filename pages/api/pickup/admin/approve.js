@@ -87,6 +87,37 @@ async function handler(req, res) {
       return res.status(400).json({ error: 'record has no chaperones' });
     }
 
+    // Gate: every student on the form must have an admin-uploaded canonical
+    // photo before approval. This mirrors the UI button-disable and stops
+    // any out-of-band caller (script, retry, race) from approving early.
+    const recStudents = Array.isArray(rec.students) ? rec.students : [];
+    if (recStudents.length === 0) {
+      return res.status(400).json({ error: 'record has no students' });
+    }
+    const missingStudentPhotos = [];
+    await Promise.all(recStudents.map(async (s) => {
+      if (!s || !s.id) { missingStudentPhotos.push(s?.name || s?.id || '(unknown)'); return; }
+      let hasPhoto = false;
+      try {
+        const tenantSnap = await db.doc(`${tenancy.studentsPath(tid)}/${s.id}`).get();
+        if (tenantSnap.exists && (tenantSnap.data() || {}).photoPath) hasPhoto = true;
+      } catch {}
+      if (!hasPhoto) {
+        try {
+          const legacy = await db.doc(`students/${s.id}`).get();
+          if (legacy.exists && (legacy.data() || {}).photoPath) hasPhoto = true;
+        } catch {}
+      }
+      if (!hasPhoto) missingStudentPhotos.push(s.name || s.id);
+    }));
+    if (missingStudentPhotos.length > 0) {
+      return res.status(409).json({
+        error: 'student_photos_required',
+        message: `Upload a photo for every student before approving. Missing: ${missingStudentPhotos.join(', ')}.`,
+        missingStudentPhotos,
+      });
+    }
+
     const now = new Date().toISOString();
     const created = [];
     const studentDenorm = new Map(); // sid -> array of {chaperoneId, name, relation}

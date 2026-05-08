@@ -67,8 +67,8 @@ async function handler(req, res) {
     if (!chaperoneId || typeof chaperoneId !== 'string') {
       return res.status(400).json({ error: 'chaperoneId required' });
     }
-    if (!Array.isArray(photos) || photos.length === 0 || photos.length > 8) {
-      return res.status(400).json({ error: 'photos must be a 1..8 element array' });
+    if (!Array.isArray(photos) || photos.length === 0 || photos.length > 2) {
+      return res.status(400).json({ error: 'photos must be a 1..2 element array' });
     }
 
     const ref = db.doc(`${tenancy.chaperonesPath(tid)}/${chaperoneId}`);
@@ -85,6 +85,15 @@ async function handler(req, res) {
     const startIdx = replace ? 0 : existing.length;
 
     const paths = replace ? [] : [...existing];
+    // Hard cap: at most 2 chaperone face photos retained on the admin side.
+    // Without this the append branch (`replace=false`) could grow unbounded.
+    if (paths.length + photos.length > 2) {
+      return res.status(400).json({
+        error: `chaperone face cap is 2 (existing=${existing.length}, ` +
+               `requested=${photos.length}, would-be=${paths.length + photos.length}). ` +
+               `Use replace=true to start from scratch.`,
+      });
+    }
     for (let i = 0; i < photos.length; i++) {
       const decoded = decodeBase64Image(photos[i]?.imageBase64);
       if (!decoded) {

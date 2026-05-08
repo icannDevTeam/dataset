@@ -486,8 +486,23 @@ export default function PickupAdminPage() {
   }
 
   // ─── Bulk actions ───────────────────────────────────────────────────────
+  // Bulk approve mirrors per-record gating: every selected record must have
+  // a photo for every student before the button activates.
+  const recordHasAllStudentPhotos = useCallback((rec) => {
+    const students = rec?.students || [];
+    if (students.length === 0) return false;
+    return students.every((s) =>
+      !!(s.photoUrl || thumbnails[s.id] || thumbnails[`name:${s.name}`]));
+  }, [thumbnails]);
+  const blockedSelectedIds = selectedIds.filter((id) => {
+    const rec = records.find((r) => r.id === id);
+    return rec && !recordHasAllStudentPhotos(rec);
+  });
+  const bulkApproveBlocked = blockedSelectedIds.length > 0;
+
   async function bulkApprove() {
     if (selectedIds.length === 0) return;
+    if (bulkApproveBlocked) return;
     if (!confirm(`Approve ${selectedIds.length} pending submission(s)?\n\n` +
       `Each will allocate chaperone IDs and push to all configured Hikvision devices.`)) return;
     setBulkBusy(true);
@@ -800,7 +815,10 @@ export default function PickupAdminPage() {
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 disabled:opacity-50">
                     {bulkBusy ? 'Working…' : <><i className="ph ph-x mr-1"></i>Reject {selectedIds.length}</>}
                   </button>
-                  <button onClick={bulkApprove} disabled={bulkBusy}
+                  <button onClick={bulkApprove} disabled={bulkBusy || bulkApproveBlocked}
+                    title={bulkApproveBlocked
+                      ? `${blockedSelectedIds.length} selected submission(s) are missing student photos.`
+                      : 'Approve and allocate chaperone IDs for all selected submissions'}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">
                     {bulkBusy ? 'Approving…' : <><i className="ph ph-check mr-1"></i>Approve {selectedIds.length}</>}
                   </button>
@@ -1314,6 +1332,15 @@ function RecordCard(props) {
     photoUrl: s.photoUrl || thumbnails[s.id] || thumbnails[`name:${s.name}`] || null,
   }));
 
+  // Approve is gated on every student having an admin-uploaded photo. The
+  // chaperone face-enrolment depends on the canonical student image; without
+  // it the approval flow would create chaperones that can never be matched
+  // back to a verifiable child at the gate.
+  const allStudentsHavePhotos =
+    enrichedStudents.length > 0 && enrichedStudents.every((s) => !!s.photoUrl);
+  const missingPhotoCount = enrichedStudents.filter((s) => !s.photoUrl).length;
+  const approveBlocked = rec.status === 'pending' && !allStudentsHavePhotos;
+
   // Per-record device-enrollment summary
   const enrollSummary = useMemo(() => {
     if (rec.status !== 'approved') return null;
@@ -1377,7 +1404,8 @@ function RecordCard(props) {
             <i className="ph ph-printer mr-1"></i>Form
           </button>
           {rec.status === 'pending' && (
-            <button onClick={onApprove} disabled={!!busy}
+            <button onClick={onApprove} disabled={!!busy || approveBlocked}
+              title={approveBlocked ? 'Upload a photo for every student before approving' : 'Approve and allocate chaperone IDs'}
               className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50">
               {busy === 'approve' ? '…' : <><i className="ph ph-check mr-1"></i>Approve</>}
             </button>
@@ -1480,12 +1508,19 @@ function RecordCard(props) {
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800 flex-wrap">
+                {approveBlocked && (
+                  <div className="text-xs text-amber-300 mr-auto">
+                    <i className="ph ph-warning mr-1"></i>
+                    Upload {missingPhotoCount} more student photo{missingPhotoCount === 1 ? '' : 's'} to enable approval.
+                  </div>
+                )}
                 <button onClick={onStartReject} disabled={!!busy}
                   className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 disabled:opacity-50">
                   <i className="ph ph-x mr-1"></i>Reject
                 </button>
-                <button onClick={onApprove} disabled={!!busy}
+                <button onClick={onApprove} disabled={!!busy || approveBlocked}
+                  title={approveBlocked ? 'Upload a photo for every student before approving' : 'Approve & enrol'}
                   className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">
                   {busy === 'approve' ? 'Approving…' : <><i className="ph ph-check mr-1"></i>Approve & enrol</>}
                 </button>
@@ -1724,7 +1759,9 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
   const [dragOver, setDragOver] = useState(false);
 
   const faces = c.faceUrls || [];
-  const MAX_FACES = 8;
+  // Admin-side cap: parents do not upload chaperone faces (Phase 2),
+  // and the school only needs a couple of admin-supplied reference shots.
+  const MAX_FACES = 2;
   const slots = Array.from({ length: MAX_FACES }, (_, i) => faces[i] || null);
   const filled = faces.length;
   const canUpload = !!onUpload && !!allocated;
