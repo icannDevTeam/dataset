@@ -55,6 +55,9 @@ async function handler(req, res) {
         windowOpenAt: body.windowOpenAt,
         windowCloseAt: body.windowCloseAt,
         createdBy,
+        // Make the invite URL match the host the admin is actually using,
+        // so links never point to a stale env-var or rotating preview URL.
+        preferredBaseUrl: invites.baseUrlFromRequest(req),
       });
       // Return a QR code with the freshly minted link so admin can
       // copy / scan / preview without a second round-trip.
