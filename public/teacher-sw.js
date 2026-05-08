@@ -1,6 +1,5 @@
-const CACHE_NAME = 'teacher-pwa-v1';
+const CACHE_NAME = 'teacher-pwa-v3';
 const PRECACHE = [
-  '/pickup/teacher',
   '/teacher-manifest.webmanifest',
   '/binus-logo.jpg',
   '/pwa/teacher-icon-192.svg',
@@ -27,6 +26,12 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
+  // NEVER cache live API calls — stale feed data caused iPads to act on
+  // events that no longer exist ("event not found" on Release/Hold).
+  if (url.pathname.startsWith('/api/')) return;
+
+  // Navigation: always go to network so new deploys land. Fall back to
+  // a cached shell only when offline.
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => caches.match('/pickup/teacher'))
@@ -34,16 +39,32 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Next.js hashed assets are immutable — safe to cache forever.
+  // The HTML always references the latest hashes, so we never serve a
+  // mismatched bundle. Use stale-while-revalidate for everything else.
+  if (url.pathname.startsWith('/_next/static/')) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => cached || fetch(event.request).then((res) => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
+        }
+        return res;
+      }))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
+      const network = fetch(event.request).then((response) => {
         if (response.ok && url.origin === self.location.origin) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      });
+      }).catch(() => cached);
+      return cached || network;
     })
   );
 });

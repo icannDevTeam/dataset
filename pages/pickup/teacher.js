@@ -550,8 +550,9 @@ export default function TeacherTabletPage() {
   const pollFeed = useCallback(async () => {
     if (!token) return;
     try {
-      const r = await fetch(`/api/pickup/tablet/feed?max=2`, {
+      const r = await fetch(`/api/pickup/tablet/feed?max=2&t=${Date.now()}`, {
         headers: { 'x-tablet-device-token': token },
+        cache: 'no-store',
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
@@ -588,8 +589,16 @@ export default function TeacherTabletPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-tablet-device-token': token },
         body: JSON.stringify({ eventId: ev.eventId || ev.id, action }),
+        cache: 'no-store',
       });
       const j = await r.json();
+      // 404 = the event no longer exists (already resolved on another iPad,
+      // or stale state from a cached feed). Don't alert — just refresh.
+      if (r.status === 404) {
+        await animDone;
+        await pollFeed();
+        return;
+      }
       if (!r.ok) throw new Error(j.error || 'failed');
       await animDone; // let the card finish its exit animation
       await pollFeed(); // server now reflects new status; rerender drops/relocates the card
