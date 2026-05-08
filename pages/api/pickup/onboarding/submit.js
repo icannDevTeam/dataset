@@ -39,6 +39,7 @@ import crypto from 'crypto';
 const tenancy = require('../../../../lib/tenancy');
 const { verifyPickupOnboardingToken } = require('../../../../lib/pickup-token');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
+const inviteLinks = require('../../../../lib/onboarding-invites');
 
 const MAX_CHAPERONES = 3;
 const MAX_STUDENTS = 10;
