@@ -9,6 +9,7 @@
  *  { recordId, target:'chaperone', tempId, action:'update', patch:{name,phone,email,idNumber,relation,authorizedStudentIds} }
  *  { recordId, target:'chaperone', tempId, action:'delete' }
  *  { recordId, target:'chaperone', tempId, action:'delete-face', facePath }
+ *  { recordId, target:'chaperone', tempId, action:'add-face', imageBase64 }
  *  { recordId, target:'student',   id,     action:'update', patch:{name,homeroom} }
  *  { recordId, target:'student',   id,     action:'delete' }
  *
@@ -25,6 +26,21 @@ const ALLOWED_CHAP_FIELDS = new Set([
   'name', 'phone', 'email', 'idNumber', 'relation', 'authorizedStudentIds',
 ]);
 const ALLOWED_STUDENT_FIELDS = new Set(['name', 'homeroom']);
+const MAX_FACES_PER_CHAP = 2;
+const MAX_FACE_BYTES = 800 * 1024;
+const FACE_MIME = { jpeg: 'jpg', jpg: 'jpg', png: 'png', webp: 'webp' };
+
+function parseFaceImage(b64) {
+  if (typeof b64 !== 'string' || !b64.length) return null;
+  const m = b64.match(/^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/i);
+  if (!m) return null;
+  const ext = FACE_MIME[m[1].toLowerCase()];
+  if (!ext) return null;
+  let buf;
+  try { buf = Buffer.from(m[2], 'base64'); } catch { return null; }
+  if (!buf.length || buf.length > MAX_FACE_BYTES) return null;
+  return { buf, ext, contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}` };
+}
 
 function clean(obj, allowed) {
   const out = {};
@@ -46,7 +62,7 @@ async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   const {
-    recordId, target, tempId, id, action, patch, facePath, tenant,
+    recordId, target, tempId, id, action, patch, facePath, imageBase64, tenant,
   } = req.body || {};
   const tid = tenant ? String(tenant) : tenancy.getTenantId();
 
@@ -54,7 +70,7 @@ async function handler(req, res) {
   if (!['chaperone', 'student'].includes(target)) {
     return res.status(400).json({ error: 'target must be chaperone|student' });
   }
-  if (!['update', 'delete', 'delete-face'].includes(action)) {
+  if (!['update', 'delete', 'delete-face', 'add-face'].includes(action)) {
     return res.status(400).json({ error: 'invalid action' });
   }
 
@@ -124,6 +140,56 @@ async function handler(req, res) {
         afterSnap = { facePaths: list[idx].facePaths };
         summary = `Removed face photo from chaperone ${original.name || tempId}`;
         auditKind = 'onboarding.chaperone_face_delete';
+      } else if (action === 'add-face') {
+        const img = parseFaceImage(imageBase64);
+        if (!img) {
+          return res.status(400).json({
+            error: 'invalid_image',
+            message: 'Image must be JPEG / PNG / WebP and ≤ 800 KB.',
+          });
+        }
+        const existing = original.facePaths || [];
+        if (existing.length >= MAX_FACES_PER_CHAP) {
+          return res.status(409).json({
+            error: 'max_faces',
+            message: `Maximum ${MAX_FACES_PER_CHAP} face photos per chaperone. Delete one first.`,
+          });
+        }
+        // Find next free photo-{i} slot under the same pending folder convention
+        // used by the parent flow (chaperone_faces_pending/{tempId}/photo-{i}).
+        const usedIdx = new Set();
+        existing.forEach((p) => {
+          const m = String(p).match(/\/photo-(\d+)\.[a-z]+$/i);
+          if (m) usedIdx.add(Number(m[1]));
+        });
+        let nextIdx = 0;
+        while (usedIdx.has(nextIdx)) nextIdx += 1;
+        const newPath = `tenants/${tid}/chaperone_faces_pending/${tempId}/photo-${nextIdx}.${img.ext}`;
+        try {
+          const bucket = getFirebaseStorage().bucket();
+          await bucket.file(newPath).save(img.buf, {
+            contentType: img.contentType,
+            resumable: false,
+            metadata: {
+              cacheControl: 'private, max-age=0, no-store',
+              metadata: {
+                tenantId: tid,
+                tempId: String(tempId),
+                photoIndex: String(nextIdx),
+                uploadedAt: new Date().toISOString(),
+                uploadedBy: req.headers['x-admin-user'] || 'admin',
+                source: 'admin-onboarding-edit',
+              },
+            },
+          });
+        } catch (e) {
+          return res.status(500).json({ error: 'storage_failed', message: e.message });
+        }
+        beforeSnap = { facePaths: [...existing] };
+        list[idx] = { ...original, facePaths: [...existing, newPath] };
+        afterSnap = { facePaths: list[idx].facePaths };
+        summary = `Added face photo to chaperone ${original.name || tempId}`;
+        auditKind = 'onboarding.chaperone_face_add';
       }
 
       await ref.update({
@@ -200,3 +266,5 @@ async function handler(req, res) {
 }
 
 export default withAuth(handler);
+
+export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };

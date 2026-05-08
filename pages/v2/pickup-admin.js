@@ -404,6 +404,46 @@ export default function PickupAdminPage() {
     }
   }, [reload]);
 
+  // Admin uploads a NEW face photo into a still-pending chaperone (no allocated
+  // chaperoneId yet, so the regular chaperone-photos endpoint can't be used).
+  // Pre-approval flow only — uses onboarding-edit's `add-face` action.
+  const uploadPendingChaperoneFace = useCallback(async ({ recordId, tempId, file }) => {
+    if (!file) return false;
+    if (!/^image\/(jpe?g|png|webp)$/i.test(file.type)) {
+      pushToast('error', 'Photo must be JPEG, PNG or WebP.');
+      return false;
+    }
+    if (file.size > 800 * 1024) {
+      pushToast('error', 'Photo must be ≤ 800 KB.');
+      return false;
+    }
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsDataURL(file);
+      });
+      const r = await fetch('/api/pickup/admin/onboarding-edit', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          recordId, target: 'chaperone', tempId,
+          action: 'add-face', imageBase64: dataUrl,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || j.error || 'upload failed');
+      pushToast('success', 'Face photo added to pending submission.');
+      reload();
+      return true;
+    } catch (e) {
+      pushToast('error', `Photo upload failed: ${e.message}`);
+      return false;
+    }
+  }, [reload]);
+
   // ─── Filtered + sorted view ─────────────────────────────────────────────
   const visibleRecords = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -877,6 +917,7 @@ export default function PickupAdminPage() {
                   onPrint={() => setPrintRec(rec)}
                   onUploadStudentPhoto={uploadStudentPhoto}
                   onUploadChaperonePhoto={uploadChaperonePhoto}
+                  onUploadPendingChaperoneFace={uploadPendingChaperoneFace}
                   onOnboardingEdit={submitOnboardingEdit}
                   busy={working[rec.id]}
                   rejecting={rejectingId === rec.id}
@@ -1426,6 +1467,7 @@ function RecordCard(props) {
     rec, thumbnails, selected, onToggleSelect, expanded, onToggle,
     onApprove, onStartReject, onCancelReject, onSubmitReject, onReenroll,
     onPhoto, onPrint, onUploadStudentPhoto, onUploadChaperonePhoto,
+    onUploadPendingChaperoneFace,
     onOnboardingEdit,
     busy, rejecting, rejectReason, setRejectReason, showSelect,
   } = props;
@@ -1564,6 +1606,9 @@ function RecordCard(props) {
                     enrichedStudents={enrichedStudents} onPhoto={onPhoto}
                     onUpload={onUploadChaperonePhoto && allocated
                       ? (file, opts) => onUploadChaperonePhoto(allocated.chaperoneId, file, opts)
+                      : null}
+                    onUploadPendingFace={editable && onUploadPendingChaperoneFace
+                      ? (file) => onUploadPendingChaperoneFace({ recordId: rec.id, tempId: c.tempId, file })
                       : null}
                     canEdit={editable}
                     onEdit={editable ? (patch) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'update', patch }) : null}
@@ -1816,12 +1861,14 @@ function EnrollPill({ summary }) {
   </span>;
 }
 
-function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, onUpload, canEdit, onEdit, onDelete, onDeleteFace }) {
+function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, onUpload, onUploadPendingFace, canEdit, onEdit, onDelete, onDeleteFace }) {
   const addInputRef = useRef(null);
   const replaceInputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  // Upload-photo modal: { mode:'add'|'replace', replacePath?:string }
+  const [photoModal, setPhotoModal] = useState(null);
   const [editForm, setEditForm] = useState({
     name: c.name || '', phone: c.phone || '', email: c.email || '',
     idNumber: c.idNumber || '', relation: c.relation || 'parent',
@@ -1873,18 +1920,39 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
   const MAX_FACES = 2;
   const slots = Array.from({ length: MAX_FACES }, (_, i) => faces[i] || null);
   const filled = faces.length;
-  const canUpload = !!onUpload && !!allocated;
+  // Post-approval upload uses the per-chaperone enrol endpoint; pre-approval
+  // uses the onboarding-edit add-face action. Either path enables admin uploads.
+  const canUpload = (!!onUpload && !!allocated) || !!onUploadPendingFace;
+  const usePending = !allocated && !!onUploadPendingFace;
 
   const handleAdd = async (file) => {
-    if (!file || !onUpload) return;
+    if (!file) return;
     setBusy(true);
-    try { await onUpload(file, { replace: false }); } finally { setBusy(false); }
+    try {
+      if (usePending) await onUploadPendingFace(file);
+      else if (onUpload) await onUpload(file, { replace: false });
+    } finally { setBusy(false); }
   };
   const handleReplace = async (file) => {
     if (!file || !onUpload) return;
     if (!confirm(`Replace ALL ${filled} existing photo(s) for ${c.name}?`)) return;
     setBusy(true);
     try { await onUpload(file, { replace: true }); } finally { setBusy(false); }
+  };
+  // Modal-driven flow: replace a single photo (delete then upload new).
+  const handleModalSubmit = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      if (photoModal?.mode === 'replace' && photoModal.replacePath && onDeleteFace) {
+        const ok = await onDeleteFace(photoModal.replacePath);
+        if (ok === false) return;
+      }
+      await handleAdd(file);
+    } finally {
+      setBusy(false);
+      setPhotoModal(null);
+    }
   };
   const onDrop = async (e) => {
     e.preventDefault();
@@ -2068,7 +2136,7 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
               <div className="flex gap-1.5">
                 <button
                   type="button"
-                  onClick={() => addInputRef.current?.click()}
+                  onClick={() => setPhotoModal({ mode: 'add' })}
                   disabled={busy || filled >= MAX_FACES}
                   title={filled >= MAX_FACES ? `Max ${MAX_FACES} photos` : 'Add another photo'}
                   className="text-[11px] inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-orange-500/15 text-orange-200 border border-orange-500/30 hover:bg-orange-500/25 disabled:opacity-40"
@@ -2076,7 +2144,7 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
                   {busy ? <i className="ph ph-spinner-gap animate-spin"></i> : <i className="ph ph-plus"></i>}
                   Add
                 </button>
-                {filled > 0 && (
+                {filled > 0 && onUpload && allocated && (
                   <button
                     type="button"
                     onClick={() => replaceInputRef.current?.click()}
@@ -2108,11 +2176,9 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
                 {canEdit && onDeleteFace && (c.facePaths || [])[j] && (
                   <div className="absolute inset-x-0 bottom-0 p-1 flex justify-center gap-1 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover/face:opacity-100 transition-opacity pointer-events-none">
                     <button type="button"
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
-                        if (!confirm(`Replace face photo ${j + 1} for ${c.name}?\n\nThe current photo will be deleted, then pick a new one to upload.`)) return;
-                        const ok = await onDeleteFace((c.facePaths || [])[j]);
-                        if (ok !== false) addInputRef.current?.click();
+                        setPhotoModal({ mode: 'replace', replacePath: (c.facePaths || [])[j] });
                       }}
                       className="pointer-events-auto w-6 h-6 rounded-full bg-blue-500 hover:bg-blue-400 text-white flex items-center justify-center shadow text-[10px]"
                       title="Replace this face photo">
@@ -2136,7 +2202,7 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
               <button
                 key={j}
                 type="button"
-                onClick={() => canUpload && j === filled && addInputRef.current?.click()}
+                onClick={() => canUpload && j === filled && setPhotoModal({ mode: 'add' })}
                 disabled={!canUpload || j !== filled}
                 className={`aspect-square rounded-lg border-2 border-dashed flex items-center justify-center text-slate-600 ${
                   canUpload && j === filled
@@ -2158,7 +2224,7 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
                 : <>— admin can upload after the form is approved.</>}
             </div>
           )}
-          {!allocated && onUpload && (
+          {!allocated && onUpload && !onUploadPendingFace && (
             <div className="mt-2 text-[11px] text-slate-500">
               <i className="ph ph-info mr-1"></i>Approve the form first to enable photo uploads.
             </div>
@@ -2216,6 +2282,139 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
           </div>
         </div>
       )}
+
+      {photoModal && (
+        <ChaperonePhotoUploadModal
+          mode={photoModal.mode}
+          chaperoneName={c.name}
+          busy={busy}
+          onClose={() => setPhotoModal(null)}
+          onSubmit={handleModalSubmit}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Chaperone face upload modal ─────────────────────────────────────────────
+// Used by ChaperoneRow for both adding a brand-new face and replacing an
+// existing one (in which case the caller deletes the old face first).
+function ChaperonePhotoUploadModal({ mode, chaperoneName, busy, onClose, onSubmit }) {
+  const inputRef = useRef(null);
+  const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [error, setError] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+
+  useEffect(() => {
+    if (!file) { setPreviewUrl(null); return; }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  const validate = (f) => {
+    if (!f) return 'No file chosen.';
+    if (!/^image\/(jpe?g|png|webp)$/i.test(f.type)) return 'Photo must be JPEG, PNG or WebP.';
+    if (f.size > 800 * 1024) return 'Photo must be ≤ 800 KB.';
+    return '';
+  };
+  const pick = (f) => {
+    const msg = validate(f);
+    setError(msg);
+    setFile(msg ? null : f);
+  };
+
+  const title = mode === 'replace' ? 'Replace face photo' : 'Add face photo';
+  const ctaLabel = mode === 'replace' ? 'Replace photo' : 'Upload photo';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      onClick={() => !busy && onClose()}
+    >
+      <div
+        className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <div className="text-base font-bold text-white">{title}</div>
+            <div className="text-xs text-slate-400 mt-0.5">
+              For chaperone <span className="text-slate-200 font-semibold">{chaperoneName}</span>
+              {mode === 'replace' && <> · the existing photo will be deleted first.</>}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="text-slate-500 hover:text-white text-lg leading-none disabled:opacity-50"
+            title="Close"
+          >×</button>
+        </div>
+
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault(); setDragOver(false);
+            const f = e.dataTransfer?.files?.[0];
+            if (f) pick(f);
+          }}
+          onClick={() => !busy && inputRef.current?.click()}
+          className={`rounded-lg border-2 border-dashed cursor-pointer transition-colors flex flex-col items-center justify-center text-center p-4 min-h-[180px] ${
+            dragOver ? 'border-orange-400 bg-orange-500/10' :
+            previewUrl ? 'border-emerald-500/40 bg-emerald-500/5' :
+            'border-slate-700 hover:border-slate-500 bg-slate-950/60'
+          }`}
+        >
+          {previewUrl ? (
+            <>
+              <img src={previewUrl} alt="preview" className="max-h-40 rounded-md mb-2 object-contain" />
+              <div className="text-[11px] text-slate-400">{file?.name} · {Math.round((file?.size || 0)/1024)} KB</div>
+              <div className="text-[10px] text-slate-500 mt-1">Click to choose a different photo</div>
+            </>
+          ) : (
+            <>
+              <i className="ph ph-cloud-arrow-up text-3xl text-slate-500 mb-1"></i>
+              <div className="text-sm text-slate-300 font-semibold">Drag photo here or click to browse</div>
+              <div className="text-[11px] text-slate-500 mt-1">JPEG / PNG / WebP · ≤ 800 KB</div>
+            </>
+          )}
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) pick(f); }}
+        />
+
+        {error && (
+          <div className="mt-2 text-[12px] text-red-300 bg-red-500/10 border border-red-500/30 rounded px-2 py-1">
+            <i className="ph ph-warning mr-1"></i>{error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-slate-700 text-slate-300 hover:bg-white/10 disabled:opacity-50"
+          >Cancel</button>
+          <button
+            type="button"
+            onClick={() => file && onSubmit(file)}
+            disabled={busy || !file}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-orange-500 text-white hover:bg-orange-400 disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {busy && <i className="ph ph-spinner-gap animate-spin"></i>}
+            {ctaLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
