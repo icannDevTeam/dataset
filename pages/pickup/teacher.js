@@ -149,7 +149,7 @@ function PairingScreen({ onPaired }) {
   );
 }
 
-function Card({ ev, onAction, busy, big = true }) {
+function Card({ ev, onAction, busy, exiting, big = true }) {
   const blocked = ev.blocked || ev.cardState === 'red';
   const ring = blocked ? '#EF4444' : ev.cardState === 'yellow' ? '#FCBF11' : '#22C55E';
   const label = blocked ? 'BLOCKED — NOT IN SYSTEM'
@@ -157,12 +157,23 @@ function Card({ ev, onAction, busy, big = true }) {
     : 'AUTHORIZED';
   const chap = ev.chaperone || {};
 
+  // Animation: release → fade + slide right; hold → shrink + slide down toward held rail.
+  let exitStyle = {};
+  if (exiting === 'release') {
+    exitStyle = { opacity: 0, transform: 'translateX(60px) scale(0.94)', pointerEvents: 'none' };
+  } else if (exiting === 'hold') {
+    exitStyle = { opacity: 0.35, transform: 'translateY(120px) scale(0.55)', pointerEvents: 'none' };
+  }
+
   return (
     <div style={{
       background: '#fff', borderRadius: 20,
       border: `4px solid ${ring}`, boxShadow: `0 12px 40px ${ring}33`,
       padding: big ? 22 : 14,
       display: 'flex', flexDirection: 'column', gap: 14,
+      transition: 'transform 380ms cubic-bezier(0.4, 0, 0.2, 1), opacity 380ms ease',
+      transformOrigin: 'center top',
+      ...exitStyle,
     }}>
       <div style={{
         display: 'inline-block', alignSelf: 'flex-start',
@@ -201,20 +212,40 @@ function Card({ ev, onAction, busy, big = true }) {
       )}
 
       <div style={{ display: 'flex', gap: 10 }}>
-        <button onClick={() => onAction(ev, 'hold')} disabled={busy[ev.id]}
+        <button
+          type="button"
+          onClick={() => onAction(ev, 'hold')}
+          disabled={busy[ev.id] || !!exiting}
           style={{
-            flex: 1, padding: '14px', background: '#f59e0b', color: '#fff',
-            border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: 'pointer',
-            opacity: busy[ev.id] ? 0.6 : 1,
-          }}>
+            flex: 1, padding: '16px', background: '#f59e0b', color: '#fff',
+            border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 800,
+            cursor: busy[ev.id] || exiting ? 'not-allowed' : 'pointer',
+            opacity: busy[ev.id] || exiting ? 0.6 : 1,
+            touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
+            boxShadow: '0 4px 12px rgba(245,158,11,0.35)',
+            transition: 'transform 120ms ease, box-shadow 120ms ease',
+          }}
+          onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
+          onTouchEnd={(e) => { e.currentTarget.style.transform = ''; }}
+        >
           Hold
         </button>
-        <button onClick={() => onAction(ev, 'release')} disabled={busy[ev.id]}
+        <button
+          type="button"
+          onClick={() => onAction(ev, 'release')}
+          disabled={busy[ev.id] || !!exiting}
           style={{
-            flex: 1, padding: '14px', background: '#16a34a', color: '#fff',
-            border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: 'pointer',
-            opacity: busy[ev.id] ? 0.6 : 1,
-          }}>
+            flex: 1, padding: '16px', background: '#16a34a', color: '#fff',
+            border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 800,
+            cursor: busy[ev.id] || exiting ? 'not-allowed' : 'pointer',
+            opacity: busy[ev.id] || exiting ? 0.6 : 1,
+            touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
+            boxShadow: '0 4px 12px rgba(22,163,74,0.4)',
+            transition: 'transform 120ms ease, box-shadow 120ms ease',
+          }}
+          onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
+          onTouchEnd={(e) => { e.currentTarget.style.transform = ''; }}
+        >
           Release
         </button>
       </div>
@@ -222,32 +253,71 @@ function Card({ ev, onAction, busy, big = true }) {
   );
 }
 
-function HeldRow({ ev, onAction, busy }) {
+function HeldRow({ ev, onAction, busy, exiting }) {
   const blocked = ev.blocked || ev.cardState === 'red';
   const ring = blocked ? '#EF4444' : ev.cardState === 'yellow' ? '#FCBF11' : '#22C55E';
   const chap = ev.chaperone || {};
+  const studentNames = ev.students?.map((s) => s.name).join(', ') || '—';
+
+  // When releasing from held: fade + slide right.
+  const exitStyle = exiting === 'release'
+    ? { opacity: 0, transform: 'translateX(60px) scale(0.95)', pointerEvents: 'none' }
+    : { opacity: 1, transform: 'translateY(0) scale(1)' };
+
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      background: '#1e293b', border: `1.5px solid ${ring}66`,
-      borderRadius: 12, padding: '10px 14px',
+      display: 'flex', alignItems: 'center', gap: 14,
+      background: 'linear-gradient(135deg, #1e293b 0%, #243047 100%)',
+      border: `2px solid ${ring}66`,
+      borderLeft: `5px solid ${ring}`,
+      borderRadius: 14, padding: '12px 16px',
+      boxShadow: `0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px ${ring}22`,
+      transition: 'transform 380ms cubic-bezier(0.4, 0, 0.2, 1), opacity 380ms ease',
+      animation: 'pickupHeldIn 360ms cubic-bezier(0.4, 0, 0.2, 1)',
+      ...exitStyle,
     }}>
-      <Avatar src={chap.photoUrl} name={chap.name} size={44} ring={ring} />
+      <Avatar src={chap.photoUrl} name={chap.name} size={56} ring={ring} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {chap.name || 'Unknown'}
-          {blocked && <span style={{ marginLeft: 8, fontSize: 10, color: '#fca5a5', fontWeight: 800 }}>BLOCKED</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            color: '#f1f5f9', fontWeight: 800, fontSize: 16,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 220,
+          }}>
+            {chap.name || 'Unknown'}
+          </span>
+          {chap.relation && (
+            <span style={{ color: '#94a3b8', fontSize: 12, textTransform: 'capitalize' }}>· {chap.relation}</span>
+          )}
+          {blocked && (
+            <span style={{
+              background: '#7f1d1d', color: '#fecaca', fontSize: 10, fontWeight: 800,
+              padding: '2px 8px', borderRadius: 999, letterSpacing: 0.5,
+            }}>BLOCKED</span>
+          )}
         </div>
-        <div style={{ color: '#94a3b8', fontSize: 12 }}>
-          {fmtTime(ev.scannedAt)} · {timeAgo(ev.scannedAt)} · {ev.students?.map((s) => s.name).join(', ') || '—'}
+        <div style={{ color: '#cbd5e1', fontSize: 13, marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {studentNames}
+        </div>
+        <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
+          Held since {fmtTime(ev.scannedAt)} · {timeAgo(ev.scannedAt)}
         </div>
       </div>
-      <button onClick={() => onAction(ev, 'release')} disabled={busy[ev.id]}
+      <button
+        type="button"
+        onClick={() => onAction(ev, 'release')}
+        disabled={busy[ev.id] || !!exiting}
         style={{
-          padding: '8px 14px', background: '#16a34a', color: '#fff',
-          border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          opacity: busy[ev.id] ? 0.6 : 1,
-        }}>
+          padding: '10px 18px', background: '#16a34a', color: '#fff',
+          border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 800,
+          cursor: busy[ev.id] || exiting ? 'not-allowed' : 'pointer',
+          opacity: busy[ev.id] || exiting ? 0.6 : 1,
+          touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
+          boxShadow: '0 3px 10px rgba(22,163,74,0.4)',
+          transition: 'transform 120ms ease',
+        }}
+        onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
+        onTouchEnd={(e) => { e.currentTarget.style.transform = ''; }}
+      >
         Release
       </button>
     </div>
@@ -425,6 +495,7 @@ export default function TeacherTabletPage() {
   const [lastEventAt, setLastEventAt] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState({});
+  const [exiting, setExiting] = useState({}); // id → 'release' | 'hold'
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
   const pollRef = useRef(null);
@@ -506,7 +577,12 @@ export default function TeacherTabletPage() {
   }, [token, identity, pollFeed]);
 
   const onAction = async (ev, action) => {
-    setBusy((b) => ({ ...b, [ev.id]: true }));
+    const id = ev.id;
+    if (busy[id] || exiting[id]) return;
+    setBusy((b) => ({ ...b, [id]: true }));
+    setExiting((e) => ({ ...e, [id]: action })); // kick off CSS transition immediately
+    const ANIM_MS = 380;
+    const animDone = new Promise((r) => setTimeout(r, ANIM_MS));
     try {
       const r = await fetch(`/api/pickup/tablet/release`, {
         method: 'POST',
@@ -515,11 +591,18 @@ export default function TeacherTabletPage() {
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'failed');
-      pollFeed();
+      await animDone; // let the card finish its exit animation
+      await pollFeed(); // server now reflects new status; rerender drops/relocates the card
     } catch (e) {
+      // rollback animation so user sees the card return + the error
+      setExiting((m) => { const n = { ...m }; delete n[id]; return n; });
       alert(e.message);
     } finally {
-      setBusy((b) => ({ ...b, [ev.id]: false }));
+      setBusy((b) => { const n = { ...b }; delete n[id]; return n; });
+      // clear exiting after a tick so the freshly-fetched feed renders normally
+      setTimeout(() => {
+        setExiting((m) => { const n = { ...m }; delete n[id]; return n; });
+      }, 50);
     }
   };
 
@@ -573,7 +656,13 @@ export default function TeacherTabletPage() {
         fontFamily: 'system-ui, -apple-system, sans-serif',
         color: '#e2e8f0',
       }}>
-        {/* Header */}
+        <style>{`
+          @keyframes pickupHeldIn {
+            from { opacity: 0; transform: translateY(-12px) scale(0.96); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+          }
+          button:active { filter: brightness(0.95); }
+        `}</style>
         <div style={{
           background: BINUS_MAROON, padding: '14px 22px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -608,24 +697,30 @@ export default function TeacherTabletPage() {
 
         {/* Active panel: max 2 cards */}
         <div style={{ padding: '22px', maxWidth: 1200, margin: '0 auto' }}>
-          {feed.active.length === 0 ? (
-            <StandbyHero
-              identity={identity}
-              todayReleased={feed.todayReleased}
-              heldCount={feed.held.length}
-              lastEventAt={lastEventAt}
-            />
-          ) : (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: feed.active.length === 1 ? '1fr' : 'repeat(auto-fit, minmax(360px, 1fr))',
-              gap: 18,
-            }}>
-              {feed.active.map((ev) => (
-                <Card key={ev.id} ev={ev} onAction={onAction} busy={busy} big />
-              ))}
-            </div>
-          )}
+          {(() => {
+            const activeTwo = (feed.active || []).slice(0, 2);
+            if (activeTwo.length === 0) {
+              return (
+                <StandbyHero
+                  identity={identity}
+                  todayReleased={feed.todayReleased}
+                  heldCount={feed.held.length}
+                  lastEventAt={lastEventAt}
+                />
+              );
+            }
+            return (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: activeTwo.length === 1 ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+                gap: 18,
+              }}>
+                {activeTwo.map((ev) => (
+                  <Card key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} big />
+                ))}
+              </div>
+            );
+          })()}
 
           {/* Held rail */}
           {feed.held.length > 0 && (
@@ -641,7 +736,7 @@ export default function TeacherTabletPage() {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {feed.held.map((ev) => (
-                  <HeldRow key={ev.id} ev={ev} onAction={onAction} busy={busy} />
+                  <HeldRow key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} />
                 ))}
               </div>
             </div>
