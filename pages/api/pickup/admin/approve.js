@@ -22,6 +22,7 @@ import admin from 'firebase-admin';
 import crypto from 'crypto';
 
 const tenancy = require('../../../../lib/tenancy');
+const { logAudit } = require('../../../../lib/audit-log');
 
 const FIRST_CHAPERONE_NO = 9000000000;
 
@@ -245,6 +246,18 @@ async function handler(req, res) {
     // Admins go to /v2/pickup-enroll once photos are uploaded to push the
     // chaperone to the right grade-level terminal(s). This avoids blind
     // pushes to all gates and gives a clean enrolled/not-enrolled board.
+    await logAudit(db, {
+      tenantId: tid, req,
+      actor: { email: req.headers['x-admin-user'] || null, name: null, role: 'admin' },
+      kind: 'chaperone.enroll',
+      target: { type: 'onboarding', id: recordId, label: rec.parentName || recordId },
+      after: {
+        allocatedChaperones: created.map(c => ({ id: c.chaperoneId || c.id, name: c.name })),
+        students: (rec.students || []).map(s => ({ id: s.id, name: s.name })),
+        notes: approvalNotes || null,
+      },
+      summary: `Approved chaperone enrollment for ${rec.parentName || recordId} (${created.length} record${created.length === 1 ? '' : 's'})`,
+    });
     return res.status(200).json({
       ok: true,
       recordId,

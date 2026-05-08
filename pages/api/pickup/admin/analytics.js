@@ -101,6 +101,26 @@ async function handler(req, res) {
     const byHour       = new Array(24).fill(0).map(() => ({ total: 0, overridden: 0 }));
     const recent       = [];   // last events for activity feed
 
+    // ── Facial-recognition signals ──────────────────────────────
+    const confidenceValues = [];   // numeric confidences (0..1)
+    let livenessChecked    = 0;
+    let livenessPassed     = 0;
+    let spoofAttempts      = 0;
+    let lowConfidence      = 0;    // confidence < 0.7
+    let unknownChaperone   = 0;
+    const retriesValues    = [];
+    const lowConfidenceFlags = [];   // surfaced in reports
+    const spoofFlags         = [];   // surfaced in reports
+    // Per-terminal FR rollup keyed by terminalId
+    const byTerminalMap = {};   // terminalId -> { gate, total, avgConfidence, livenessPassRate, spoof, low, unknown }
+    const initTerm = () => ({
+      total: 0, gate: null,
+      confSum: 0, confN: 0,
+      livenessChecked: 0, livenessPassed: 0,
+      spoof: 0, low: 0, unknown: 0,
+      retriesSum: 0, retriesN: 0,
+    });
+
     let totalPickups      = 0;
     let autoApproved      = 0;
     let officerOverridden = 0;
@@ -165,6 +185,53 @@ async function handler(req, res) {
         if (isOverride) byHour[wibHour].overridden++;
       } catch {}
 
+      // ── FR signals ──────────────────────────────────────────
+      const fr = e.fr || {};
+      const tIdRaw = e.terminalId || gate || 'Unknown';
+      if (!byTerminalMap[tIdRaw]) byTerminalMap[tIdRaw] = initTerm();
+      const tBucket = byTerminalMap[tIdRaw];
+      tBucket.total++;
+      tBucket.gate = tBucket.gate || gate;
+      if (typeof fr.confidence === 'number') {
+        confidenceValues.push(fr.confidence);
+        tBucket.confSum += fr.confidence; tBucket.confN++;
+        if (fr.confidence < 0.7) {
+          lowConfidence++;
+          tBucket.low++;
+          if (lowConfidenceFlags.length < 50) lowConfidenceFlags.push({
+            id: doc.id,
+            at: tsToWIBDate(e.recordedAt) || date,
+            gate, terminalId: tIdRaw,
+            chaperone: chapName,
+            confidence: parseFloat(fr.confidence.toFixed(3)),
+          });
+        }
+      }
+      if (typeof fr.livenessPassed === 'boolean') {
+        livenessChecked++;
+        tBucket.livenessChecked++;
+        if (fr.livenessPassed) { livenessPassed++; tBucket.livenessPassed++; }
+      }
+      if (fr.spoof === true) {
+        spoofAttempts++;
+        tBucket.spoof++;
+        if (spoofFlags.length < 50) spoofFlags.push({
+          id: doc.id,
+          at: tsToWIBDate(e.recordedAt) || date,
+          gate, terminalId: tIdRaw,
+          chaperone: chapName,
+          livenessScore: typeof fr.liveness === 'number' ? parseFloat(fr.liveness.toFixed(3)) : null,
+        });
+      }
+      if (typeof fr.retries === 'number') {
+        retriesValues.push(fr.retries);
+        tBucket.retriesSum += fr.retries; tBucket.retriesN++;
+      }
+      if (e.decision === 'unknown_chaperone') {
+        unknownChaperone++;
+        tBucket.unknown++;
+      }
+
       // recent activity (collect first 50, snap is desc-ordered)
       if (recent.length < 50) {
         const dt = e.recordedAt?.toDate ? e.recordedAt.toDate() : new Date(e.recordedAt);
@@ -228,6 +295,52 @@ async function handler(req, res) {
     const approvalRate = totalPickups > 0 ? Math.round((autoApproved / totalPickups) * 1000) / 10 : 0;
     const overrideRate = totalPickups > 0 ? Math.round((officerOverridden / totalPickups) * 1000) / 10 : 0;
 
+    // ── FR rollups ───────────────────────────────────────────────
+    const cAvg = confidenceValues.length
+      ? confidenceValues.reduce((a, b) => a + b, 0) / confidenceValues.length
+      : null;
+    const fr = {
+      sample: confidenceValues.length,
+      confidence: {
+        avg: cAvg != null ? parseFloat((cAvg * 100).toFixed(1)) : null,
+        min: confidenceValues.length ? parseFloat((Math.min(...confidenceValues) * 100).toFixed(1)) : null,
+        max: confidenceValues.length ? parseFloat((Math.max(...confidenceValues) * 100).toFixed(1)) : null,
+        distribution: {
+          below50: confidenceValues.filter(v => v < 0.5).length,
+          '50to70': confidenceValues.filter(v => v >= 0.5 && v < 0.7).length,
+          '70to90': confidenceValues.filter(v => v >= 0.7 && v < 0.9).length,
+          above90: confidenceValues.filter(v => v >= 0.9).length,
+        },
+      },
+      liveness: {
+        checked: livenessChecked,
+        passed: livenessPassed,
+        passRate: livenessChecked ? parseFloat(((livenessPassed / livenessChecked) * 100).toFixed(1)) : null,
+      },
+      spoofAttempts,
+      lowConfidence,
+      unknownChaperone,
+      retriesAvg: retriesValues.length
+        ? parseFloat((retriesValues.reduce((a, b) => a + b, 0) / retriesValues.length).toFixed(2))
+        : null,
+      lowConfidenceFlags: lowConfidenceFlags.sort((a, b) => a.confidence - b.confidence),
+      spoofFlags,
+    };
+    const byTerminal = Object.entries(byTerminalMap)
+      .map(([terminalId, v]) => ({
+        terminalId,
+        gate: v.gate || terminalId,
+        total: v.total,
+        avgConfidence: v.confN ? parseFloat(((v.confSum / v.confN) * 100).toFixed(1)) : null,
+        livenessPassRate: v.livenessChecked
+          ? parseFloat(((v.livenessPassed / v.livenessChecked) * 100).toFixed(1)) : null,
+        spoof: v.spoof,
+        lowConfidence: v.low,
+        unknownChaperone: v.unknown,
+        avgRetries: v.retriesN ? parseFloat((v.retriesSum / v.retriesN).toFixed(2)) : null,
+      }))
+      .sort((a, b) => b.total - a.total);
+
     return res.status(200).json({
       ok: true,
       range: { from, to, totalDays },
@@ -249,6 +362,8 @@ async function handler(req, res) {
       topChaperones,
       topOfficers,
       recent,
+      fr,
+      byTerminal,
     });
   } catch (err) {
     console.error('[pickup/admin/analytics]', err.message, err.stack);

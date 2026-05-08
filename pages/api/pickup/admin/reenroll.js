@@ -18,6 +18,7 @@ import admin from 'firebase-admin';
 import { enrollChaperones } from '../../../../lib/chaperone-enroll';
 
 const tenancy = require('../../../../lib/tenancy');
+const { logAudit } = require('../../../../lib/audit-log');
 
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -59,6 +60,14 @@ async function handler(req, res) {
       );
     }
 
+    await logAudit(db, {
+      tenantId: tid, req,
+      actor: { email: req.headers['x-admin-user'] || null, name: null, role: 'admin' },
+      kind: 'chaperone.reenroll',
+      target: { type: recordId ? 'onboarding' : 'chaperone', id: recordId || ids.join(','), label: recordId ? `onboarding:${recordId}` : `${ids.length} chaperone(s)` },
+      after: { chaperoneIds: ids, summary, gradeFilter: opts.gradeFilter || null, deviceIps: opts.deviceIps || null },
+      summary: `Re-enrolled ${ids.length} chaperone(s) on Hikvision terminals`,
+    });
     return res.status(200).json({ ok: true, summary });
   } catch (err) {
     console.error('[pickup/admin/reenroll]', err.message, err.stack);

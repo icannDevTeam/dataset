@@ -12,6 +12,7 @@ import { withAuth } from '../../../lib/auth-middleware';
 import { resolvePermissions } from '../../../lib/permissions';
 import admin from 'firebase-admin';
 const { sanitizeClassScopes, isTeacherEmail } = require('../../../lib/teacher-auth');
+const { logAudit } = require('../../../lib/audit-log');
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
 const TEACHER_EMAIL_DOMAIN = (process.env.TEACHER_EMAIL_DOMAIN || 'binus.edu').toLowerCase();
@@ -159,6 +160,13 @@ async function handler(req, res) {
         disabled: false,
       });
 
+      await logAudit(db, {
+        actor: caller, req,
+        kind: 'user.invite',
+        target: { type: 'user', id: cleanEmail, label: name || cleanEmail },
+        after: { role: assignedRole, classScopes: assignedRole === 'teacher' ? cleanClassScopes : [] },
+        summary: `Invited ${cleanEmail} as ${assignedRole}`,
+      });
       return res.status(201).json({ ok: true, email: cleanEmail, role: assignedRole, classScopes: assignedRole === 'teacher' ? cleanClassScopes : [] });
     } catch (err) {
       console.error('[USERS POST]', err.message);
@@ -204,6 +212,13 @@ async function handler(req, res) {
         await admin.auth().updateUser(authUser.uid, { disabled: true });
       } catch {}
 
+      await logAudit(db, {
+        actor: caller, req,
+        kind: 'user.delete',
+        target: { type: 'user', id: cleanEmail, label: doc.data()?.name || cleanEmail },
+        before: { role: targetRole },
+        summary: `Deleted user ${cleanEmail}`,
+      });
       return res.status(200).json({ ok: true });
     } catch (err) {
       console.error('[USERS DELETE]', err.message);
@@ -253,6 +268,9 @@ async function handler(req, res) {
           await admin.auth().updateUser(authUser.uid, { disabled: true });
         } catch {}
         await usersRef.doc(cleanEmail).update(update);
+        await logAudit(db, { actor: caller, req, kind: 'user.suspend',
+          target: { type: 'user', id: cleanEmail, label: doc.data()?.name || cleanEmail },
+          summary: `Suspended ${cleanEmail}` });
         return res.status(200).json({ ok: true, email: cleanEmail, disabled: true });
       }
 
@@ -263,6 +281,9 @@ async function handler(req, res) {
           await admin.auth().updateUser(authUser.uid, { disabled: false });
         } catch {}
         await usersRef.doc(cleanEmail).update(update);
+        await logAudit(db, { actor: caller, req, kind: 'user.unsuspend',
+          target: { type: 'user', id: cleanEmail, label: doc.data()?.name || cleanEmail },
+          summary: `Re-activated ${cleanEmail}` });
         return res.status(200).json({ ok: true, email: cleanEmail, disabled: false });
       }
 
@@ -284,6 +305,11 @@ async function handler(req, res) {
       // Handle revoke — strip all custom permissions, reset to viewer
       if (patchAction === 'revoke') {
         await usersRef.doc(cleanEmail).update({ role: 'viewer', permissions: {}, classScopes: [] });
+        await logAudit(db, { actor: caller, req, kind: 'user.revoke',
+          target: { type: 'user', id: cleanEmail, label: doc.data()?.name || cleanEmail },
+          before: { role: doc.data()?.role, classScopes: doc.data()?.classScopes || [] },
+          after: { role: 'viewer', classScopes: [] },
+          summary: `Reset ${cleanEmail} to viewer (revoked all permissions)` });
         return res.status(200).json({ ok: true, email: cleanEmail, role: 'viewer', permissions: resolvePermissions('viewer') });
       }
 
@@ -322,11 +348,33 @@ async function handler(req, res) {
         return res.status(400).json({ error: 'Nothing to update.' });
       }
 
+      const beforeData = doc.data() || {};
       await usersRef.doc(cleanEmail).update(update);
 
       const updatedRole = update.role || doc.data().role || 'viewer';
       const updatedOverrides = update.permissions !== undefined ? update.permissions : (doc.data().permissions || {});
       const resolved = resolvePermissions(updatedRole, updatedOverrides);
+
+      // Audit: role change vs. permission edit
+      const isRoleChange = update.role && update.role !== beforeData.role;
+      await logAudit(db, {
+        actor: caller, req,
+        kind: isRoleChange ? 'user.role_change' : 'user.permissions',
+        target: { type: 'user', id: cleanEmail, label: beforeData.name || cleanEmail },
+        before: {
+          role: beforeData.role,
+          permissions: beforeData.permissions || {},
+          classScopes: beforeData.classScopes || [],
+        },
+        after: {
+          role: updatedRole,
+          permissions: update.permissions !== undefined ? update.permissions : (beforeData.permissions || {}),
+          classScopes: update.classScopes !== undefined ? update.classScopes : (beforeData.classScopes || []),
+        },
+        summary: isRoleChange
+          ? `Changed ${cleanEmail} role: ${beforeData.role} → ${updatedRole}`
+          : `Updated permissions for ${cleanEmail}`,
+      });
       const updatedClassScopes = update.classScopes !== undefined
         ? update.classScopes
         : (Array.isArray(doc.data().classScopes) ? doc.data().classScopes : []);

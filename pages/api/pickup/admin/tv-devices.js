@@ -17,6 +17,7 @@ const tenancy = require('../../../../lib/tenancy');
 const td = require('../../../../lib/tv-devices');
 const kp = require('../../../../lib/kiosk-profiles');
 const { maybeSeedPickupDemoOnClaim } = require('../../../../lib/pickup-demo-seeder');
+const { logAudit } = require('../../../../lib/audit-log');
 
 async function handler(req, res) {
   initializeFirebase();
@@ -97,6 +98,14 @@ async function handler(req, res) {
       }
 
       const updated = (await doc.ref.get()).data();
+      await logAudit(db, {
+        tenantId: tid, req,
+        actor: { email: req.headers['x-actor-email'] || null, name: null, role: null },
+        kind: 'device.pair',
+        target: { type: 'tv_device', id: doc.id, label: deviceLabel || updated.deviceLabel || code },
+        after: { profileId, profileName: profile.data().name, claimedVia: 'pairingCode' },
+        summary: `Paired TV "${deviceLabel || updated.deviceLabel || code}" to profile ${profile.data().name}`,
+      });
       return res.status(200).json({
         ok: true,
         device: td.publicDevice(doc.id, updated),
@@ -132,7 +141,10 @@ async function handler(req, res) {
       const id = req.query.id ? String(req.query.id) : null;
       if (!id) return res.status(400).json({ error: 'id required' });
       const ref = colRef.doc(id);
-      if (req.query.hard === '1') {
+      const snap = await ref.get();
+      const before = snap.exists ? snap.data() : {};
+      const hard = req.query.hard === '1';
+      if (hard) {
         await ref.delete();
       } else {
         await ref.set({
@@ -141,6 +153,14 @@ async function handler(req, res) {
           revokedAt: admin.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
       }
+      await logAudit(db, {
+        tenantId: tid, req,
+        actor: { email: req.headers['x-actor-email'] || null, name: null, role: null },
+        kind: hard ? 'device.unpair' : 'device.revoke',
+        target: { type: 'tv_device', id, label: before.deviceLabel || id },
+        before: { profileId: before.profileId || null, status: before.status || null },
+        summary: hard ? `Hard-deleted TV device ${before.deviceLabel || id}` : `Revoked TV device ${before.deviceLabel || id}`,
+      });
       return res.status(200).json({ ok: true, id });
     }
 

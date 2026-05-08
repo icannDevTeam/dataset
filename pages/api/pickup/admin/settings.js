@@ -10,6 +10,7 @@
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
+const { logAudit } = require('../../../../lib/audit-log');
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
@@ -48,7 +49,20 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'no valid fields in body' });
     }
 
+    const beforeSnap = await docRef.get();
+    const before = beforeSnap.exists ? beforeSnap.data() : {};
+
     await docRef.set(patch, { merge: true });
+    await logAudit(db, {
+      tenantId: tid,
+      actor: { email: req.headers['x-actor-email'] || null, name: null, role: null },
+      req,
+      kind: 'settings.update',
+      target: { type: 'pickup_settings', id: 'pickup', label: 'Pickup Settings' },
+      before: Object.fromEntries(Object.keys(patch).map(k => [k, before[k] ?? null])),
+      after: patch,
+      summary: `Updated pickup settings: ${Object.keys(patch).join(', ')}`,
+    });
     return res.status(200).json({ ok: true, updated: patch });
   } catch (e) {
     console.error('[pickup/admin/settings]', e.message);

@@ -187,6 +187,8 @@ export default async function handler(req, res) {
         chaperone: { ...chap, photoUrl: chapPhoto },
         students,
         capturePath: capture,
+        enrolledPhotoUrl: chapPhoto,   // for side-by-side view
+        fr: e.fr || null,              // confidence / liveness / spoof / retries
         officerOverride: e.officerOverride || null,
         teacherRelease: e.teacherRelease || null,
         flagged: !!e.teacherRelease?.flagged,

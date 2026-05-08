@@ -16,6 +16,7 @@ import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { verifyCookie } from '../../auth/session';
 const { runOfficerOverride } = require('../../../../lib/officer-override-core.cjs');
 const tenancy = require('../../../../lib/tenancy');
+const { logAudit } = require('../../../../lib/audit-log');
 
 const TEACHER_EMAIL_DOMAIN = (process.env.TEACHER_EMAIL_DOMAIN || 'binus.edu').toLowerCase();
 
@@ -56,6 +57,22 @@ async function handler(req, res) {
 
   // Strip internal test field before sending
   const { _override: _, ...responseBody } = result.body;
+
+  if (result.statusCode === 200 && responseBody.ok) {
+    await logAudit(db, {
+      tenantId: tid, req,
+      actor: {
+        email: session?.email || officer || null,
+        name: session?.name || null,
+        role: session?.role || 'officer',
+      },
+      kind: 'pickup.officer_override',
+      target: { type: 'pickup_event', id: responseBody.eventId, label: responseBody.chaperone || null },
+      after: { officer: officer || session?.email, gate: responseBody.gate, note: note || null },
+      summary: `Officer override for ${responseBody.chaperone || 'event ' + responseBody.eventId} at ${responseBody.gate || ''}`.trim(),
+    });
+  }
+
   return res.status(result.statusCode).json(responseBody);
 }
 

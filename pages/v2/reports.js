@@ -83,6 +83,52 @@ function exportPickupCSV(data, fromDate, toDate) {
   rows.push(['Homeroom', 'Total Pickups']);
   (data.byClass || []).forEach(c => rows.push([c.homeroom || c.class, c.total]));
   rows.push([]);
+
+  // ── Facial-recognition signals ──────────────────────────────
+  const fr = data.fr;
+  if (fr) {
+    rows.push(['--- FR Confidence ---']);
+    rows.push(['Sample Size', fr.sample]);
+    rows.push(['Average Confidence (%)', fr.confidence?.avg ?? '']);
+    rows.push(['Min Confidence (%)', fr.confidence?.min ?? '']);
+    rows.push(['Max Confidence (%)', fr.confidence?.max ?? '']);
+    rows.push(['Distribution: <50%', fr.confidence?.distribution?.below50 ?? 0]);
+    rows.push(['Distribution: 50-70%', fr.confidence?.distribution?.['50to70'] ?? 0]);
+    rows.push(['Distribution: 70-90%', fr.confidence?.distribution?.['70to90'] ?? 0]);
+    rows.push(['Distribution: ≥90%', fr.confidence?.distribution?.above90 ?? 0]);
+    rows.push([]);
+    rows.push(['--- Liveness & Anti-Spoofing ---']);
+    rows.push(['Liveness Checks', fr.liveness?.checked ?? 0]);
+    rows.push(['Liveness Passed', fr.liveness?.passed ?? 0]);
+    rows.push(['Liveness Pass Rate (%)', fr.liveness?.passRate ?? '']);
+    rows.push(['Spoof Attempts', fr.spoofAttempts ?? 0]);
+    rows.push(['Unknown Chaperone Events', fr.unknownChaperone ?? 0]);
+    rows.push(['Average Retries', fr.retriesAvg ?? '']);
+    rows.push([]);
+    if ((data.byTerminal || []).length) {
+      rows.push(['--- Per-Terminal Recognition Health ---']);
+      rows.push(['Terminal', 'Gate', 'Scans', 'Avg Confidence (%)', 'Liveness Pass Rate (%)', 'Spoof Attempts', 'Low-Conf Scans', 'Unknown Chaperone', 'Avg Retries']);
+      data.byTerminal.forEach(t => rows.push([
+        t.terminalId, t.gate, t.total,
+        t.avgConfidence ?? '', t.livenessPassRate ?? '',
+        t.spoof, t.lowConfidence, t.unknownChaperone,
+        t.avgRetries ?? '',
+      ]));
+      rows.push([]);
+    }
+    if ((fr.lowConfidenceFlags || []).length) {
+      rows.push(['--- Top Low-Confidence Events ---']);
+      rows.push(['Date', 'Gate', 'Terminal', 'Chaperone', 'Confidence']);
+      fr.lowConfidenceFlags.slice(0, 25).forEach(f => rows.push([f.at, f.gate, f.terminalId, f.chaperone, f.confidence]));
+      rows.push([]);
+    }
+    if ((fr.spoofFlags || []).length) {
+      rows.push(['--- Spoof Attempts ---']);
+      rows.push(['Date', 'Gate', 'Terminal', 'Chaperone', 'Liveness Score']);
+      fr.spoofFlags.forEach(f => rows.push([f.at, f.gate, f.terminalId, f.chaperone, f.livenessScore ?? '']));
+      rows.push([]);
+    }
+  }
   rows.push(['--- Top Chaperones ---']);
   rows.push(['Name', 'Pickup Count']);
   (data.topChaperones || []).forEach(c => rows.push([c.name, c.total ?? c.count]));
@@ -1681,6 +1727,157 @@ function PickupAnalyticsView({ data, loading, error, fromDate, toDate, setFromDa
                 <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-orange-500/60"></span> Pickups</span>
                 <span className="flex items-center gap-1.5"><span className="w-3 h-2 rounded-sm bg-amber-400/80"></span> Officer override</span>
               </div>
+            </div>
+          )}
+
+          {/* ── Facial-Recognition Signals ─────────────────────────────── */}
+          {data.fr && (data.fr.sample > 0 || (data.fr.spoofAttempts ?? 0) > 0) && (
+            <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <i className="ph ph-scan text-orange-400"></i>
+                  Facial-Recognition Signals
+                </h3>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">{data.fr.sample} scans w/ FR data</span>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-emerald-300/70">Avg Confidence</p>
+                  <p className="text-2xl font-bold text-white mt-1">{data.fr.confidence?.avg ?? '—'}<span className="text-base text-emerald-300/60">%</span></p>
+                  <p className="text-[10px] text-slate-500 mt-1">range {data.fr.confidence?.min ?? '—'}% – {data.fr.confidence?.max ?? '—'}%</p>
+                </div>
+                <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-sky-300/70">Liveness Pass Rate</p>
+                  <p className="text-2xl font-bold text-white mt-1">{data.fr.liveness?.passRate ?? '—'}<span className="text-base text-sky-300/60">%</span></p>
+                  <p className="text-[10px] text-slate-500 mt-1">{data.fr.liveness?.passed ?? 0}/{data.fr.liveness?.checked ?? 0} checks</p>
+                </div>
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-red-300/70">Spoof Attempts</p>
+                  <p className="text-2xl font-bold text-white mt-1">{data.fr.spoofAttempts ?? 0}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">{data.fr.unknownChaperone ?? 0} unknown chaperones</p>
+                </div>
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-amber-300/70">Low-Confidence</p>
+                  <p className="text-2xl font-bold text-white mt-1">{data.fr.lowConfidence ?? 0}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">avg retries {data.fr.retriesAvg ?? '—'}</p>
+                </div>
+              </div>
+              {data.fr.confidence?.distribution && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Confidence Distribution</p>
+                  <div className="flex h-6 rounded-lg overflow-hidden border border-slate-800">
+                    {[
+                      { key: 'below50', label: '<50%', color: 'bg-red-500/70' },
+                      { key: '50to70',  label: '50-70%', color: 'bg-amber-500/70' },
+                      { key: '70to90',  label: '70-90%', color: 'bg-sky-500/70' },
+                      { key: 'above90', label: '≥90%', color: 'bg-emerald-500/70' },
+                    ].map((b) => {
+                      const v = data.fr.confidence.distribution[b.key] || 0;
+                      const total = data.fr.sample || 1;
+                      const pct = (v / total) * 100;
+                      return v > 0 ? (
+                        <div key={b.key} className={`${b.color} flex items-center justify-center text-[10px] font-bold text-white`} style={{ width: `${pct}%` }} title={`${b.label}: ${v} scans`}>
+                          {pct >= 8 ? `${v}` : ''}
+                        </div>
+                      ) : null;
+                    })}
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                    <span>0%</span><span>50%</span><span>70%</span><span>90%</span><span>100%</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Per-Terminal Recognition Health ─────────────────────────── */}
+          {(data.byTerminal || []).length > 0 && (
+            <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+              <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                <i className="ph ph-monitor text-orange-400"></i>
+                Per-Terminal Recognition Health
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                      <th className="pb-2 pr-4 text-left">Terminal · Gate</th>
+                      <th className="pb-2 pr-4 text-right">Scans</th>
+                      <th className="pb-2 pr-4 text-right">Avg Conf.</th>
+                      <th className="pb-2 pr-4 text-right">Liveness</th>
+                      <th className="pb-2 pr-4 text-right">Spoof</th>
+                      <th className="pb-2 pr-4 text-right">Low-Conf</th>
+                      <th className="pb-2 pr-4 text-right">Unknown</th>
+                      <th className="pb-2 text-right">Retries</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/40">
+                    {data.byTerminal.map((t) => {
+                      const confTone = (t.avgConfidence ?? 100) >= 90 ? 'text-emerald-400'
+                        : (t.avgConfidence ?? 0) >= 70 ? 'text-amber-400' : 'text-red-400';
+                      const liveTone = (t.livenessPassRate ?? 100) >= 95 ? 'text-emerald-400'
+                        : (t.livenessPassRate ?? 0) >= 80 ? 'text-amber-400' : 'text-red-400';
+                      return (
+                        <tr key={t.terminalId} className="hover:bg-white/5">
+                          <td className="py-2.5 pr-4">
+                            <div className="text-white font-medium">{t.gate}</div>
+                            <div className="font-mono text-[10px] text-slate-500">{t.terminalId}</div>
+                          </td>
+                          <td className="py-2.5 pr-4 text-right text-slate-200">{t.total}</td>
+                          <td className={`py-2.5 pr-4 text-right font-mono ${confTone}`}>{t.avgConfidence != null ? `${t.avgConfidence}%` : '—'}</td>
+                          <td className={`py-2.5 pr-4 text-right font-mono ${liveTone}`}>{t.livenessPassRate != null ? `${t.livenessPassRate}%` : '—'}</td>
+                          <td className="py-2.5 pr-4 text-right text-red-400">{t.spoof || ''}</td>
+                          <td className="py-2.5 pr-4 text-right text-amber-400">{t.lowConfidence || ''}</td>
+                          <td className="py-2.5 pr-4 text-right text-slate-400">{t.unknownChaperone || ''}</td>
+                          <td className="py-2.5 text-right font-mono text-slate-400">{t.avgRetries ?? '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Low-Confidence Flags / Spoof Attempts ───────────────────── */}
+          {((data.fr?.lowConfidenceFlags || []).length > 0 || (data.fr?.spoofFlags || []).length > 0) && (
+            <div className="grid lg:grid-cols-2 gap-5">
+              {(data.fr?.lowConfidenceFlags || []).length > 0 && (
+                <div className="glass-panel rounded-2xl border border-amber-500/20 p-5">
+                  <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                    <i className="ph ph-warning-octagon text-amber-400"></i>
+                    Top Low-Confidence Scans
+                  </h3>
+                  <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                    {data.fr.lowConfidenceFlags.slice(0, 12).map((f, i) => (
+                      <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-900/40 border border-slate-800">
+                        <span className="font-mono text-[10px] text-slate-500 w-20 flex-shrink-0">{f.at}</span>
+                        <span className="flex-1 truncate text-slate-200 text-xs">{f.chaperone || '—'}</span>
+                        <span className="text-[10px] text-slate-500 truncate max-w-[100px]">{f.gate}</span>
+                        <span className="font-mono text-amber-300 font-semibold text-xs">{(f.confidence * 100).toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(data.fr?.spoofFlags || []).length > 0 && (
+                <div className="glass-panel rounded-2xl border border-red-500/20 p-5">
+                  <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                    <i className="ph ph-shield-warning text-red-400"></i>
+                    Spoof Attempts
+                  </h3>
+                  <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                    {data.fr.spoofFlags.slice(0, 12).map((f, i) => (
+                      <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/20">
+                        <span className="font-mono text-[10px] text-slate-500 w-20 flex-shrink-0">{f.at}</span>
+                        <span className="flex-1 truncate text-slate-200 text-xs">{f.chaperone || '—'}</span>
+                        <span className="text-[10px] text-slate-500 truncate max-w-[100px]">{f.gate}</span>
+                        <span className="font-mono text-red-300 font-semibold text-xs">live {(f.livenessScore != null ? (f.livenessScore * 100).toFixed(0) + '%' : '—')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

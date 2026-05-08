@@ -990,6 +990,7 @@ function LiveGateTile() {
 }
 
 function LiveGatePill({ ev }) {
+  const [zoom, setZoom] = useState(false);
   const tone = ev.cardState === 'red' ? 'red'
     : ev.cardState === 'yellow' ? 'amber'
     : 'emerald';
@@ -1003,9 +1004,26 @@ function LiveGatePill({ ev }) {
   const ago = ts ? Math.max(0, Math.floor((Date.now() - ts.getTime()) / 1000)) : 0;
   const agoStr = ago < 60 ? `${ago}s ago` : `${Math.floor(ago / 60)}m ago`;
   const stuNames = (ev.students || []).map((s) => s.name).filter(Boolean).slice(0, 3).join(', ');
-  return (
-    <div className={`flex items-center gap-3 rounded-lg border ${ring} px-3 py-2`}>
+
+  // FR signal display
+  const fr = ev.fr || {};
+  const conf = typeof fr.confidence === 'number' ? Math.round(fr.confidence * 100) : null;
+  const confTone = conf == null ? 'text-slate-500'
+    : conf >= 90 ? 'text-emerald-300'
+    : conf >= 70 ? 'text-amber-300' : 'text-red-300';
+  const liveBad = fr.spoof === true || fr.livenessPassed === false;
+  const showThumb = !!ev.capturePath;
+
+  const card = (
+    <div
+      onClick={() => (showThumb || ev.enrolledPhotoUrl) && setZoom(true)}
+      className={`flex items-center gap-3 rounded-lg border ${ring} px-3 py-2 ${(showThumb || ev.enrolledPhotoUrl) ? 'cursor-pointer hover:brightness-110' : ''}`}
+    >
       <span className={`h-2 w-2 rounded-full ${dot} flex-shrink-0`}></span>
+      {showThumb && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={ev.capturePath} alt="" className="w-8 h-8 rounded object-cover border border-slate-700 flex-shrink-0" />
+      )}
       <div className="min-w-0 flex-1">
         <div className="text-sm text-white font-medium truncate">
           {ev.chaperone?.name || '—'}
@@ -1013,6 +1031,22 @@ function LiveGatePill({ ev }) {
         <div className="text-[11px] text-slate-400 truncate">
           {stuNames || ev.decision} · {ev.gate}
         </div>
+        {(conf != null || liveBad) && (
+          <div className="flex items-center gap-1.5 mt-0.5">
+            {conf != null && (
+              <span className={`text-[9px] font-mono font-semibold ${confTone}`}>{conf}%</span>
+            )}
+            {fr.livenessPassed === true && (
+              <span className="text-[9px] font-semibold text-emerald-400/80 inline-flex items-center gap-0.5"><i className="ph ph-check-circle text-[10px]"></i>live</span>
+            )}
+            {liveBad && (
+              <span className="text-[9px] font-semibold text-red-400 inline-flex items-center gap-0.5"><i className="ph ph-shield-warning text-[10px]"></i>spoof</span>
+            )}
+            {typeof fr.retries === 'number' && fr.retries > 1 && (
+              <span className="text-[9px] text-slate-500">×{fr.retries}</span>
+            )}
+          </div>
+        )}
       </div>
       <div className="text-right flex-shrink-0">
         <div className="text-[10px] text-slate-500 tabular-nums">{agoStr}</div>
@@ -1021,6 +1055,58 @@ function LiveGatePill({ ev }) {
         )}
       </div>
     </div>
+  );
+
+  if (!zoom) return card;
+
+  return (
+    <>
+      {card}
+      <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setZoom(false)}>
+        <div className="max-w-3xl w-full glass-panel rounded-2xl border border-slate-700 p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h3 className="text-white font-semibold text-lg">{ev.chaperone?.name || 'Unknown'}</h3>
+              <p className="text-xs text-slate-400">{ev.gate} · {agoStr}</p>
+            </div>
+            <button onClick={() => setZoom(false)} className="text-slate-400 hover:text-white"><i className="ph ph-x text-xl"></i></button>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Enrolled</p>
+              {ev.enrolledPhotoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={ev.enrolledPhotoUrl} alt="" className="w-full aspect-square object-cover rounded-lg border border-emerald-500/30" />
+              ) : (
+                <div className="w-full aspect-square rounded-lg border border-slate-700 bg-slate-800 flex items-center justify-center text-slate-500 text-xs">No enrolled photo</div>
+              )}
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Captured at gate</p>
+              {ev.capturePath ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={ev.capturePath} alt="" className={`w-full aspect-square object-cover rounded-lg border ${liveBad ? 'border-red-500/50' : 'border-sky-500/30'}`} />
+              ) : (
+                <div className="w-full aspect-square rounded-lg border border-slate-700 bg-slate-800 flex items-center justify-center text-slate-500 text-xs">No capture</div>
+              )}
+            </div>
+          </div>
+          {(conf != null || fr.livenessPassed != null || fr.spoof != null) && (
+            <div className="mt-4 flex flex-wrap gap-2 text-xs">
+              {conf != null && <span className={`px-2 py-1 rounded border border-slate-700 bg-slate-900/60 ${confTone}`}>Confidence <strong>{conf}%</strong></span>}
+              {fr.livenessPassed != null && (
+                <span className={`px-2 py-1 rounded border ${fr.livenessPassed ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10' : 'border-red-500/30 text-red-300 bg-red-500/10'}`}>
+                  Liveness <strong>{fr.livenessPassed ? 'PASS' : 'FAIL'}</strong>
+                  {typeof fr.liveness === 'number' && ` (${(fr.liveness * 100).toFixed(0)}%)`}
+                </span>
+              )}
+              {fr.spoof === true && <span className="px-2 py-1 rounded border border-red-500/40 text-red-300 bg-red-500/10">SPOOF FLAGGED</span>}
+              {fr.engine && <span className="px-2 py-1 rounded border border-slate-700 bg-slate-900/60 text-slate-400">engine: {fr.engine}</span>}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
