@@ -119,6 +119,47 @@ const ROSTER = [
 
 const FIRST_CHAPERONE_NO = 9000099000; // out of the way of real allocations
 
+// FR signal generator — keeps demo numbers realistic per cardState/decision.
+function frSignals(item) {
+  if (item.decision === 'unknown_chaperone') {
+    // Unknown visitor: low-confidence, possible spoof, low liveness
+    const isSpoof = item.chaperone && /unknown|visitor/i.test(item.chaperone.name || '');
+    return {
+      confidence: +(0.32 + Math.random() * 0.18).toFixed(3),         // 0.32-0.50
+      distance:   +(0.55 + Math.random() * 0.15).toFixed(3),
+      liveness:   +(0.30 + Math.random() * 0.20).toFixed(3),
+      livenessPassed: false,
+      spoof: isSpoof,
+      retries: 2 + Math.floor(Math.random() * 2),
+      engine: 'arcface-r100-onnx',
+      enrolledPhotoPath: null,
+    };
+  }
+  if (item.cardState === 'yellow') {
+    return {
+      confidence: +(0.66 + Math.random() * 0.12).toFixed(3),         // 0.66-0.78
+      distance:   +(0.34 + Math.random() * 0.10).toFixed(3),
+      liveness:   +(0.62 + Math.random() * 0.15).toFixed(3),
+      livenessPassed: true,
+      spoof: false,
+      retries: 1 + Math.floor(Math.random() * 2),
+      engine: 'arcface-r100-onnx',
+      enrolledPhotoPath: null,
+    };
+  }
+  // green / ok
+  return {
+    confidence: +(0.90 + Math.random() * 0.08).toFixed(3),           // 0.90-0.98
+    distance:   +(0.18 + Math.random() * 0.08).toFixed(3),
+    liveness:   +(0.85 + Math.random() * 0.10).toFixed(3),
+    livenessPassed: true,
+    spoof: false,
+    retries: 1,
+    engine: 'arcface-r100-onnx',
+    enrolledPhotoPath: null,
+  };
+}
+
 admin.initializeApp({ credential: admin.credential.cert(SERVICE_ACCOUNT) });
 const db = admin.firestore();
 
@@ -209,6 +250,7 @@ async function seed() {
       }],
       capturePath: null,
       teacherRelease: null,
+      fr: frSignals(item),
       demoFlag: DEMO_FLAG,
     });
 
