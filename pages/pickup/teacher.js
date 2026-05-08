@@ -240,13 +240,16 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
         </div>
       </div>
 
-      {/* MAIN: students LEFT (the focus), chaperone face RIGHT (the proof) */}
+      {/* MAIN: students LEFT (the focus), chaperone face RIGHT (the proof).
+          Strong vertical divider between the two columns to visually separate
+          "who is being picked up" from "who is doing the pickup". */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 1fr) auto',
-        gap: 18, alignItems: 'center',
+        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 1.6fr) 1px minmax(120px, 0.6fr)',
+        gap: blocked ? 0 : 18, alignItems: 'stretch',
+        padding: '4px 0',
       }}>
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 0, paddingRight: blocked ? 0 : 4 }}>
           {!blocked && <StudentList students={ev.students || []} />}
           {blocked && (
             <div style={{
@@ -260,13 +263,23 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
 
         {!blocked && (
           <div style={{
+            width: 1, background: `linear-gradient(to bottom, transparent, ${ring}66, transparent)`,
+          }} />
+        )}
+
+        {!blocked && (
+          <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-            paddingLeft: 18, borderLeft: `2px solid ${ring}33`,
-            minWidth: big ? 140 : 110,
+            paddingLeft: 14,
+            minWidth: big ? 130 : 100,
           }}>
-            <Avatar src={chap.photoUrl} name={chap.name} size={big ? 110 : 76} ring={ring} />
             <div style={{
-              fontSize: big ? 14 : 12, fontWeight: 800, color: '#0f172a',
+              fontSize: 9, color: '#94a3b8', fontWeight: 800,
+              letterSpacing: 1.5, textTransform: 'uppercase',
+            }}>Picked up by</div>
+            <Avatar src={chap.photoUrl} name={chap.name} size={big ? 96 : 70} ring={ring} />
+            <div style={{
+              fontSize: big ? 13 : 11, fontWeight: 700, color: '#334155',
               textAlign: 'center', lineHeight: 1.15, maxWidth: big ? 140 : 110,
               wordBreak: 'break-word',
             }}>
@@ -364,11 +377,12 @@ function HeldCard({ ev, onAction, busy, exiting }) {
         }}>HELD · {timeAgo(ev.scannedAt)}</span>
       </div>
 
-      {/* MAIN: students LEFT (focus), chaperone face RIGHT */}
+      {/* MAIN: students LEFT (focus), chaperone face RIGHT — with an obvious
+          vertical divider so the teacher can scan name-first. */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 1fr) auto',
-        gap: 12, alignItems: 'center',
+        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 1.6fr) 1px minmax(72px, 0.55fr)',
+        gap: blocked ? 0 : 12, alignItems: 'stretch',
       }}>
         <div style={{ minWidth: 0 }}>
           {!blocked && <StudentList students={ev.students || []} compact />}
@@ -385,13 +399,23 @@ function HeldCard({ ev, onAction, busy, exiting }) {
 
         {!blocked && (
           <div style={{
+            width: 1, background: `linear-gradient(to bottom, transparent, ${ring}55, transparent)`,
+          }} />
+        )}
+
+        {!blocked && (
+          <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-            paddingLeft: 10, borderLeft: `2px solid ${ring}33`,
-            minWidth: 78,
+            paddingLeft: 8,
+            minWidth: 72,
           }}>
-            <Avatar src={chap.photoUrl} name={chap.name} size={62} ring={ring} />
             <div style={{
-              fontSize: 11, fontWeight: 800, color: '#0f172a',
+              fontSize: 8, color: '#94a3b8', fontWeight: 800,
+              letterSpacing: 1.2, textTransform: 'uppercase',
+            }}>Pickup by</div>
+            <Avatar src={chap.photoUrl} name={chap.name} size={56} ring={ring} />
+            <div style={{
+              fontSize: 11, fontWeight: 700, color: '#334155',
               textAlign: 'center', lineHeight: 1.1, maxWidth: 90,
               wordBreak: 'break-word',
             }}>
