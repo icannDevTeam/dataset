@@ -79,6 +79,57 @@ function StudentChip({ s }) {
   );
 }
 
+// Big student-name list — used as the LEFT column of every card.
+// Teacher-first: students are the focus, the chaperone is the proof.
+function StudentList({ students = [], compact = false }) {
+  if (students.length === 0) return null;
+  // Scale name size by count so 1 student feels huge, 5 still readable.
+  const scale = compact
+    ? (students.length <= 2 ? 22 : students.length <= 4 ? 18 : 15)
+    : (students.length === 1 ? 38 : students.length <= 2 ? 30 : students.length <= 4 ? 24 : 20);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 4 : 8, minWidth: 0 }}>
+      <div style={{
+        fontSize: compact ? 10 : 11, color: '#92400e', fontWeight: 800,
+        letterSpacing: 1.5, textTransform: 'uppercase',
+      }}>
+        Picking up · {students.length}
+      </div>
+      <div style={{
+        display: 'flex', flexDirection: 'column',
+        gap: compact ? 2 : 4,
+      }}>
+        {students.map((s, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'baseline', gap: 10,
+            paddingTop: i === 0 ? 0 : (compact ? 4 : 6),
+            borderTop: i === 0 ? 'none' : '1px dashed #fcd34d',
+          }}>
+            <div style={{
+              fontSize: scale, fontWeight: 900, color: '#0f172a',
+              lineHeight: 1.05, letterSpacing: -0.3,
+              wordBreak: 'break-word',
+            }}>
+              {s.name}
+            </div>
+            {s.homeroom && (
+              <div style={{
+                fontSize: Math.max(11, Math.round(scale * 0.45)),
+                fontWeight: 700, color: '#92400e',
+                background: '#fff7ea', border: '1px solid #FFD86A',
+                borderRadius: 8, padding: '1px 7px',
+                whiteSpace: 'nowrap',
+              }}>
+                {s.homeroom}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PairingScreen({ onPaired }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -178,40 +229,64 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
       ...exitStyle,
     }}>
       <div style={{
-        display: 'inline-block', alignSelf: 'flex-start',
-        background: ring, color: '#fff', fontWeight: 800, fontSize: 12,
-        padding: '4px 12px', borderRadius: 999, letterSpacing: 1,
-      }}>{label}</div>
-
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-        <Avatar src={chap.photoUrl} name={chap.name} size={big ? 96 : 64} ring={ring} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: big ? 24 : 18, fontWeight: 800, color: '#0f172a', lineHeight: 1.15 }}>
-            {chap.name || 'Unknown'}
-          </div>
-          {chap.relation && <div style={{ fontSize: 13, color: '#64748b', marginTop: 2, textTransform: 'capitalize' }}>{chap.relation}</div>}
-          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
-            {fmtTime(ev.scannedAt)} · {timeAgo(ev.scannedAt)}
-          </div>
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+      }}>
+        <div style={{
+          background: ring, color: '#fff', fontWeight: 800, fontSize: 12,
+          padding: '4px 12px', borderRadius: 999, letterSpacing: 1,
+        }}>{label}</div>
+        <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
+          {fmtTime(ev.scannedAt)} · {timeAgo(ev.scannedAt)}
         </div>
       </div>
 
-      {!blocked && ev.students?.length > 0 && (
-        <div>
-          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6, fontWeight: 600 }}>PICKING UP</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {ev.students.map((s, i) => <StudentChip key={i} s={s} />)}
+      {/* MAIN: students LEFT (the focus), chaperone face RIGHT (the proof) */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 1fr) auto',
+        gap: 18, alignItems: 'center',
+      }}>
+        <div style={{ minWidth: 0 }}>
+          {!blocked && <StudentList students={ev.students || []} />}
+          {blocked && (
+            <div style={{
+              padding: 14, background: '#fef2f2', borderRadius: 12, border: '1px solid #fecaca',
+              fontSize: 14, color: '#991b1b', fontWeight: 600,
+            }}>
+              This person is not enrolled. Verify ID before releasing or hold for officer review.
+            </div>
+          )}
+        </div>
+
+        {!blocked && (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+            paddingLeft: 18, borderLeft: `2px solid ${ring}33`,
+            minWidth: big ? 140 : 110,
+          }}>
+            <Avatar src={chap.photoUrl} name={chap.name} size={big ? 110 : 76} ring={ring} />
+            <div style={{
+              fontSize: big ? 14 : 12, fontWeight: 800, color: '#0f172a',
+              textAlign: 'center', lineHeight: 1.15, maxWidth: big ? 140 : 110,
+              wordBreak: 'break-word',
+            }}>
+              {chap.name || 'Unknown'}
+            </div>
+            {chap.relation && (
+              <div style={{
+                fontSize: 10, color: '#fff', background: '#64748b',
+                padding: '2px 8px', borderRadius: 999, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: 0.5,
+              }}>
+                {chap.relation}
+              </div>
+            )}
           </div>
-        </div>
-      )}
-      {blocked && (
-        <div style={{
-          padding: 12, background: '#fef2f2', borderRadius: 10, border: '1px solid #fecaca',
-          fontSize: 13, color: '#991b1b',
-        }}>
-          This person is not enrolled in the system. Check ID before releasing or hold for officer review.
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* Divider line above the action buttons */}
+      <div style={{ height: 1, background: '#e2e8f0', margin: '4px -4px 0' }} />
 
       <div style={{ display: 'flex', gap: 10 }}>
         <button
@@ -286,45 +361,56 @@ function HeldCard({ ev, onAction, busy, exiting }) {
           background: '#fff7ea', color: '#92400e', fontWeight: 700, fontSize: 10,
           padding: '3px 9px', borderRadius: 999, letterSpacing: 0.5,
           border: '1px solid #fde68a',
-        }}>HELD</span>
+        }}>HELD · {timeAgo(ev.scannedAt)}</span>
       </div>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <Avatar src={chap.photoUrl} name={chap.name} size={56} ring={ring} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            fontSize: 16, fontWeight: 800, color: '#0f172a', lineHeight: 1.15,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
-            {chap.name || 'Unknown'}
-          </div>
-          {chap.relation && (
-            <div style={{ fontSize: 11, color: '#64748b', marginTop: 1, textTransform: 'capitalize' }}>
-              {chap.relation}
+      {/* MAIN: students LEFT (focus), chaperone face RIGHT */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 1fr) auto',
+        gap: 12, alignItems: 'center',
+      }}>
+        <div style={{ minWidth: 0 }}>
+          {!blocked && <StudentList students={ev.students || []} compact />}
+          {blocked && (
+            <div style={{
+              fontSize: 12, fontWeight: 700, color: '#991b1b',
+              background: '#fef2f2', border: '1px solid #fecaca',
+              borderRadius: 8, padding: '8px 10px',
+            }}>
+              Not enrolled — verify before release
             </div>
           )}
-          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
-            Held since {fmtTime(ev.scannedAt)} · {timeAgo(ev.scannedAt)}
-          </div>
         </div>
+
+        {!blocked && (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+            paddingLeft: 10, borderLeft: `2px solid ${ring}33`,
+            minWidth: 78,
+          }}>
+            <Avatar src={chap.photoUrl} name={chap.name} size={62} ring={ring} />
+            <div style={{
+              fontSize: 11, fontWeight: 800, color: '#0f172a',
+              textAlign: 'center', lineHeight: 1.1, maxWidth: 90,
+              wordBreak: 'break-word',
+            }}>
+              {chap.name || 'Unknown'}
+            </div>
+            {chap.relation && (
+              <div style={{
+                fontSize: 9, color: '#64748b', fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: 0.4,
+              }}>
+                {chap.relation}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {!blocked && ev.students?.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {ev.students.map((s, i) => (
-            <div key={i} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              background: '#fff7ea', border: '1px solid #FFD86A',
-              borderRadius: 10, padding: '4px 8px',
-              fontSize: 11, fontWeight: 700, color: '#1f2937',
-            }}>
-              <Avatar src={s.photoUrl} name={s.name} size={22} ring="#FFD86A" />
-              <span style={{ whiteSpace: 'nowrap' }}>{s.name}</span>
-              {s.homeroom && <span style={{ color: '#92400e', fontWeight: 600 }}>· {s.homeroom}</span>}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Divider above the action button */}
+      <div style={{ height: 1, background: '#e2e8f0', margin: '2px -2px 0' }} />
 
       <button
         type="button"

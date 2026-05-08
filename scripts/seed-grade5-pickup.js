@@ -66,6 +66,17 @@ const ROSTER = [
     terminalId: 'cf18e11f9d8e',
     status: 'pending', cardState: 'green', decision: 'ok', minutesAgo: 4,
   },
+  // Multi-student pickup: one parent collecting siblings (3 kids) — demos the big list state
+  {
+    students: [
+      { id: '1870001744', name: 'Connor Henry Owen',     homeroom: '5A' },
+      { id: '1970003014', name: 'Carter Surya Putra',    homeroom: '5A' },
+      { id: '1870002777', name: 'Ayla Madina Zulkarnain', homeroom: '5A' },
+    ],
+    chaperone: { name: 'Carpool Driver - Bu Ratna', relation: 'Other', phone: '+62 821 1414 9090' },
+    terminalId: '2dc4c6f35f89',
+    status: 'pending', cardState: 'yellow', decision: 'ok', minutesAgo: 1,
+  },
   // ── HELD (below the divider, smaller cards in a grid) ────────────────────
   {
     student: { id: '2470006068', name: 'Soyi Shin', homeroom: '5A' },
@@ -90,6 +101,16 @@ const ROSTER = [
     chaperone: { name: 'Putri Surya', relation: 'Mother', phone: '+62 821 6060 7070' },
     terminalId: '2dc4c6f35f89',
     status: 'held', cardState: 'green', decision: 'ok', minutesAgo: 11,
+  },
+  // Multi-student held: 2 siblings being picked up by an aunt
+  {
+    students: [
+      { id: '1870002777', name: 'Ayla Madina Zulkarnain', homeroom: '5A' },
+      { id: '1970003074', name: 'Shaylene Louise Mak',    homeroom: '5B' },
+    ],
+    chaperone: { name: 'Aunt Diana Halim', relation: 'Aunt', phone: '+62 813 1717 8181' },
+    terminalId: '875e8b213c76',
+    status: 'held', cardState: 'green', decision: 'ok', minutesAgo: 12,
   },
   {
     student: { id: '1870002777', name: 'Ayla Madina Zulkarnain', homeroom: '5A' },
@@ -192,6 +213,13 @@ async function seed() {
     const recordedAt = new Date(now - item.minutesAgo * 60_000);
     const eventId = `g5seed-${chaperoneId}-${recordedAt.getTime()}`;
 
+    // Normalize: support either single .student or .students[] in the roster
+    const studentList = Array.isArray(item.students) && item.students.length > 0
+      ? item.students
+      : [item.student];
+    const studentIds = studentList.map((s) => s.id);
+    const homerooms = Array.from(new Set(studentList.map((s) => s.homeroom).filter(Boolean)));
+
     // 1. Approved chaperone doc.
     await db.doc(`tenants/${TENANT}/chaperones/${chaperoneId}`).set({
       chaperoneId,
@@ -205,8 +233,8 @@ async function seed() {
       guardianName: item.chaperone.name,
       guardianEmail: null,
       guardianPhone: item.chaperone.phone,
-      authorizedStudentIds: [item.student.id],
-      studentClasses: [item.student.homeroom],
+      authorizedStudentIds: studentIds,
+      studentClasses: homerooms,
       studentGrades: ['5'],
       facePaths: [],
       status: 'approved_pending_faces',
@@ -242,12 +270,12 @@ async function seed() {
         suspended: false,
         reEnrollOverdue: false,
       },
-      students: [{
-        id: item.student.id,
-        name: item.student.name,
-        homeroom: item.student.homeroom,
+      students: studentList.map((s) => ({
+        id: s.id,
+        name: s.name,
+        homeroom: s.homeroom,
         photoUrl: null,
-      }],
+      })),
       capturePath: null,
       teacherRelease: null,
       fr: frSignals(item),
@@ -255,7 +283,7 @@ async function seed() {
     });
 
     console.log(`[+] ${item.status.toUpperCase().padEnd(8)} ${chaperoneId}` +
-      `  ${item.chaperone.name}  →  ${item.student.name} (${item.student.homeroom})` +
+      `  ${item.chaperone.name}  →  ${studentList.map((s) => s.name).join(' + ')}` +
       `  @ ${TERMINALS[item.terminalId]}`);
   }
   console.log('\nDone. The Grade 5 iPad should now show 5 active (cap 2 visible) + 8 held pickups.');
