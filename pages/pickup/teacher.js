@@ -173,7 +173,7 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
       border: `4px solid ${ring}`, boxShadow: `0 12px 40px ${ring}33`,
       padding: big ? 22 : 14,
       display: 'flex', flexDirection: 'column', gap: 14,
-      transition: 'transform 380ms cubic-bezier(0.4, 0, 0.2, 1), opacity 380ms ease',
+      transition: 'transform 180ms cubic-bezier(0.4, 0, 0.2, 1), opacity 180ms ease',
       transformOrigin: 'center top',
       ...exitStyle,
     }}>
@@ -273,8 +273,8 @@ function HeldCard({ ev, onAction, busy, exiting }) {
       boxShadow: `0 6px 20px ${ring}22, 0 2px 6px rgba(0,0,0,0.15)`,
       padding: 14,
       display: 'flex', flexDirection: 'column', gap: 10,
-      transition: 'transform 380ms cubic-bezier(0.4, 0, 0.2, 1), opacity 380ms ease',
-      animation: 'pickupHeldIn 360ms cubic-bezier(0.4, 0, 0.2, 1)',
+      transition: 'transform 180ms cubic-bezier(0.4, 0, 0.2, 1), opacity 180ms ease',
+      animation: 'pickupHeldIn 180ms cubic-bezier(0.4, 0, 0.2, 1)',
       ...exitStyle,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -372,7 +372,7 @@ function HeldListRow({ ev, onAction, busy, exiting }) {
       boxShadow: '0 1px 3px rgba(0,0,0,0.18)',
       opacity: exiting ? 0 : 1,
       transform: exiting === 'release' ? 'translateX(60px)' : 'none',
-      transition: 'opacity 320ms ease, transform 320ms ease',
+      transition: 'opacity 180ms ease, transform 180ms ease',
     }}>
       {ev.chaperonePhotoUrl ? (
         <img src={ev.chaperonePhotoUrl} alt="" style={{
@@ -720,8 +720,13 @@ export default function TeacherTabletPage() {
     if (busy[id] || exiting[id]) return;
     setBusy((b) => ({ ...b, [id]: true }));
     setExiting((e) => ({ ...e, [id]: action })); // kick off CSS transition immediately
-    const ANIM_MS = 380;
-    const animDone = new Promise((r) => setTimeout(r, ANIM_MS));
+    // Optimistically drop the card from the local feed so the next one slides
+    // in instantly — we don't wait for the network or the exit animation.
+    setFeed((f) => ({
+      ...f,
+      active: f.active.filter((x) => x.id !== id),
+      held: f.held.filter((x) => x.id !== id),
+    }));
     try {
       const r = await fetch(`/api/pickup/tablet/release`, {
         method: 'POST',
@@ -729,27 +734,21 @@ export default function TeacherTabletPage() {
         body: JSON.stringify({ eventId: ev.eventId || ev.id, action }),
         cache: 'no-store',
       });
-      const j = await r.json();
-      // 404 = the event no longer exists (already resolved on another iPad,
-      // or stale state from a cached feed). Don't alert — just refresh.
-      if (r.status === 404) {
-        await animDone;
-        await pollFeed();
-        return;
+      // 404 = the event no longer exists. Just resync silently.
+      if (r.status === 404) { pollFeed(); return; }
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j.error || 'failed');
       }
-      if (!r.ok) throw new Error(j.error || 'failed');
-      await animDone; // let the card finish its exit animation
-      await pollFeed(); // server now reflects new status; rerender drops/relocates the card
+      // Refresh in background to reconcile (status, new arrivals, held promotions).
+      pollFeed();
     } catch (e) {
-      // rollback animation so user sees the card return + the error
-      setExiting((m) => { const n = { ...m }; delete n[id]; return n; });
+      // Rollback: refresh from server so the card reappears in its true state.
+      pollFeed();
       alert(e.message);
     } finally {
       setBusy((b) => { const n = { ...b }; delete n[id]; return n; });
-      // clear exiting after a tick so the freshly-fetched feed renders normally
-      setTimeout(() => {
-        setExiting((m) => { const n = { ...m }; delete n[id]; return n; });
-      }, 50);
+      setExiting((m) => { const n = { ...m }; delete n[id]; return n; });
     }
   };
 
