@@ -31,11 +31,11 @@ const TERMINALS = {
   '875e8b213c76': 'Basement 1 Terminal (DS-K1T341AMF)',
 };
 
-// Realistic Grade 5 demo: 8 chaperones, 8 events, mix of pending/held,
-// covering the 3 terminals the Grade 5 iPad watches. Timestamps spread
-// from "just now" to ~12 minutes ago so the cards look organic.
+// Realistic Grade 5 demo: many chaperones + events covering all three
+// terminals, mix of pending/held, mix of green/yellow/red. Timestamps
+// spread from "just now" to ~22 minutes ago so the cards look organic.
 const ROSTER = [
-  // ── PENDING (active rail) ───────────────────────────────────────
+  // ── PENDING (active rail, hard-capped to 2 client-side; rest queue up) ──
   {
     student: { id: '1870001744', name: 'Connor Henry Owen', homeroom: '5A' },
     chaperone: { name: 'Daniel Owen', relation: 'Father', phone: '+62 812 1111 2222' },
@@ -60,7 +60,13 @@ const ROSTER = [
     terminalId: '875e8b213c76',
     status: 'pending', cardState: 'yellow', decision: 'ok', minutesAgo: 3,
   },
-  // ── HELD (below rail, smaller) ──────────────────────────────────
+  {
+    student: { id: '2470006068', name: 'Soyi Shin', homeroom: '5A' },
+    chaperone: { name: 'Min-Jung Shin', relation: 'Mother', phone: '+62 817 9090 1010' },
+    terminalId: 'cf18e11f9d8e',
+    status: 'pending', cardState: 'green', decision: 'ok', minutesAgo: 4,
+  },
+  // ── HELD (below the divider, smaller cards in a grid) ────────────────────
   {
     student: { id: '2470006068', name: 'Soyi Shin', homeroom: '5A' },
     chaperone: { name: 'Hyun-Woo Shin', relation: 'Father', phone: '+62 817 1212 3434' },
@@ -83,7 +89,31 @@ const ROSTER = [
     student: { id: '1970003014', name: 'Carter Surya Putra', homeroom: '5A' },
     chaperone: { name: 'Putri Surya', relation: 'Mother', phone: '+62 821 6060 7070' },
     terminalId: '2dc4c6f35f89',
-    status: 'held', cardState: 'green', decision: 'ok', minutesAgo: 12,
+    status: 'held', cardState: 'green', decision: 'ok', minutesAgo: 11,
+  },
+  {
+    student: { id: '1870002777', name: 'Ayla Madina Zulkarnain', homeroom: '5A' },
+    chaperone: { name: 'Sari Zulkarnain', relation: 'Mother', phone: '+62 822 3030 1010' },
+    terminalId: 'cf18e11f9d8e',
+    status: 'held', cardState: 'yellow', decision: 'ok', minutesAgo: 13,
+  },
+  {
+    student: { id: '1970003074', name: 'Shaylene Louise Mak', homeroom: '5B' },
+    chaperone: { name: 'Unknown Visitor', relation: 'Other', phone: '+62 800 0000 0000' },
+    terminalId: '875e8b213c76',
+    status: 'held', cardState: 'red', decision: 'unknown_chaperone', minutesAgo: 16,
+  },
+  {
+    student: { id: '1870001744', name: 'Connor Henry Owen', homeroom: '5A' },
+    chaperone: { name: 'Sophia Owen', relation: 'Sister', phone: '+62 813 7070 8080' },
+    terminalId: '2dc4c6f35f89',
+    status: 'held', cardState: 'green', decision: 'ok', minutesAgo: 18,
+  },
+  {
+    student: { id: '2470006068', name: 'Soyi Shin', homeroom: '5A' },
+    chaperone: { name: 'Driver - Pak Joko', relation: 'Other', phone: '+62 856 1010 2020' },
+    terminalId: 'cf18e11f9d8e',
+    status: 'held', cardState: 'yellow', decision: 'ok', minutesAgo: 22,
   },
 ];
 
@@ -186,7 +216,7 @@ async function seed() {
       `  ${item.chaperone.name}  →  ${item.student.name} (${item.student.homeroom})` +
       `  @ ${TERMINALS[item.terminalId]}`);
   }
-  console.log('\nDone. The Grade 5 iPad should now show 4 active + 4 held pickups.');
+  console.log('\nDone. The Grade 5 iPad should now show 5 active (cap 2 visible) + 8 held pickups.');
 }
 
 (async () => {

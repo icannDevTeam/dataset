@@ -253,61 +253,83 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
   );
 }
 
-function HeldRow({ ev, onAction, busy, exiting }) {
+function HeldCard({ ev, onAction, busy, exiting }) {
   const blocked = ev.blocked || ev.cardState === 'red';
   const ring = blocked ? '#EF4444' : ev.cardState === 'yellow' ? '#FCBF11' : '#22C55E';
+  const label = blocked ? 'BLOCKED' : ev.cardState === 'yellow' ? 'VERIFY' : 'AUTHORIZED';
   const chap = ev.chaperone || {};
-  const studentNames = ev.students?.map((s) => s.name).join(', ') || '—';
 
-  // When releasing from held: fade + slide right.
+  // Releasing from held: fade + slide right.
   const exitStyle = exiting === 'release'
-    ? { opacity: 0, transform: 'translateX(60px) scale(0.95)', pointerEvents: 'none' }
-    : { opacity: 1, transform: 'translateY(0) scale(1)' };
+    ? { opacity: 0, transform: 'translateX(60px) scale(0.92)', pointerEvents: 'none' }
+    : {};
 
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 14,
-      background: 'linear-gradient(135deg, #1e293b 0%, #243047 100%)',
-      border: `2px solid ${ring}66`,
-      borderLeft: `5px solid ${ring}`,
-      borderRadius: 14, padding: '12px 16px',
-      boxShadow: `0 6px 20px rgba(0,0,0,0.25), inset 0 0 0 1px ${ring}22`,
+      background: '#fff', borderRadius: 16,
+      border: `3px solid ${ring}`,
+      boxShadow: `0 6px 20px ${ring}22, 0 2px 6px rgba(0,0,0,0.15)`,
+      padding: 14,
+      display: 'flex', flexDirection: 'column', gap: 10,
       transition: 'transform 380ms cubic-bezier(0.4, 0, 0.2, 1), opacity 380ms ease',
       animation: 'pickupHeldIn 360ms cubic-bezier(0.4, 0, 0.2, 1)',
       ...exitStyle,
     }}>
-      <Avatar src={chap.photoUrl} name={chap.name} size={56} ring={ring} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{
-            color: '#f1f5f9', fontWeight: 800, fontSize: 16,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 220,
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{
+          background: ring, color: '#fff', fontWeight: 800, fontSize: 10,
+          padding: '3px 9px', borderRadius: 999, letterSpacing: 1,
+        }}>{label}</span>
+        <span style={{
+          background: '#fff7ea', color: '#92400e', fontWeight: 700, fontSize: 10,
+          padding: '3px 9px', borderRadius: 999, letterSpacing: 0.5,
+          border: '1px solid #fde68a',
+        }}>HELD</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <Avatar src={chap.photoUrl} name={chap.name} size={56} ring={ring} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 16, fontWeight: 800, color: '#0f172a', lineHeight: 1.15,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             {chap.name || 'Unknown'}
-          </span>
+          </div>
           {chap.relation && (
-            <span style={{ color: '#94a3b8', fontSize: 12, textTransform: 'capitalize' }}>· {chap.relation}</span>
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 1, textTransform: 'capitalize' }}>
+              {chap.relation}
+            </div>
           )}
-          {blocked && (
-            <span style={{
-              background: '#7f1d1d', color: '#fecaca', fontSize: 10, fontWeight: 800,
-              padding: '2px 8px', borderRadius: 999, letterSpacing: 0.5,
-            }}>BLOCKED</span>
-          )}
-        </div>
-        <div style={{ color: '#cbd5e1', fontSize: 13, marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {studentNames}
-        </div>
-        <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
-          Held since {fmtTime(ev.scannedAt)} · {timeAgo(ev.scannedAt)}
+          <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+            Held since {fmtTime(ev.scannedAt)} · {timeAgo(ev.scannedAt)}
+          </div>
         </div>
       </div>
+
+      {!blocked && ev.students?.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {ev.students.map((s, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: '#fff7ea', border: '1px solid #FFD86A',
+              borderRadius: 10, padding: '4px 8px',
+              fontSize: 11, fontWeight: 700, color: '#1f2937',
+            }}>
+              <Avatar src={s.photoUrl} name={s.name} size={22} ring="#FFD86A" />
+              <span style={{ whiteSpace: 'nowrap' }}>{s.name}</span>
+              {s.homeroom && <span style={{ color: '#92400e', fontWeight: 600 }}>· {s.homeroom}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
       <button
         type="button"
         onClick={() => onAction(ev, 'release')}
         disabled={busy[ev.id] || !!exiting}
         style={{
-          padding: '10px 18px', background: '#16a34a', color: '#fff',
+          marginTop: 2, padding: '11px', background: '#16a34a', color: '#fff',
           border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 800,
           cursor: busy[ev.id] || exiting ? 'not-allowed' : 'pointer',
           opacity: busy[ev.id] || exiting ? 0.6 : 1,
@@ -322,6 +344,11 @@ function HeldRow({ ev, onAction, busy, exiting }) {
       </button>
     </div>
   );
+}
+
+function HeldRow({ ev, onAction, busy, exiting }) {
+  // Back-compat shim — delegates to HeldCard.
+  return <HeldCard ev={ev} onAction={onAction} busy={busy} exiting={exiting} />;
 }
 
 function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
@@ -732,7 +759,7 @@ export default function TeacherTabletPage() {
         )}
 
         {/* Active panel: max 2 cards */}
-        <div style={{ padding: '22px', maxWidth: 1200, margin: '0 auto' }}>
+        <div style={{ padding: '22px', maxWidth: 1400, margin: '0 auto' }}>
           {(() => {
             const activeTwo = (feed.active || []).slice(0, 2);
             if (activeTwo.length === 0) {
@@ -758,21 +785,49 @@ export default function TeacherTabletPage() {
             );
           })()}
 
-          {/* Held rail */}
+          {/* Divider + Held rail */}
           {feed.held.length > 0 && (
-            <div style={{ marginTop: 30 }}>
+            <div style={{ marginTop: 36 }}>
+              {/* Divider line with inline label */}
               <div style={{
-                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
-                color: '#cbd5e1', fontSize: 14, fontWeight: 700, letterSpacing: 1,
+                display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18,
               }}>
-                <span>ON HOLD</span>
-                <span style={{ background: '#f59e0b', color: '#fff', borderRadius: 999, padding: '2px 10px', fontSize: 11 }}>
-                  {feed.held.length}
-                </span>
+                <div style={{
+                  flex: 1, height: 1,
+                  background: 'linear-gradient(to right, transparent, rgba(245,158,11,0.5), rgba(245,158,11,0.5))',
+                }} />
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '6px 16px', borderRadius: 999,
+                  background: 'rgba(245,158,11,0.12)',
+                  border: '1px solid rgba(245,158,11,0.4)',
+                  color: '#fbbf24', fontSize: 12, fontWeight: 800, letterSpacing: 2,
+                  whiteSpace: 'nowrap',
+                }}>
+                  <span style={{
+                    display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                    background: '#f59e0b', boxShadow: '0 0 10px #f59e0b',
+                  }} />
+                  ON HOLD
+                  <span style={{
+                    background: '#f59e0b', color: '#1f1300',
+                    borderRadius: 999, padding: '1px 9px', fontSize: 11, fontWeight: 900,
+                  }}>{feed.held.length}</span>
+                </div>
+                <div style={{
+                  flex: 1, height: 1,
+                  background: 'linear-gradient(to left, transparent, rgba(245,158,11,0.5), rgba(245,158,11,0.5))',
+                }} />
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+              {/* Held cards: smaller, grid (3-up at wide widths, 2-up tablet, 1-up phone) */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                gap: 14,
+              }}>
                 {feed.held.map((ev) => (
-                  <HeldRow key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} />
+                  <HeldCard key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} />
                 ))}
               </div>
             </div>
