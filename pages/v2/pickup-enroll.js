@@ -14,6 +14,8 @@
 import Head from 'next/head';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
+import TerminalPicker from '../../components/v2/pickup/TerminalPicker';
+import EnrollmentRunOverlay from '../../components/v2/pickup/EnrollmentRunOverlay';
 
 const REL_LABEL = {
   parent: 'Parent', mother: 'Mother', father: 'Father',
@@ -42,6 +44,10 @@ export default function PickupEnrollPage() {
   const [toast, setToast] = useState(null);
   const [collapsed, setCollapsed] = useState({});
   const [lightbox, setLightbox] = useState(null);
+  // Per-chaperone terminal-IP override (null/undefined = use grade defaults)
+  const [terminalOverrides, setTerminalOverrides] = useState({});
+  // Active enrollment run (drives the overlay). null = closed.
+  const [activeRun, setActiveRun] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -84,13 +90,23 @@ export default function PickupEnrollPage() {
       .filter((g) => g.chaperones.length > 0);
   }, [board, filter, search, selectedGrade]);
 
+  // Resolve which terminals will be hit for a given chaperone (override or defaults).
+  const resolveTerminalsFor = useCallback((c) => {
+    const all = c.enrollment?.allDevices || [];
+    const override = terminalOverrides[c.id];
+    const ips = override !== undefined && override !== null
+      ? override
+      : all.filter((d) => d.isMatched).map((d) => d.ip);
+    return all.filter((d) => ips.includes(d.ip)).map((d) => ({ ip: d.ip, name: d.name, isMatched: d.isMatched }));
+  }, [terminalOverrides]);
+
   const visibleEnrollableIds = useMemo(() => {
     const ids = [];
     filteredGroups.forEach((g) => g.chaperones.forEach((c) => {
-      if (!c.noPhotos && c.matchedDeviceCount > 0) ids.push(c.id);
+      if (!c.noPhotos && resolveTerminalsFor(c).length > 0) ids.push(c.id);
     }));
     return ids;
-  }, [filteredGroups]);
+  }, [filteredGroups, resolveTerminalsFor]);
 
   const allSelected = visibleEnrollableIds.length > 0 && visibleEnrollableIds.every((id) => selected[id]);
   const selectedCount = Object.values(selected).filter(Boolean).length;
@@ -104,55 +120,55 @@ export default function PickupEnrollPage() {
     }
   };
 
-  const enrollIds = async (ids, label) => {
-    if (ids.length === 0) return;
-    setBusy(true);
-    try {
-      const r = await fetch('/api/pickup/admin/reenroll', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chaperoneIds: ids }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || j.message || 'enrol failed');
-      const ok = (j.summary || []).filter((s) => s.ok).length;
-      showToast(
-        ok === ids.length ? 'success' : 'warn',
-        `${label}: ${ok}/${ids.length} enrolled${ok < ids.length ? ` · ${ids.length - ok} failed` : ''}`,
-      );
-      setSelected({});
-      load();
-    } catch (e) {
-      showToast('error', `Enrol failed: ${e.message}`);
-    } finally {
-      setBusy(false);
-      setBusyId(null);
+  // Open the live overlay with an arbitrary set of chaperones. Each entry
+  // carries its resolved terminal IPs so the overlay knows what to push.
+  const startRun = (chaperones) => {
+    if (chaperones.length === 0) return;
+    const queue = chaperones
+      .map((c) => ({ id: c.id, name: c.name, terminals: resolveTerminalsFor(c) }))
+      .filter((q) => q.terminals.length > 0);
+    if (queue.length === 0) {
+      showToast('warn', 'No terminals selected for any of the chosen chaperones.');
+      return;
     }
+    setBusy(true);
+    setActiveRun(queue);
   };
 
-  const enrollSelected = async () => {
-    const ids = Object.keys(selected).filter((id) => selected[id]);
-    if (ids.length === 0) return;
-    if (!confirm(`Enrol ${ids.length} chaperone(s) on the matching grade-level terminal(s)?`)) return;
-    await enrollIds(ids, `${ids.length} chaperone(s)`);
+  const onRunDone = (runs) => {
+    const okCount = runs.filter((r) => r.status === 'success').length;
+    const failCount = runs.filter((r) => r.status === 'failed' || r.status === 'partial').length;
+    showToast(
+      failCount === 0 ? 'success' : 'warn',
+      `${okCount}/${runs.length} chaperones enrolled${failCount > 0 ? ` · ${failCount} need attention` : ''}`,
+    );
+    setActiveRun(null);
+    setBusy(false);
+    setBusyId(null);
+    setSelected({});
+    load();
   };
 
-  const enrollOne = async (c) => {
+  const enrollSelected = () => {
+    const ids = new Set(Object.keys(selected).filter((id) => selected[id]));
+    if (ids.size === 0) return;
+    const chaperones = [];
+    filteredGroups.forEach((g) => g.chaperones.forEach((c) => { if (ids.has(c.id)) chaperones.push(c); }));
+    startRun(chaperones);
+  };
+
+  const enrollOne = (c) => {
     setBusyId(c.id);
-    await enrollIds([c.id], c.name);
+    startRun([c]);
   };
 
-  const enrollGroup = async (group) => {
-    const ids = group.chaperones
-      .filter((c) => !c.noPhotos && !c.allEnrolled && c.matchedDeviceCount > 0)
-      .map((c) => c.id);
-    if (ids.length === 0) {
+  const enrollGroup = (group) => {
+    const chaperones = group.chaperones.filter((c) => !c.noPhotos && resolveTerminalsFor(c).length > 0);
+    if (chaperones.length === 0) {
       showToast('warn', `${group.homeroom}: nothing to enrol.`);
       return;
     }
-    if (!confirm(`Enrol all ${ids.length} pending chaperone(s) for ${group.homeroom}?`)) return;
-    await enrollIds(ids, `Class ${group.homeroom}`);
+    startRun(chaperones);
   };
 
   const grades = useMemo(() => {
@@ -308,7 +324,7 @@ export default function PickupEnrollPage() {
 
         {filteredGroups.map((group) => {
           const isCollapsed = collapsed[group.homeroom];
-          const pendingCount = group.chaperones.filter((c) => !c.allEnrolled && !c.noPhotos && c.matchedDeviceCount > 0).length;
+          const pendingCount = group.chaperones.filter((c) => !c.allEnrolled && !c.noPhotos && resolveTerminalsFor(c).length > 0).length;
           const doneCount = group.chaperones.filter((c) => c.allEnrolled).length;
           return (
             <section key={group.homeroom} className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden">
@@ -356,6 +372,9 @@ export default function PickupEnrollPage() {
                       onPhoto={() => c.facePhotoUrl && setLightbox({ url: c.facePhotoUrl, caption: c.name })}
                       busy={busy}
                       busyHere={busyId === c.id}
+                      selectedTerminalIps={terminalOverrides[c.id]}
+                      onTerminalsChange={(ips) => setTerminalOverrides((m) => ({ ...m, [c.id]: ips }))}
+                      resolvedTerminalCount={resolveTerminalsFor(c).length}
                     />
                   ))}
                 </div>
@@ -374,6 +393,15 @@ export default function PickupEnrollPage() {
             <div className="mt-3 text-center text-white text-sm">{lightbox.caption}</div>
           </div>
         </div>
+      )}
+
+      {/* Live enrollment run overlay */}
+      {activeRun && (
+        <EnrollmentRunOverlay
+          queue={activeRun}
+          onClose={() => { setActiveRun(null); setBusy(false); setBusyId(null); }}
+          onDone={onRunDone}
+        />
       )}
 
       {/* Toast */}
@@ -418,22 +446,26 @@ function StatCard({ label, value, icon, tone, hint, active, onClick }) {
   );
 }
 
-function ChaperoneCard({ c, checked, onCheck, onEnroll, onPhoto, busy, busyHere }) {
+function ChaperoneCard({
+  c, checked, onCheck, onEnroll, onPhoto, busy, busyHere,
+  selectedTerminalIps, onTerminalsChange, resolvedTerminalCount,
+}) {
+  const allDevices = c.enrollment?.allDevices || [];
   const ringClass =
     c.noPhotos                          ? 'ring-violet-500/60' :
     c.allEnrolled                       ? 'ring-emerald-500/70' :
     c.enrolledDeviceCount > 0           ? 'ring-amber-500/60' :
-    c.matchedDeviceCount === 0          ? 'ring-slate-700' :
+    allDevices.length === 0             ? 'ring-slate-700' :
                                           'ring-rose-500/60';
 
   const statusBadge =
     c.noPhotos                          ? { label: 'NEEDS PHOTO', cls: 'bg-violet-500/15 text-violet-300 border-violet-500/40', icon: 'ph-camera-slash' } :
     c.allEnrolled                       ? { label: 'ENROLLED',    cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40', icon: 'ph-check-circle' } :
     c.enrolledDeviceCount > 0           ? { label: 'PARTIAL',     cls: 'bg-amber-500/15 text-amber-300 border-amber-500/40', icon: 'ph-circle-half' } :
-    c.matchedDeviceCount === 0          ? { label: 'NO DEVICE',   cls: 'bg-slate-700/40 text-slate-400 border-slate-600', icon: 'ph-warning' } :
+    allDevices.length === 0             ? { label: 'NO TERMINAL', cls: 'bg-slate-700/40 text-slate-400 border-slate-600', icon: 'ph-warning' } :
                                           { label: 'NOT ENROLLED', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/40', icon: 'ph-x-circle' };
 
-  const canEnroll = !c.noPhotos && c.matchedDeviceCount > 0;
+  const canEnroll = !c.noPhotos && resolvedTerminalCount > 0;
 
   return (
     <div className={`relative rounded-xl border bg-gradient-to-br from-slate-900/70 to-slate-900/30 overflow-hidden transition-all ${
@@ -521,33 +553,21 @@ function ChaperoneCard({ c, checked, onCheck, onEnroll, onPhoto, busy, busyHere 
         </div>
       )}
 
-      {/* Device chips */}
+      {/* Terminal picker (configurable) */}
       <div className="px-4 py-2.5 border-t border-slate-800/60">
         <div className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5 flex items-center justify-between">
-          <span><i className="ph ph-cpu mr-1"></i>Terminal status</span>
-          {c.matchedDeviceCount > 0 && (
+          <span><i className="ph ph-cpu mr-1"></i>Pair with terminals</span>
+          {c.availableDeviceCount > 0 && (
             <span className="font-mono normal-case text-slate-400 tracking-normal">
-              {c.enrolledDeviceCount}/{c.matchedDeviceCount}
+              {c.enrolledDeviceCount}/{c.availableDeviceCount} live
             </span>
           )}
         </div>
-        <div className="flex flex-wrap gap-1">
-          {c.enrollment.matched.length === 0 ? (
-            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">
-              <i className="ph ph-warning mr-0.5"></i>No grade-matching device
-            </span>
-          ) : c.enrollment.matched.map((d) => (
-            <span key={d.ip} title={d.error || `${d.name} · ${d.ip}`}
-              className={`text-[10px] px-1.5 py-0.5 rounded border font-mono inline-flex items-center gap-0.5 ${
-                d.ok       ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                : d.attempted ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-                : 'bg-slate-800/50 text-slate-400 border-slate-700'
-              }`}>
-              {d.ok ? <i className="ph ph-check"></i> : d.attempted ? <i className="ph ph-x"></i> : <i className="ph ph-circle-dashed"></i>}
-              {d.name.replace(/\s*\(.*\)\s*$/, '').replace(/\s*\(.*\)/, '')}
-            </span>
-          ))}
-        </div>
+        <TerminalPicker
+          allDevices={allDevices}
+          selectedIps={selectedTerminalIps}
+          onChange={onTerminalsChange}
+        />
       </div>
 
       {/* Action footer */}
@@ -557,9 +577,14 @@ function ChaperoneCard({ c, checked, onCheck, onEnroll, onPhoto, busy, busyHere 
             className="block text-center text-xs px-3 py-2 rounded-lg bg-violet-500/15 border border-violet-500/40 text-violet-200 font-semibold hover:bg-violet-500/25">
             <i className="ph ph-camera-plus mr-1"></i>Upload chaperone photo first
           </a>
-        ) : c.matchedDeviceCount === 0 ? (
-          <div className="text-center text-[11px] text-slate-500 px-2 py-2">
-            No terminal in grade {c.studentGrades[0] || '?'}
+        ) : allDevices.length === 0 ? (
+          <a href="/v2/terminals"
+            className="block text-center text-xs px-3 py-2 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200 font-semibold hover:bg-amber-500/25">
+            <i className="ph ph-cpu mr-1"></i>Configure a terminal first
+          </a>
+        ) : resolvedTerminalCount === 0 ? (
+          <div className="text-center text-[11px] text-amber-300/80 px-2 py-2">
+            <i className="ph ph-list-checks mr-1"></i>Pick at least one terminal above to enrol
           </div>
         ) : (
           <button
@@ -572,8 +597,8 @@ function ChaperoneCard({ c, checked, onCheck, onEnroll, onPhoto, busy, busyHere 
             } disabled:opacity-50`}
           >
             {busyHere ? <><i className="ph ph-spinner-gap animate-spin mr-1"></i>Enrolling…</>
-              : c.allEnrolled ? <><i className="ph ph-arrows-clockwise mr-1"></i>Re-enrol</>
-              : <><i className="ph ph-fingerprint mr-1"></i>Enrol on {c.matchedDeviceCount} terminal{c.matchedDeviceCount !== 1 ? 's' : ''}</>}
+              : c.allEnrolled ? <><i className="ph ph-arrows-clockwise mr-1"></i>Re-enrol on {resolvedTerminalCount} terminal{resolvedTerminalCount !== 1 ? 's' : ''}</>
+              : <><i className="ph ph-fingerprint mr-1"></i>Enrol on {resolvedTerminalCount} terminal{resolvedTerminalCount !== 1 ? 's' : ''}</>}
           </button>
         )}
       </div>

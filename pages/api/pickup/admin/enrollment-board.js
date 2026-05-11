@@ -158,38 +158,44 @@ async function handler(req, res) {
         homeroom: studentMeta[sid]?.homeroom || null,
       }));
 
-      // Build per-device enrollment view
+      // Build per-device enrollment view. The UI now lets the operator
+      // pick ANY configured terminal (not just grade-matching ones), so we
+      // expose every available device with its match-status + last result.
       const lastResults = Array.isArray(c.deviceEnrollResults) ? c.deviceEnrollResults : [];
       const lastAttemptAt = c.deviceEnrollAttemptedAt || null;
       const resultByIp = new Map(lastResults.map((r) => [r.ip, r]));
 
-      const matched = [];
-      const unmatched = [];
-      for (const d of devicesPublic) {
-        if (deviceMatchesGrades(d, studentGrades)) {
-          const r = resultByIp.get(d.ip);
-          matched.push({
-            name: d.name,
-            ip: d.ip,
-            ok: r ? !!r.ok : false,
-            error: r && !r.ok ? (r.error || 'never attempted') : null,
-            attempted: !!r,
-            lastAttemptAt: r ? lastAttemptAt : null,
-          });
-        } else {
-          unmatched.push({ name: d.name, ip: d.ip });
-        }
-      }
+      const allDevices = devicesPublic.map((d) => {
+        const r = resultByIp.get(d.ip);
+        return {
+          name: d.name,
+          ip: d.ip,
+          section: d.section || null,
+          gradeScopes: d.gradeScopes || [],
+          isMatched: deviceMatchesGrades(d, studentGrades),
+          ok: r ? !!r.ok : false,
+          error: r && !r.ok ? (r.error || null) : null,
+          attempted: !!r,
+          lastAttemptAt: r ? lastAttemptAt : null,
+        };
+      });
 
-      const matchedAttempted = matched.filter((m) => m.attempted);
+      // Backwards-compatible split (still consumed by some legacy filters)
+      const matched = allDevices.filter((d) => d.isMatched);
+      const unmatched = allDevices.filter((d) => !d.isMatched).map((d) => ({ name: d.name, ip: d.ip }));
+
       const matchedOk = matched.filter((m) => m.ok);
-      const allEnrolled = matched.length > 0 && matchedOk.length === matched.length;
+      // "allEnrolled" is now defined as: there exists at least one successful
+      // enrollment AND no failed devices.
+      const okAny = allDevices.some((d) => d.ok);
+      const failedAny = allDevices.some((d) => d.attempted && !d.ok);
+      const allEnrolled = okAny && !failedAny;
       const noPhotos = photoCount === 0;
-      const needsEnroll = !noPhotos && matchedOk.length === 0;
+      const needsEnroll = !noPhotos && !okAny;
 
       if (noPhotos) awaitingPhotos += 1;
       else if (allEnrolled) fullyEnrolled += 1;
-      else if (matchedOk.length > 0) partiallyEnrolled += 1;
+      else if (okAny) partiallyEnrolled += 1;
       else neverEnrolled += 1;
 
       const item = {
@@ -207,12 +213,14 @@ async function handler(req, res) {
         studentClasses,
         studentGrades,
         authorizedStudents,
-        enrollment: { matched, unmatched },
+        // New canonical shape: every configured device + its match-status
+        enrollment: { matched, unmatched, allDevices, lastAttemptAt },
         allEnrolled,
         needsEnroll,
         noPhotos,
         matchedDeviceCount: matched.length,
-        enrolledDeviceCount: matchedOk.length,
+        enrolledDeviceCount: allDevices.filter((d) => d.ok).length,
+        availableDeviceCount: allDevices.length,
         suspended: !!c.suspendedAt,
       };
 
