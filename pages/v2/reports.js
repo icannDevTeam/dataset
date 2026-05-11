@@ -2,6 +2,7 @@ import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import PickupReportExportOverlay from '../../components/v2/reports/PickupReportExportOverlay';
+import OnboardingExportOverlay from '../../components/v2/reports/OnboardingExportOverlay';
 
 function getWIBDate(offset = 0) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -1972,6 +1973,7 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const fetchForms = async () => {
     setLoading(true); setError(null);
@@ -2135,13 +2137,14 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50">
             <i className="ph ph-arrows-clockwise mr-1"></i>{loading ? 'Loading…' : 'Apply filters'}
           </button>
-          <button onClick={exportCSV} disabled={!filtered.length}
-            className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30 rounded-lg text-sm font-medium disabled:opacity-50">
-            <i className="ph ph-file-csv mr-1"></i>Download CSV ({filtered.length})
+          <button onClick={() => setExportOpen(true)} disabled={!filtered.length}
+            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg text-sm font-semibold disabled:opacity-50 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+            <i className="ph ph-export mr-1"></i>Export report…
           </button>
-          <button onClick={handlePrint} disabled={!filtered.length}
-            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg text-sm font-semibold disabled:opacity-50">
-            <i className="ph ph-printer mr-1"></i>Print
+          <button onClick={exportCSV} disabled={!filtered.length}
+            title="Quick CSV — single-shot, no parameters"
+            className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30 rounded-lg text-sm font-medium disabled:opacity-50">
+            <i className="ph ph-file-csv mr-1"></i>Quick CSV ({filtered.length})
           </button>
         </div>
       </div>
@@ -2231,6 +2234,17 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
           </div>
         )}
       </div>
+
+      <OnboardingExportOverlay
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        defaultFrom={fromDate}
+        defaultTo={toDate}
+        defaultStatus={status}
+        defaultGrade={scope === 'grade' ? grade : ''}
+        defaultHomeroom={scope === 'individual' ? homeroom : ''}
+        defaultStudentId={scope === 'individual' ? studentId : ''}
+      />
     </div>
   );
 }
