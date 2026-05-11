@@ -44,8 +44,10 @@ export default function PickupEnrollPage() {
   const [toast, setToast] = useState(null);
   const [collapsed, setCollapsed] = useState({});
   const [lightbox, setLightbox] = useState(null);
-  // Per-chaperone terminal-IP override (null/undefined = use grade defaults)
-  const [terminalOverrides, setTerminalOverrides] = useState({});
+  // Per-CLASS terminal-IP override (homeroom -> ip[] | null/undefined = use defaults)
+  // Defaults are "all configured + enabled terminals visible to this group"
+  // (computed in resolveDefaultsFor).
+  const [classTerminalOverrides, setClassTerminalOverrides] = useState({});
   // Active enrollment run (drives the overlay). null = closed.
   const [activeRun, setActiveRun] = useState(null);
 
@@ -90,15 +92,37 @@ export default function PickupEnrollPage() {
       .filter((g) => g.chaperones.length > 0);
   }, [board, filter, search, selectedGrade]);
 
-  // Resolve which terminals will be hit for a given chaperone (override or defaults).
+  // Default terminals for a given class group: every configured + enabled
+  // terminal whose gradeScopes include the class's grade (or has empty
+  // scopes = shared gate). If nothing matches, fall back to all terminals
+  // so operators always see SOMETHING pre-selected.
+  const resolveDefaultsForGroup = useCallback((group) => {
+    const all = board?.devices || [];
+    if (all.length === 0) return [];
+    const grade = String(group.grade || '');
+    const matched = all.filter((d) =>
+      !d.gradeScopes || d.gradeScopes.length === 0 || d.gradeScopes.map(String).includes(grade)
+    );
+    return (matched.length ? matched : all).map((d) => d.ip);
+  }, [board]);
+
+  // Resolve which terminals will be hit for a given chaperone. Driven by
+  // the chaperone's class override (or that class's defaults).
   const resolveTerminalsFor = useCallback((c) => {
     const all = c.enrollment?.allDevices || [];
-    const override = terminalOverrides[c.id];
-    const ips = override !== undefined && override !== null
-      ? override
-      : all.filter((d) => d.isMatched).map((d) => d.ip);
-    return all.filter((d) => ips.includes(d.ip)).map((d) => ({ ip: d.ip, name: d.name, isMatched: d.isMatched }));
-  }, [terminalOverrides]);
+    const homeroom = ((c.studentClasses || [])[0] || '— UNASSIGNED').toUpperCase();
+    let ips = classTerminalOverrides[homeroom];
+    if (ips === undefined || ips === null) {
+      // Compute defaults: terminals whose gradeScopes match this chaperone's
+      // grades, falling back to every available device.
+      const matched = all.filter((d) => d.isMatched);
+      ips = (matched.length ? matched : all).map((d) => d.ip);
+    }
+    const ipSet = new Set(ips);
+    return all.filter((d) => ipSet.has(d.ip)).map((d) => ({
+      ip: d.ip, name: d.name, isMatched: d.isMatched,
+    }));
+  }, [classTerminalOverrides]);
 
   const visibleEnrollableIds = useMemo(() => {
     const ids = [];
@@ -326,6 +350,20 @@ export default function PickupEnrollPage() {
           const isCollapsed = collapsed[group.homeroom];
           const pendingCount = group.chaperones.filter((c) => !c.allEnrolled && !c.noPhotos && resolveTerminalsFor(c).length > 0).length;
           const doneCount = group.chaperones.filter((c) => c.allEnrolled).length;
+          const groupAllDevices = (board?.devices || []).map((d) => ({
+            name: d.name,
+            ip: d.ip,
+            section: d.section || null,
+            gradeScopes: d.gradeScopes || [],
+            isMatched: !d.gradeScopes || d.gradeScopes.length === 0
+              || d.gradeScopes.map(String).includes(String(group.grade || '')),
+            ok: false, attempted: false, error: null,
+          }));
+          const groupDefaults = resolveDefaultsForGroup(group);
+          const groupSelectedIps = classTerminalOverrides[group.homeroom];
+          const effectiveSelected = groupSelectedIps !== undefined && groupSelectedIps !== null
+            ? groupSelectedIps
+            : groupDefaults;
           return (
             <section key={group.homeroom} className="rounded-2xl border border-slate-800 bg-slate-950/40 overflow-hidden">
               {/* Group header */}
@@ -350,14 +388,32 @@ export default function PickupEnrollPage() {
                     </div>
                   </div>
                 </button>
-                {pendingCount > 0 && (
-                  <button onClick={() => enrollGroup(group)}
-                    disabled={busy}
-                    className="text-xs px-3.5 py-2 rounded-lg bg-brand-500 text-white font-semibold hover:bg-brand-600 disabled:opacity-50 shadow-md shadow-brand-500/20">
-                    <i className="ph ph-fingerprint mr-1"></i>
-                    Enrol class ({pendingCount})
-                  </button>
-                )}
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  {/* Class-level terminal picker (far right of class card) */}
+                  {groupAllDevices.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold hidden sm:inline">
+                        <i className="ph ph-cpu mr-1"></i>Terminals
+                      </span>
+                      <TerminalPicker
+                        allDevices={groupAllDevices}
+                        selectedIps={groupSelectedIps}
+                        defaultIps={groupDefaults}
+                        onChange={(ips) => setClassTerminalOverrides((m) => ({ ...m, [group.homeroom]: ips }))}
+                        align="right"
+                      />
+                    </div>
+                  )}
+                  {pendingCount > 0 && (
+                    <button onClick={() => enrollGroup(group)}
+                      disabled={busy || effectiveSelected.length === 0}
+                      title={effectiveSelected.length === 0 ? 'Pick at least one terminal' : ''}
+                      className="text-xs px-3.5 py-2 rounded-lg bg-brand-500 text-white font-semibold hover:bg-brand-600 disabled:opacity-50 shadow-md shadow-brand-500/20">
+                      <i className="ph ph-fingerprint mr-1"></i>
+                      Enrol class ({pendingCount})
+                    </button>
+                  )}
+                </div>
               </header>
 
               {!isCollapsed && (
@@ -372,8 +428,6 @@ export default function PickupEnrollPage() {
                       onPhoto={() => c.facePhotoUrl && setLightbox({ url: c.facePhotoUrl, caption: c.name })}
                       busy={busy}
                       busyHere={busyId === c.id}
-                      selectedTerminalIps={terminalOverrides[c.id]}
-                      onTerminalsChange={(ips) => setTerminalOverrides((m) => ({ ...m, [c.id]: ips }))}
                       resolvedTerminalCount={resolveTerminalsFor(c).length}
                     />
                   ))}
@@ -448,7 +502,7 @@ function StatCard({ label, value, icon, tone, hint, active, onClick }) {
 
 function ChaperoneCard({
   c, checked, onCheck, onEnroll, onPhoto, busy, busyHere,
-  selectedTerminalIps, onTerminalsChange, resolvedTerminalCount,
+  resolvedTerminalCount,
 }) {
   const allDevices = c.enrollment?.allDevices || [];
   const ringClass =
@@ -553,21 +607,24 @@ function ChaperoneCard({
         </div>
       )}
 
-      {/* Terminal picker (configurable) */}
-      <div className="px-4 py-2.5 border-t border-slate-800/60">
-        <div className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5 flex items-center justify-between">
-          <span><i className="ph ph-cpu mr-1"></i>Pair with terminals</span>
+      {/* Terminal summary (read-only — picker now lives on class header) */}
+      <div className="px-4 py-2 border-t border-slate-800/60">
+        <div className="text-[10px] text-slate-400 flex items-center justify-between gap-2">
+          <span>
+            <i className="ph ph-cpu text-slate-500 mr-1"></i>
+            {allDevices.length === 0
+              ? <span className="text-amber-300">No terminals configured</span>
+              : resolvedTerminalCount === 0
+                ? <span className="text-amber-300">Pick terminals on class header above</span>
+                : <>Will enrol on <span className="text-slate-200 font-semibold">{resolvedTerminalCount}</span> terminal{resolvedTerminalCount !== 1 ? 's' : ''}</>
+            }
+          </span>
           {c.availableDeviceCount > 0 && (
-            <span className="font-mono normal-case text-slate-400 tracking-normal">
+            <span className="font-mono text-slate-500 text-[10px]">
               {c.enrolledDeviceCount}/{c.availableDeviceCount} live
             </span>
           )}
         </div>
-        <TerminalPicker
-          allDevices={allDevices}
-          selectedIps={selectedTerminalIps}
-          onChange={onTerminalsChange}
-        />
       </div>
 
       {/* Action footer */}
@@ -584,7 +641,7 @@ function ChaperoneCard({
           </a>
         ) : resolvedTerminalCount === 0 ? (
           <div className="text-center text-[11px] text-amber-300/80 px-2 py-2">
-            <i className="ph ph-list-checks mr-1"></i>Pick at least one terminal above to enrol
+            <i className="ph ph-list-checks mr-1"></i>Pick at least one terminal on the class header
           </div>
         ) : (
           <button

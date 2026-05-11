@@ -20,14 +20,20 @@ const STATUS_PILL = (d) => {
 
 export default function TerminalPicker({
   allDevices = [],
-  selectedIps,         // controlled; null/undefined → defaults from isMatched
+  selectedIps,         // controlled; null/undefined → defaults from isMatched (or defaultIps)
+  defaultIps,          // optional override for defaults; e.g. class-level picker passes all enabled IPs
   onChange,            // (ips: string[]) => void
+  align = 'right',     // 'right' | 'left' — popover horizontal anchor
 }) {
   const [open, setOpen] = useState(false);
   const popRef = useRef(null);
 
-  // Compute defaults from grade-match
-  const defaults = allDevices.filter((d) => d.isMatched).map((d) => d.ip);
+  // Compute defaults: caller override wins, otherwise grade-matched, otherwise all.
+  const defaults = Array.isArray(defaultIps)
+    ? defaultIps
+    : (allDevices.some((d) => d.isMatched)
+        ? allDevices.filter((d) => d.isMatched).map((d) => d.ip)
+        : allDevices.map((d) => d.ip));
   const effective = selectedIps !== undefined && selectedIps !== null ? selectedIps : defaults;
   const selectedSet = new Set(effective);
 
@@ -113,7 +119,7 @@ export default function TerminalPicker({
       {/* Popover */}
       {open && (
         <div
-          className="absolute z-30 right-0 top-full mt-1.5 w-72 rounded-xl bg-slate-950 border border-slate-700 shadow-2xl shadow-black/50 overflow-hidden"
+          className={`absolute z-30 ${align === 'left' ? 'left-0' : 'right-0'} top-full mt-1.5 w-72 rounded-xl bg-slate-950 border border-slate-700 shadow-2xl shadow-black/50 overflow-hidden`}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between">

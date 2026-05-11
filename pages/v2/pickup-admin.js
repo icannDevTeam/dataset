@@ -362,18 +362,13 @@ export default function PickupAdminPage() {
         body: JSON.stringify({
           chaperoneId,
           replace,
-          enroll: true,
+          enroll: false,
           photos: [{ imageBase64: dataUrl }],
         }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || j.message || 'upload failed');
-      const enrollFails = (j.enrollment || []).filter((e) => !e.ok);
-      if (enrollFails.length) {
-        pushToast('warn', `Photo saved but enroll warning on ${enrollFails.length} device(s).`);
-      } else {
-        pushToast('success', `Chaperone photo ${replace ? 'replaced' : 'added'} & enrolled.`);
-      }
+      pushToast('success', `Chaperone photo ${replace ? 'replaced' : 'added'}. Push to terminals on the Enrolment page.`);
       reload();
     } catch (e) {
       pushToast('error', `Upload failed: ${e.message}`);
@@ -484,8 +479,8 @@ export default function PickupAdminPage() {
   // ─── Single-record actions ──────────────────────────────────────────────
   async function approve(rec) {
     if (!confirm(`Approve submission from ${rec.guardian?.name}?\n\n` +
-      `Allocates ${rec.chaperones.length} chaperone employeeNo(s) (9XXXXXXXXX) ` +
-      `and pushes to all configured Hikvision devices.`)) return;
+      `Allocates ${rec.chaperones.length} chaperone employeeNo(s) (9XXXXXXXXX). ` +
+      `Push to Hikvision terminals separately on the Enrolment page.`)) return;
     setWorking((w) => ({ ...w, [rec.id]: 'approve' }));
     try {
       const r = await fetch('/api/pickup/admin/approve', {
@@ -496,12 +491,9 @@ export default function PickupAdminPage() {
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || j.message || 'approve failed');
       const allocated = (j.allocated || []).length;
-      const enrolledOk = (j.enrollment || []).filter((e) => e.ok).length;
-      const enrolledFail = (j.enrollment || []).filter((e) => !e.ok).length;
       pushToast(
-        enrolledFail > 0 ? 'warn' : 'success',
-        `Allocated ${allocated} chaperone(s). Enrolled on devices: ${enrolledOk} ok` +
-          (enrolledFail > 0 ? `, ${enrolledFail} failed (use Re-push to retry)` : '.'),
+        'success',
+        `Allocated ${allocated} chaperone(s). Go to Enrolment to push them onto the terminals.`,
         `Approved: ${rec.guardian?.name}`,
       );
       await reload();
@@ -1691,13 +1683,6 @@ function RecordCard(props) {
                   >
                     <i className="ph ph-fingerprint mr-1"></i>Open Enrolment board
                   </a>
-                  <button onClick={onReenroll} disabled={!!busy}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800/60 border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-50"
-                    title="Quick re-push of just this form's chaperones (uses each chaperone's grade scope)">
-                    {busy === 'reenroll' ? 'Re-enrolling…' : (
-                      <><i className="ph ph-arrows-clockwise mr-1"></i>Quick re-push</>
-                    )}
-                  </button>
                 </div>
               )}
             </div>
