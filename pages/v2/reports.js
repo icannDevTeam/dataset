@@ -1,6 +1,7 @@
 import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
+import PickupReportExportOverlay from '../../components/v2/reports/PickupReportExportOverlay';
 
 function getWIBDate(offset = 0) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -167,6 +168,7 @@ export default function ReportsPage() {
   const [pickupData, setPickupData] = useState(null);
   const [pickupLoading, setPickupLoading] = useState(false);
   const [pickupError, setPickupError] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   // Filters
   const [filterClass, setFilterClass] = useState('');
@@ -456,20 +458,21 @@ export default function ReportsPage() {
             {module === 'pickup' && (
               <>
                 <button
-                  onClick={() => exportPickupCSV(pickupData, fromDate, toDate)}
+                  onClick={() => setExportOpen(true)}
                   disabled={!pickupData}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold border border-brand-400 disabled:opacity-50 shadow-[0_0_20px_rgba(6,182,212,0.3)]"
                 >
-                  <i className="ph ph-file-csv text-lg"></i>
-                  Export CSV
+                  <i className="ph ph-export text-lg"></i>
+                  Export report…
                 </button>
                 <button
-                  onClick={handlePrint}
+                  onClick={() => exportPickupCSV(pickupData, fromDate, toDate)}
                   disabled={!pickupData}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-400 text-white rounded-lg text-sm font-semibold transition-all shadow-[0_0_20px_rgba(249,115,22,0.3)] hover:shadow-[0_0_25px_rgba(249,115,22,0.5)] active:scale-95 disabled:opacity-50"
+                  title="Quick CSV — single-shot, no parameters"
+                  className="flex items-center gap-2 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50"
                 >
-                  <i className="ph ph-printer text-lg"></i>
-                  Print Report
+                  <i className="ph ph-file-csv text-lg"></i>
+                  Quick CSV
                 </button>
                 <button
                   onClick={fetchPickupReport}
@@ -1453,6 +1456,13 @@ export default function ReportsPage() {
           </div>
         );
       })()}
+
+      <PickupReportExportOverlay
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        defaultFrom={fromDate}
+        defaultTo={toDate}
+      />
 
     </V2Layout>
   );

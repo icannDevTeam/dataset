@@ -13,10 +13,12 @@
   "dependencies": {
     "@google-cloud/firestore": "^8.0.0",
     "@mhoc/axios-digest-auth": "^0.8.0",
+    "@react-pdf/renderer": "^4.5.1",
     "axios": "^1.4.0",
     "busboy": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
+    "exceljs": "^4.4.0",
     "face-api.js": "^0.22.2",
     "firebase": "^10.5.0",
     "firebase-admin": "^13.6.1",
