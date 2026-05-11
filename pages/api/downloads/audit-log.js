@@ -5,7 +5,7 @@
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../lib/firebase-admin';
 import { withApi } from '../../../lib/api-auth';
-const { renderDownload, validateExportRequest, MAX_ROWS } = require('../../../lib/downloads-helpers');
+const { renderDownload, validateExportRequest, buildPreview, MAX_ROWS } = require('../../../lib/downloads-helpers');
 const tenancy = require('../../../lib/tenancy');
 const { auditLogPath, logAudit } = require('../../../lib/audit-log');
 
@@ -63,7 +63,7 @@ async function handler(req, res) {
     .map(([k, c]) => `${k} (${c})`).join(', ') || '—';
 
   const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const out = await renderDownload({
+  const payload = {
     format: v.format,
     kind: 'audit-log',
     dateStamp,
@@ -87,7 +87,13 @@ async function handler(req, res) {
     truncated,
     sheetName: 'Audit Log',
     notes: kindFilter ? [`Filtered by kind prefix: ${kindFilter}`] : [],
-  });
+  };
+
+  if (req.body && req.body.preview === true) {
+    return res.status(200).json(buildPreview(payload));
+  }
+
+  const out = await renderDownload(payload);
 
   try {
     await logAudit(db, {

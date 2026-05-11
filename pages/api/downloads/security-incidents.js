@@ -6,7 +6,7 @@
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../lib/firebase-admin';
 import { withApi } from '../../../lib/api-auth';
-const { renderDownload, validateExportRequest, MAX_ROWS } = require('../../../lib/downloads-helpers');
+const { renderDownload, validateExportRequest, buildPreview, MAX_ROWS } = require('../../../lib/downloads-helpers');
 const tenancy = require('../../../lib/tenancy');
 const { logAudit } = require('../../../lib/audit-log');
 
@@ -67,7 +67,7 @@ async function handler(req, res) {
   }
 
   const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const out = await renderDownload({
+  const payload = {
     format: v.format,
     kind: 'security-incidents',
     dateStamp,
@@ -94,7 +94,13 @@ async function handler(req, res) {
       'Photos referenced in "Photo Path" are stored in Firebase Storage.',
       'For incidents older than 90 days, narrow the date range to retrieve archived records.',
     ],
-  });
+  };
+
+  if (req.body && req.body.preview === true) {
+    return res.status(200).json(buildPreview(payload));
+  }
+
+  const out = await renderDownload(payload);
 
   try {
     await logAudit(db, {

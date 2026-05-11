@@ -9,7 +9,7 @@
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../lib/firebase-admin';
 import { withApi } from '../../../lib/api-auth';
-const { renderDownload, validateExportRequest, MAX_ROWS } = require('../../../lib/downloads-helpers');
+const { renderDownload, validateExportRequest, buildPreview, MAX_ROWS } = require('../../../lib/downloads-helpers');
 const tenancy = require('../../../lib/tenancy');
 const { logAudit } = require('../../../lib/audit-log');
 
@@ -95,7 +95,7 @@ async function handler(req, res) {
   const pct = (n, d) => d ? `${((n / d) * 100).toFixed(1)}%` : '—';
   const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
-  const out = await renderDownload({
+  const payload = {
     format: v.format,
     kind: 'attendance',
     dateStamp,
@@ -122,7 +122,13 @@ async function handler(req, res) {
       filterClass ? `Filtered by homeroom: ${filterClass}` : null,
       filterStatus ? `Filtered by status: ${filterStatus}` : null,
     ].filter(Boolean),
-  });
+  };
+
+  if (req.body && req.body.preview === true) {
+    return res.status(200).json(buildPreview(payload));
+  }
+
+  const out = await renderDownload(payload);
 
   try {
     await logAudit(db, {

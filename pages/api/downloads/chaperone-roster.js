@@ -5,7 +5,7 @@
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../lib/firebase-admin';
 import { withApi } from '../../../lib/api-auth';
-const { renderDownload, validateExportRequest, MAX_ROWS } = require('../../../lib/downloads-helpers');
+const { renderDownload, validateExportRequest, buildPreview, MAX_ROWS } = require('../../../lib/downloads-helpers');
 const tenancy = require('../../../lib/tenancy');
 const { logAudit } = require('../../../lib/audit-log');
 
@@ -61,7 +61,7 @@ async function handler(req, res) {
   }
 
   const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const out = await renderDownload({
+  const payload = {
     format: fmt,
     kind: 'chaperone-roster',
     dateStamp,
@@ -85,7 +85,13 @@ async function handler(req, res) {
     truncated,
     sheetName: 'Chaperones',
     notes: [],
-  });
+  };
+
+  if (req.body && req.body.preview === true) {
+    return res.status(200).json(buildPreview(payload));
+  }
+
+  const out = await renderDownload(payload);
 
   try {
     await logAudit(db, {

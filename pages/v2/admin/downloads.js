@@ -109,6 +109,138 @@ function fmtPills({ value, onChange, disabled }) {
   ));
 }
 
+function safeCell(v) {
+  if (v == null) return '';
+  const s = String(v);
+  return s.length > 80 ? s.slice(0, 77) + '…' : s;
+}
+
+function PreviewModal({ data, tone, format, onClose, onConfirm }) {
+  const cols = data.columns || [];
+  const rows = data.sampleRows || [];
+  const more = Math.max(0, (data.totalRows || 0) - rows.length);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className={`px-5 py-4 border-b border-slate-700 flex items-start justify-between gap-4 ${tone.bg}`}>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <i className={`ph ph-eye text-lg ${tone.fg}`} />
+              <span className={`text-[10px] font-semibold uppercase tracking-widest ${tone.fg}`}>Preview</span>
+            </div>
+            <h3 className="text-base font-semibold text-white mt-1 truncate">{data.title}</h3>
+            <p className="text-xs text-slate-400 mt-0.5 truncate">{data.subtitle}</p>
+            {data.range && <p className="text-[11px] text-slate-500 mt-1">{data.range}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-white p-1.5 rounded hover:bg-white/5"
+            aria-label="Close preview"
+          >
+            <i className="ph ph-x text-lg" />
+          </button>
+        </div>
+
+        {/* KPIs */}
+        {data.kpis && data.kpis.length > 0 && (
+          <div className="px-5 py-3 border-b border-slate-800 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {data.kpis.map(([label, value], i) => (
+              <div key={i} className="bg-slate-950/60 border border-slate-800 rounded-lg p-2">
+                <div className="text-[9px] uppercase tracking-wider text-slate-500 truncate">{label}</div>
+                <div className="text-sm font-semibold text-white mt-0.5 truncate" title={String(value)}>{value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Notes */}
+        {data.notes && data.notes.length > 0 && (
+          <div className="px-5 pt-3 space-y-1">
+            {data.notes.map((n, i) => (
+              <div key={i} className="text-[11px] text-amber-300/80 flex items-start gap-1.5">
+                <i className="ph ph-info mt-0.5" /> <span>{n}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Sample table */}
+        <div className="flex-1 overflow-auto px-5 py-3">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">
+            Showing first {rows.length.toLocaleString()} of {(data.totalRows || 0).toLocaleString()} rows
+            {data.truncated && <span className="ml-2 text-amber-300">· truncated at server cap</span>}
+          </div>
+          {rows.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 text-sm">
+              <i className="ph ph-tray text-3xl block mb-2" />
+              No rows in the selected range.
+            </div>
+          ) : (
+            <table className="w-full text-[11px] border-collapse">
+              <thead className="sticky top-0 bg-slate-900">
+                <tr>
+                  {cols.map((c) => (
+                    <th key={c} className={`text-left font-semibold px-2 py-1.5 border-b border-slate-700 ${tone.fg}`}>{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, ri) => (
+                  <tr key={ri} className={ri % 2 ? 'bg-slate-950/40' : ''}>
+                    {(Array.isArray(r) ? r : []).map((cell, ci) => (
+                      <td key={ci} className="px-2 py-1.5 border-b border-slate-800/60 text-slate-300 align-top whitespace-nowrap">
+                        {safeCell(cell)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {more > 0 && (
+            <div className="text-[11px] text-slate-500 italic mt-3">
+              … {more.toLocaleString()} more rows will be included in the actual download.
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-slate-700 flex items-center justify-between gap-3 bg-slate-950/60">
+          <div className="text-[11px] text-slate-500">
+            Format: <span className="text-slate-300 font-medium">{format.toUpperCase()}</span>
+            {data.tenant && <span className="ml-3">Tenant: <span className="text-slate-300">{data.tenant}</span></span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 hover:bg-slate-800 rounded-lg"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={rows.length === 0}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg text-white flex items-center gap-1.5 ${tone.btn} disabled:opacity-50`}
+            >
+              <i className="ph ph-download-simple" /> Generate {format.toUpperCase()}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DownloadCard({ card }) {
   const tone = TONES[card.tone] || TONES.teal;
   const [from, setFrom] = useState(daysAgo(29));
@@ -116,9 +248,15 @@ function DownloadCard({ card }) {
   const [format, setFormat] = useState('xlsx');
   const [filters, setFilters] = useState({});
   const [busy, setBusy] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState(null);
 
   const setRange = (n) => { setFrom(daysAgo(n - 1)); setTo(today()); };
+
+  const buildBody = (extra = {}) => (
+    card.needsRange ? { format, from, to, filters, ...extra } : { format, ...extra }
+  );
 
   const generate = useCallback(async () => {
     setBusy(true); setMsg(null);
@@ -127,7 +265,7 @@ function DownloadCard({ card }) {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(card.needsRange ? { format, from, to, filters } : { format }),
+        body: JSON.stringify(buildBody()),
       });
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
@@ -151,6 +289,29 @@ function DownloadCard({ card }) {
       setMsg({ ok: false, text: err.message || 'Export failed' });
     } finally {
       setBusy(false);
+    }
+  }, [card, format, from, to, filters]);
+
+  const runPreview = useCallback(async () => {
+    setPreviewing(true); setMsg(null);
+    try {
+      const res = await fetch(card.endpoint, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildBody({ preview: true })),
+      });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try { const j = await res.json(); detail = j.error || j.message || detail; } catch {}
+        throw new Error(detail);
+      }
+      const data = await res.json();
+      setPreview(data);
+    } catch (err) {
+      setMsg({ ok: false, text: err.message || 'Preview failed' });
+    } finally {
+      setPreviewing(false);
     }
   }, [card, format, from, to, filters]);
 
@@ -235,18 +396,30 @@ function DownloadCard({ card }) {
 
       <div className="flex items-center justify-between gap-2 pt-1 mt-auto">
         <div className="flex items-center gap-1">
-          {fmtPills({ value: format, onChange: setFormat, disabled: busy })}
+          {fmtPills({ value: format, onChange: setFormat, disabled: busy || previewing })}
         </div>
-        <button
-          type="button"
-          onClick={generate}
-          disabled={busy}
-          className={`px-3 py-1.5 text-xs font-semibold rounded-lg text-white flex items-center gap-1.5 ${tone.btn} disabled:opacity-50`}
-        >
-          {busy
-            ? (<><i className="ph ph-circle-notch animate-spin" /> Generating…</>)
-            : (<><i className="ph ph-download-simple" /> Generate</>)}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={runPreview}
+            disabled={busy || previewing}
+            className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 hover:bg-slate-800 flex items-center gap-1.5 disabled:opacity-50"
+          >
+            {previewing
+              ? (<><i className="ph ph-circle-notch animate-spin" /> …</>)
+              : (<><i className="ph ph-eye" /> Preview</>)}
+          </button>
+          <button
+            type="button"
+            onClick={generate}
+            disabled={busy || previewing}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg text-white flex items-center gap-1.5 ${tone.btn} disabled:opacity-50`}
+          >
+            {busy
+              ? (<><i className="ph ph-circle-notch animate-spin" /> Generating…</>)
+              : (<><i className="ph ph-download-simple" /> Generate</>)}
+          </button>
+        </div>
       </div>
 
       {msg && (
@@ -255,6 +428,16 @@ function DownloadCard({ card }) {
         }`}>
           {msg.text}
         </div>
+      )}
+
+      {preview && (
+        <PreviewModal
+          data={preview}
+          tone={tone}
+          format={format}
+          onClose={() => setPreview(null)}
+          onConfirm={() => { setPreview(null); generate(); }}
+        />
       )}
     </div>
   );
