@@ -16,7 +16,7 @@
  * All edits are audited via lib/audit-log.
  */
 import admin from 'firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 
 const tenancy = require('../../../../lib/tenancy');
@@ -265,6 +265,6 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler);
+export default withApi(handler, { permission: 'pickup_admin.edit_chaperone' });
 
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };

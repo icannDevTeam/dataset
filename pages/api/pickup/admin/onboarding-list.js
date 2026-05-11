@@ -15,7 +15,7 @@
  *       allocatedChaperones?
  *   }] }
  */
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 import admin from 'firebase-admin';
 
@@ -131,4 +131,4 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler);
+export default withApi(handler, { permission: 'pickup_admin.view' });

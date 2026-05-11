@@ -9,7 +9,7 @@
  * Used by /v2/chaperone/[id] audit page (#15).
  */
 import admin from 'firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
 
@@ -131,4 +131,4 @@ function tsToIso(v) {
   return null;
 }
 
-export default withAuth(handler, { methods: ['GET'] });
+export default withApi(handler, { methods: ['GET'], permission: 'pickup_admin.view' });

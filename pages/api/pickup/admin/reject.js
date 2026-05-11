@@ -6,7 +6,7 @@
  *
  * Body: { recordId, tenant?, reason }
  */
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import admin from 'firebase-admin';
 
@@ -54,4 +54,4 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler);
+export default withApi(handler, { methods: ['POST'], permission: 'pickup_admin.reject' });

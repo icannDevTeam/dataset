@@ -7,7 +7,7 @@
  * Bound by tenant. Read-only.
  */
 import { initializeFirebase, getFirestoreDB } from '../../../../lib/firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 const { auditLogPath } = require('../../../../lib/audit-log');
 
@@ -72,4 +72,4 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler, { methods: ['GET'] });
+export default withApi(handler, { methods: ['GET'], permission: 'pickup_admin.view' });

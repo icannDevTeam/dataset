@@ -15,7 +15,7 @@
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 const tab = require('../../../../lib/tablet-devices');
 
@@ -248,4 +248,8 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler, { methods: ['GET', 'POST', 'PUT', 'DELETE'] });
+export default withApi(handler, {
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  // GET = view; mutations require manage_groups.
+  anyPermission: ['pickup_admin.view', 'pickup_admin.manage_groups'],
+});

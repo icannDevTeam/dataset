@@ -11,7 +11,7 @@
  * Returns: { ok, eventId, chaperone, gate }
  */
 import admin from 'firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { verifyCookie } from '../../auth/session';
 const { runOfficerOverride } = require('../../../../lib/officer-override-core.cjs');
@@ -76,4 +76,4 @@ async function handler(req, res) {
   return res.status(result.statusCode).json(responseBody);
 }
 
-export default withAuth(handler, { methods: ['POST'] });
+export default withApi(handler, { methods: ['POST'], permission: 'pickup_admin.officer_override' });

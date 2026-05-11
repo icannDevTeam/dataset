@@ -17,7 +17,7 @@
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 const kp = require('../../../../lib/kiosk-profiles');
 
@@ -86,4 +86,4 @@ async function handler(req, res) {
   });
 }
 
-export default withAuth(handler, { methods: ['GET'] });
+export default withApi(handler, { methods: ['GET'], permission: 'pickup_admin.view' });

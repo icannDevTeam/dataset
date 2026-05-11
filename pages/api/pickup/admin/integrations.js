@@ -29,7 +29,7 @@
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
-const { withAuth } = require('../../../../lib/auth-middleware');
+const { withApi } = require('../../../../lib/api-auth');
 const tenancy = require('../../../../lib/tenancy');
 
 const DEFAULTS = {
@@ -254,4 +254,7 @@ async function handler(req, res) {
   return res.status(400).json({ error: 'unknown action' });
 }
 
-export default withAuth(handler, { methods: ['GET', 'POST', 'PUT', 'DELETE'] });
+export default withApi(handler, {
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  permission: 'settings.edit',
+});

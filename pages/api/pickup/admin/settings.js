@@ -5,16 +5,21 @@
  * Supported fields (body):
  *   allowSelfClaim  boolean  — TV can self-claim via kiosk code without admin
  *
- * Protected: requires session auth (same as all pickup admin APIs).
+ * RBAC: GET requires `pickup_admin.settings_view`,
+ *       POST requires `pickup_admin.settings_edit`.
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
 const { logAudit } = require('../../../../lib/audit-log');
+const { withApi } = require('../../../../lib/api-auth');
+const { can } = require('../../../../lib/rbac');
 
-export default async function handler(req, res) {
-  if (req.method !== 'GET' && req.method !== 'POST') {
-    return res.status(405).json({ error: 'method' });
+async function handler(req, res) {
+  // Per-method permission split is enforced inside the handler so a single
+  // wrapper can serve both verbs.
+  if (req.method === 'POST' && !req.user.superAdmin && !can(req.user.permissions, 'pickup_admin.settings_edit')) {
+    return res.status(403).json({ error: 'forbidden', need: ['pickup_admin.settings_edit'] });
   }
 
   try {
@@ -55,7 +60,7 @@ export default async function handler(req, res) {
     await docRef.set(patch, { merge: true });
     await logAudit(db, {
       tenantId: tid,
-      actor: { email: req.headers['x-actor-email'] || null, name: null, role: null },
+      actor: { email: req.user.email, name: req.user.name, role: req.user.role },
       req,
       kind: 'settings.update',
       target: { type: 'pickup_settings', id: 'pickup', label: 'Pickup Settings' },
@@ -69,3 +74,9 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'internal', message: e.message });
   }
 }
+
+export default withApi(handler, {
+  methods: ['GET', 'POST'],
+  // GET only needs the view grant; POST also needs settings_edit (checked above).
+  permission: 'pickup_admin.settings_view',
+});

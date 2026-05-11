@@ -13,6 +13,7 @@ import { resolvePermissions } from '../../../lib/permissions';
 import admin from 'firebase-admin';
 const { sanitizeClassScopes, isTeacherEmail } = require('../../../lib/teacher-auth');
 const { logAudit } = require('../../../lib/audit-log');
+const { invalidateUser } = require('../../../lib/api-auth');
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
 const TEACHER_EMAIL_DOMAIN = (process.env.TEACHER_EMAIL_DOMAIN || 'binus.edu').toLowerCase();
@@ -263,11 +264,14 @@ async function handler(req, res) {
       // Handle suspend / unsuspend
       if (patchAction === 'suspend') {
         update.disabled = true;
+        update.tokenValidAfter = admin.firestore.FieldValue.serverTimestamp();
         try {
           const authUser = await admin.auth().getUserByEmail(cleanEmail);
           await admin.auth().updateUser(authUser.uid, { disabled: true });
+          await admin.auth().revokeRefreshTokens(authUser.uid);
         } catch {}
         await usersRef.doc(cleanEmail).update(update);
+        invalidateUser(cleanEmail);
         await logAudit(db, { actor: caller, req, kind: 'user.suspend',
           target: { type: 'user', id: cleanEmail, label: doc.data()?.name || cleanEmail },
           summary: `Suspended ${cleanEmail}` });
@@ -281,6 +285,7 @@ async function handler(req, res) {
           await admin.auth().updateUser(authUser.uid, { disabled: false });
         } catch {}
         await usersRef.doc(cleanEmail).update(update);
+        invalidateUser(cleanEmail);
         await logAudit(db, { actor: caller, req, kind: 'user.unsuspend',
           target: { type: 'user', id: cleanEmail, label: doc.data()?.name || cleanEmail },
           summary: `Re-activated ${cleanEmail}` });
@@ -296,15 +301,26 @@ async function handler(req, res) {
         try {
           const authUser = await admin.auth().getUserByEmail(cleanEmail);
           await admin.auth().updateUser(authUser.uid, { password: newPassword });
+          await admin.auth().revokeRefreshTokens(authUser.uid);
         } catch (err) {
           return res.status(500).json({ error: 'Failed to reset password.' });
         }
+        await usersRef.doc(cleanEmail).update({
+          tokenValidAfter: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        invalidateUser(cleanEmail);
         return res.status(200).json({ ok: true, email: cleanEmail });
       }
 
       // Handle revoke — strip all custom permissions, reset to viewer
       if (patchAction === 'revoke') {
-        await usersRef.doc(cleanEmail).update({ role: 'viewer', permissions: {}, classScopes: [] });
+        await usersRef.doc(cleanEmail).update({
+          role: 'viewer',
+          permissions: {},
+          classScopes: [],
+          tokenValidAfter: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        invalidateUser(cleanEmail);
         await logAudit(db, { actor: caller, req, kind: 'user.revoke',
           target: { type: 'user', id: cleanEmail, label: doc.data()?.name || cleanEmail },
           before: { role: doc.data()?.role, classScopes: doc.data()?.classScopes || [] },
@@ -349,7 +365,16 @@ async function handler(req, res) {
       }
 
       const beforeData = doc.data() || {};
+      // Any role / permission / class-scope change must invalidate active
+      // sessions for that user so the new policy is enforced immediately.
+      const sensitiveChange = update.role !== undefined
+        || update.permissions !== undefined
+        || update.classScopes !== undefined;
+      if (sensitiveChange) {
+        update.tokenValidAfter = admin.firestore.FieldValue.serverTimestamp();
+      }
       await usersRef.doc(cleanEmail).update(update);
+      if (sensitiveChange) invalidateUser(cleanEmail);
 
       const updatedRole = update.role || doc.data().role || 'viewer';
       const updatedOverrides = update.permissions !== undefined ? update.permissions : (doc.data().permissions || {});

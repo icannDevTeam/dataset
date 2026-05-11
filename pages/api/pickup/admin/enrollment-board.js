@@ -38,7 +38,7 @@
  *   }
  */
 import admin from 'firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 import { resolveEnrollmentDevices } from '../../../../lib/chaperone-enroll';
 
@@ -253,4 +253,4 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler, { methods: ['GET'] });
+export default withApi(handler, { methods: ['GET'], permission: 'pickup_admin.view' });

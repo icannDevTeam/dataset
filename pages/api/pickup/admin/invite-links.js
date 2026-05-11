@@ -17,7 +17,7 @@
  */
 import QRCode from 'qrcode';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import * as invites from '../../../../lib/onboarding-invites';
 const admin = require('firebase-admin');
 const tenancy = require('../../../../lib/tenancy');
@@ -95,4 +95,7 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler, { methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'] });
+export default withApi(handler, {
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+  anyPermission: ['pickup_admin.view', 'pickup_admin.edit_chaperone'],
+});

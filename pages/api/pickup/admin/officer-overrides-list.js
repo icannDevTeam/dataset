@@ -10,7 +10,7 @@
  * Query: ?days=7  (history window, default 7, max 30)
  */
 import admin from 'firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
 
@@ -171,4 +171,4 @@ async function handler(req, res) {
   });
 }
 
-export default withAuth(handler, { methods: ['GET'] });
+export default withApi(handler, { methods: ['GET'], permission: 'pickup_admin.view' });

@@ -16,7 +16,7 @@
 import admin from 'firebase-admin';
 import crypto from 'crypto';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 const { isValidHHMM } = require('../../../../lib/terminal-gate');
 
@@ -164,4 +164,7 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler, { methods: ['GET', 'POST', 'PUT', 'DELETE'] });
+export default withApi(handler, {
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  anyPermission: ['pickup_admin.view', 'pickup_admin.manage_terminals'],
+});

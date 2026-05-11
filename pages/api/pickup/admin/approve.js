@@ -16,7 +16,7 @@
  *
  * Body: { recordId, tenant?, approvalNotes? }
  */
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 import admin from 'firebase-admin';
 import crypto from 'crypto';
@@ -247,4 +247,4 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler);
+export default withApi(handler, { methods: ['POST'], permission: 'pickup_admin.approve' });

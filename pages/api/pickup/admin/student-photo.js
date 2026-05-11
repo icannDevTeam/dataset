@@ -23,7 +23,7 @@
  */
 import admin from 'firebase-admin';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 
 const MAX_BYTES = 800 * 1024;
@@ -126,6 +126,6 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler, { methods: ['GET', 'POST'] });
+export default withApi(handler, { methods: ['GET', 'POST'], permission: 'pickup_admin.upload_face' });
 
 export const config = { api: { bodyParser: { sizeLimit: '4mb' } } };

@@ -9,46 +9,12 @@
  */
 import { initializeFirebase } from '../../../lib/firebase-admin';
 import admin from 'firebase-admin';
-import crypto from 'crypto';
+const { signCookie, verifyCookie: _verifyCookie, SESSION_MAX_AGE_SEC } = require('../../../lib/session-cookie');
 
-const SESSION_MAX_AGE = 60 * 60; // 60 minutes in seconds
+const SESSION_MAX_AGE = SESSION_MAX_AGE_SEC; // back-compat alias
 
-// HMAC key for session cookie signing — MUST be set in env. No insecure fallback.
-const SESSION_SECRET = process.env.SESSION_SECRET
-  || process.env.DASHBOARD_API_KEY
-  || null;
-
-function _assertSecret() {
-  if (!SESSION_SECRET) {
-    throw new Error('SESSION_SECRET (or DASHBOARD_API_KEY) is not set; refusing to sign cookies.');
-  }
-}
-
-function signCookie(payload) {
-  _assertSecret();
-  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('hex');
-  return Buffer.from(`${payload}:${sig}`).toString('base64');
-}
-
-export function verifyCookie(cookie) {
-  if (!SESSION_SECRET) return null;
-  try {
-    const decoded = Buffer.from(cookie, 'base64').toString();
-    const lastColon = decoded.lastIndexOf(':');
-    if (lastColon === -1) return null;
-    const payload = decoded.substring(0, lastColon);
-    const sig = decoded.substring(lastColon + 1);
-    const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('hex');
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-    // Extract timestamp from payload (email:timestamp)
-    const parts = payload.split(':');
-    const timestamp = parseInt(parts[parts.length - 1], 10);
-    if (isNaN(timestamp) || Date.now() - timestamp > SESSION_MAX_AGE * 1000) return null;
-    return { email: parts.slice(0, -1).join(':'), timestamp };
-  } catch {
-    return null;
-  }
-}
+// Re-export the canonical verifier so existing imports keep working.
+export const verifyCookie = _verifyCookie;
 
 export default async function handler(req, res) {
   if (req.method === 'POST') {

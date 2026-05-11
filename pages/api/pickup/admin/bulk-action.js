@@ -16,13 +16,14 @@
  * On approve we re-use the same allocation + enrollment helper used by the
  * single-record endpoint so behaviour is identical.
  */
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 import admin from 'firebase-admin';
 import crypto from 'crypto';
 import { enrollChaperones } from '../../../../lib/chaperone-enroll';
 
 const tenancy = require('../../../../lib/tenancy');
+const { can } = require('../../../../lib/rbac');
 const FIRST_CHAPERONE_NO = 9000000000;
 
 async function allocateEmployeeNo(db, tid) {
@@ -185,8 +186,15 @@ async function handler(req, res) {
   if (action === 'reject' && (!reason || reason.trim().length < 4)) {
     return res.status(400).json({ error: 'reason required (min 4 chars) for reject' });
   }
+
+  // Per-action RBAC: bulk_approve vs bulk_reject are separate grants.
+  const need = action === 'approve' ? 'pickup_admin.bulk_approve' : 'pickup_admin.bulk_reject';
+  if (!req.user.superAdmin && !can(req.user.permissions, need)) {
+    return res.status(403).json({ error: 'forbidden', need: [need] });
+  }
+
   const tid = tenant ? String(tenant) : tenancy.getTenantId();
-  const reviewer = req.headers['x-admin-user'] || 'api-key';
+  const reviewer = req.user.email || 'api-key';
 
   try {
     initializeFirebase();
@@ -214,4 +222,10 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler);
+export default withApi(handler, {
+  methods: ['POST'],
+  // Outer wrapper only requires the umbrella view grant; the per-action
+  // bulk_approve / bulk_reject check happens inside the handler so we can
+  // 403 with the precise key the caller is missing.
+  permission: 'pickup_admin.view',
+});

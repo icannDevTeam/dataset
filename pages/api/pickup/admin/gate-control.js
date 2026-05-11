@@ -21,7 +21,7 @@
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 const { terminalGateStatus, isValidHHMM } = require('../../../../lib/terminal-gate');
 
@@ -108,4 +108,4 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(handler, { methods: ['GET', 'POST'] });
+export default withApi(handler, { methods: ['GET', 'POST'], permission: 'pickup_admin.gate_control' });
