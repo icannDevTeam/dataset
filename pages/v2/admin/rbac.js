@@ -891,6 +891,8 @@ function ConfirmCluster({ tone, onConfirm, onCancel }) {
 function PermissionDrawer({ state, setState, onCancel, onSave, saving, ownerCanGrantOwner }) {
   const [activeGroup, setActiveGroup] = useState(FEATURE_GROUPS[0]?.label || 'Main');
   const [activeFeature, setActiveFeature] = useState(null);
+  // Sub-module key (e.g. 'review' under pickup_admin). null = show ALL actions for the feature.
+  const [activeSubKey, setActiveSubKey] = useState(null);
   const [scopesInput, setScopesInput] = useState((state.classScopes || []).join(', '));
 
   // Pick first feature in active group when group changes (or initially)
@@ -901,6 +903,9 @@ function PermissionDrawer({ state, setState, onCancel, onSave, saving, ownerCanG
       setActiveFeature(grp.features[0]);
     }
   }, [activeGroup, activeFeature]);
+
+  // When the active feature changes, reset the sub-module selection.
+  useEffect(() => { setActiveSubKey(null); }, [activeFeature]);
 
   // Sync scopes input back to state on blur
   function commitScopes() {
@@ -979,16 +984,49 @@ function PermissionDrawer({ state, setState, onCancel, onSave, saving, ownerCanG
   const featureMeta = activeFeature ? FEATURES[activeFeature] : null;
   const featurePerms = activeFeature ? (state.permissions?.[activeFeature] || {}) : {};
 
-  // Group actions of selected feature by risk
+  // Active sub-module (when the feature defines subModules, e.g. pickup_admin).
+  const activeSub = useMemo(() => {
+    if (!featureMeta?.subModules || !activeSubKey) return null;
+    return featureMeta.subModules.find(s => s.key === activeSubKey) || null;
+  }, [featureMeta, activeSubKey]);
+
+  // Per-sub-module granted counts for badges in pane 2.
+  const grantedPerSub = useMemo(() => {
+    if (!featureMeta?.subModules) return {};
+    const map = {};
+    featureMeta.subModules.forEach(sm => {
+      let granted = 0;
+      sm.actions.forEach(a => { if (featurePerms[a]) granted++; });
+      map[sm.key] = { total: sm.actions.length, granted };
+    });
+    return map;
+  }, [featureMeta, featurePerms]);
+
+  // Group actions of selected feature (or active sub-module slice) by risk
   const actionsByRisk = useMemo(() => {
     if (!featureMeta || !activeFeature) return {};
     const out = { read: [], write: [], destructive: [], admin: [] };
-    featureMeta.actions.forEach(a => {
+    const list = activeSub ? activeSub.actions : featureMeta.actions;
+    list.forEach(a => {
       const r = actionRisk(activeFeature, a);
       (out[r] || out.write).push(a);
     });
     return out;
-  }, [featureMeta, activeFeature]);
+  }, [featureMeta, activeFeature, activeSub]);
+
+  function setAllInSub(enabled) {
+    if (!featureMeta || !activeSub) return;
+    setState(prev => ({
+      ...prev,
+      permissions: {
+        ...prev.permissions,
+        [activeFeature]: {
+          ...prev.permissions?.[activeFeature],
+          ...Object.fromEntries(activeSub.actions.map(a => [a, enabled])),
+        },
+      },
+    }));
+  }
 
   return (
     <>
@@ -1070,7 +1108,7 @@ function PermissionDrawer({ state, setState, onCancel, onSave, saving, ownerCanG
                   : stats.granted === 0 ? 'text-slate-600' : 'text-amber-400';
                 return (
                   <li key={fk}>
-                    <button onClick={() => setActiveFeature(fk)}
+                    <button onClick={() => { setActiveFeature(fk); setActiveSubKey(null); }}
                       className={`w-full text-left px-3 py-2.5 flex items-center gap-2.5 text-xs transition-colors border-l-2 ${
                         active
                           ? 'bg-brand-500/10 text-brand-200 border-brand-400'
@@ -1080,6 +1118,44 @@ function PermissionDrawer({ state, setState, onCancel, onSave, saving, ownerCanG
                       <span className="flex-1 truncate font-medium">{meta.label}</span>
                       <span className={`text-[10px] font-mono ${tone}`}>{stats.granted}/{stats.total}</span>
                     </button>
+
+                    {/* Sub-modules (e.g. pickup_admin → Review Queue, Chaperones, Devices, …) */}
+                    {active && Array.isArray(meta.subModules) && meta.subModules.length > 0 && (
+                      <ul className="border-t border-slate-800/40 bg-slate-950/40">
+                        <li>
+                          <button onClick={() => setActiveSubKey(null)}
+                            className={`w-full text-left pl-9 pr-3 py-1.5 flex items-center gap-2 text-[11px] transition-colors border-l-2 ${
+                              activeSubKey === null
+                                ? 'bg-brand-500/15 text-brand-100 border-brand-400'
+                                : 'text-slate-400 hover:bg-white/5 border-transparent hover:text-slate-200'
+                            }`}>
+                            <i className="ph ph-list-dashes text-sm flex-shrink-0" />
+                            <span className="flex-1 truncate">All actions</span>
+                            <span className="text-[10px] font-mono opacity-70">{stats.granted}/{stats.total}</span>
+                          </button>
+                        </li>
+                        {meta.subModules.map(sm => {
+                          const sStats = grantedPerSub[sm.key] || { total: 0, granted: 0 };
+                          const sActive = sm.key === activeSubKey;
+                          const sTone = sStats.granted === sStats.total ? 'text-emerald-400'
+                            : sStats.granted === 0 ? 'text-slate-600' : 'text-amber-400';
+                          return (
+                            <li key={sm.key}>
+                              <button onClick={() => setActiveSubKey(sm.key)}
+                                className={`w-full text-left pl-9 pr-3 py-1.5 flex items-center gap-2 text-[11px] transition-colors border-l-2 ${
+                                  sActive
+                                    ? 'bg-brand-500/15 text-brand-100 border-brand-400'
+                                    : 'text-slate-400 hover:bg-white/5 border-transparent hover:text-slate-200'
+                                }`}>
+                                <i className={`ph ${sm.icon || 'ph-square'} text-sm flex-shrink-0`} />
+                                <span className="flex-1 truncate">{sm.label}</span>
+                                <span className={`text-[10px] font-mono ${sTone}`}>{sStats.granted}/{sStats.total}</span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                   </li>
                 );
               })}
@@ -1093,15 +1169,32 @@ function PermissionDrawer({ state, setState, onCancel, onSave, saving, ownerCanG
             ) : (
               <div className="p-5">
                 <div className="flex items-center gap-3 mb-4">
-                  <i className={`ph ${featureMeta.icon} text-2xl text-brand-300`} />
+                  <i className={`ph ${activeSub?.icon || featureMeta.icon} text-2xl text-brand-300`} />
                   <div className="flex-1">
-                    <h3 className="text-base font-semibold text-white">{featureMeta.label}</h3>
-                    <p className="text-[11px] text-slate-500">Toggle individual actions. Hover for full description.</p>
+                    <h3 className="text-base font-semibold text-white">
+                      {activeSub ? `${featureMeta.label} · ${activeSub.label}` : featureMeta.label}
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      {activeSub
+                        ? `${activeSub.actions.length} action${activeSub.actions.length !== 1 ? 's' : ''} in this sub-module. Use the All / None buttons to bulk-toggle just this slice.`
+                        : 'Toggle individual actions. Hover for full description.'}
+                    </p>
                   </div>
-                  <button onClick={() => setAllInFeature(activeFeature, true)}
-                    className="px-2.5 py-1 text-[10px] text-emerald-300 border border-emerald-500/30 rounded hover:bg-emerald-500/10">All</button>
-                  <button onClick={() => setAllInFeature(activeFeature, false)}
-                    className="px-2.5 py-1 text-[10px] text-slate-400 border border-slate-700 rounded hover:bg-white/5">None</button>
+                  {activeSub ? (
+                    <>
+                      <button onClick={() => setAllInSub(true)}
+                        className="px-2.5 py-1 text-[10px] text-emerald-300 border border-emerald-500/30 rounded hover:bg-emerald-500/10">All in module</button>
+                      <button onClick={() => setAllInSub(false)}
+                        className="px-2.5 py-1 text-[10px] text-slate-400 border border-slate-700 rounded hover:bg-white/5">None in module</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => setAllInFeature(activeFeature, true)}
+                        className="px-2.5 py-1 text-[10px] text-emerald-300 border border-emerald-500/30 rounded hover:bg-emerald-500/10">All</button>
+                      <button onClick={() => setAllInFeature(activeFeature, false)}
+                        className="px-2.5 py-1 text-[10px] text-slate-400 border border-slate-700 rounded hover:bg-white/5">None</button>
+                    </>
+                  )}
                 </div>
 
                 {['read', 'write', 'destructive', 'admin'].map(risk => {
