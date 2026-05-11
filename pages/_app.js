@@ -1,8 +1,10 @@
 import '../styles/globals.css';
+import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
 import { canAccessPath } from '../lib/permissions';
+import { FOUC_SCRIPT } from '../lib/theme';
 
 // Pages that don't require authentication
 const PUBLIC_PAGES = ['/login'];
@@ -151,8 +153,14 @@ function AuthGate({ Component, pageProps }) {
 
 export default function App({ Component, pageProps }) {
   return (
-    <AuthProvider>
-      <AuthGate Component={Component} pageProps={pageProps} />
-    </AuthProvider>
+    <>
+      <Head>
+        {/* Pre-hydration theme application — prevents FOUC on light mode */}
+        <script dangerouslySetInnerHTML={{ __html: FOUC_SCRIPT }} />
+      </Head>
+      <AuthProvider>
+        <AuthGate Component={Component} pageProps={pageProps} />
+      </AuthProvider>
+    </>
   );
 }

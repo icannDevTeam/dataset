@@ -13,6 +13,8 @@
 import Head from 'next/head';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
+import TerminalAddModal from '../../components/v2/terminals/TerminalAddModal';
+import TerminalRenameModal from '../../components/v2/terminals/TerminalRenameModal';
 
 // Compute effective gate state in WIB, mirroring lib/terminal-gate.js so the
 // card can show what the relay is actually doing without a round-trip.
@@ -60,6 +62,8 @@ export default function TerminalsPage() {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [renaming, setRenaming] = useState(null); // terminal object or null
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -208,10 +212,16 @@ export default function TerminalsPage() {
                 </p>
               </div>
             </div>
-            <button onClick={reload} disabled={loading}
-              className="px-3 py-2 text-sm rounded-lg bg-slate-800/70 border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-50">
-              <i className={`ph ph-arrows-clockwise ${loading ? 'animate-spin' : ''} mr-1`}></i>Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowAdd(true)}
+                className="px-3 py-2 text-sm rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold border border-emerald-400 shadow-md shadow-emerald-500/20">
+                <i className="ph ph-plus mr-1"></i>Add terminal
+              </button>
+              <button onClick={reload} disabled={loading}
+                className="px-3 py-2 text-sm rounded-lg bg-slate-800/70 border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+                <i className={`ph ph-arrows-clockwise ${loading ? 'animate-spin' : ''} mr-1`}></i>Refresh
+              </button>
+            </div>
           </div>
         </div>
 
@@ -284,6 +294,7 @@ export default function TerminalsPage() {
               onSave={() => save(t.id)}
               onGate={(v) => setGate(t.id, v)}
               onToggleEnabled={() => toggleEnabled(t)}
+              onRename={() => setRenaming(t)}
             />
           ))}
         </div>
@@ -303,6 +314,27 @@ export default function TerminalsPage() {
           {toast.message}
         </div>
       )}
+
+      {/* Add modal */}
+      <TerminalAddModal
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        onCreated={(t) => {
+          showToast('success', `Terminal "${t?.name || 'new'}" created.`);
+          reload();
+        }}
+      />
+
+      {/* Rename modal */}
+      <TerminalRenameModal
+        open={!!renaming}
+        terminal={renaming}
+        onClose={() => setRenaming(null)}
+        onRenamed={(t) => {
+          showToast('success', `Renamed to "${t?.name || ''}".`);
+          reload();
+        }}
+      />
     </V2Layout>
   );
 }
@@ -333,7 +365,7 @@ function StatCard({ label, value, icon, tone, active, onClick }) {
 }
 
 // ── Terminal card ─────────────────────────────────────────────────────
-function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave, onGate, onToggleEnabled }) {
+function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave, onGate, onToggleEnabled, onRename }) {
   const dirty = Object.keys(draft).length > 0;
   const disabled = t.enabled === false;
   const lastSeen = relativeTime(t.lastSeenAt);
@@ -392,17 +424,27 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
           </div>
           <div className="text-[10px] text-slate-600 mt-0.5 font-mono truncate" title={t.id}>id: {t.id}</div>
         </div>
-        <button
-          onClick={onToggleEnabled}
-          disabled={busy}
-          title={disabled ? 'Enable terminal' : 'Disable terminal'}
-          className={`p-1.5 rounded-md text-xs ${
-            disabled ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25'
-                     : 'bg-slate-800/60 text-slate-400 border border-slate-700 hover:text-rose-300 hover:bg-rose-500/10 hover:border-rose-500/30'
-          } disabled:opacity-50`}
-        >
-          <i className={`ph ${disabled ? 'ph-power' : 'ph-prohibit'}`}></i>
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onRename}
+            disabled={busy}
+            title="Rename terminal"
+            className="p-1.5 rounded-md text-xs bg-slate-800/60 text-slate-400 border border-slate-700 hover:text-brand-300 hover:bg-brand-500/10 hover:border-brand-500/30 disabled:opacity-50"
+          >
+            <i className="ph ph-pencil-simple"></i>
+          </button>
+          <button
+            onClick={onToggleEnabled}
+            disabled={busy}
+            title={disabled ? 'Enable terminal' : 'Disable terminal'}
+            className={`p-1.5 rounded-md text-xs ${
+              disabled ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25'
+                       : 'bg-slate-800/60 text-slate-400 border border-slate-700 hover:text-rose-300 hover:bg-rose-500/10 hover:border-rose-500/30'
+            } disabled:opacity-50`}
+          >
+            <i className={`ph ${disabled ? 'ph-power' : 'ph-prohibit'}`}></i>
+          </button>
+        </div>
       </div>
 
       {/* State summary line */}

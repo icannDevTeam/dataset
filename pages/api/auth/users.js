@@ -30,8 +30,62 @@ async function verifyAdmin(req) {
     if (!email) return null;
 
     const db = getFirestoreDB();
-    const userDoc = await db.collection('dashboard_users').doc(email).get();
-    if (!userDoc.exists) return null;
+    const userRef = db.collection('dashboard_users').doc(email);
+    const userDoc = await userRef.get();
+
+    // ── Bootstrap: if no owner exists yet, the very first authenticated
+    // caller is auto-promoted. Idempotent — no-op once any owner is present.
+    if (SUPER_ADMIN && email === SUPER_ADMIN) {
+      // Super admin (env-configured) is always allowed and self-heals their doc.
+      if (!userDoc.exists || userDoc.data()?.role !== 'owner') {
+        await userRef.set({
+          email,
+          name: decoded.name || userDoc.data()?.name || '',
+          role: 'owner',
+          superAdmin: true,
+          bootstrap: !userDoc.exists,
+          addedAt: userDoc.exists ? (userDoc.data()?.addedAt || admin.firestore.FieldValue.serverTimestamp())
+                                  : admin.firestore.FieldValue.serverTimestamp(),
+          promotedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        try {
+          await logAudit(db, {
+            actor: { email },
+            kind: 'auth.bootstrap_owner',
+            target: { type: 'user', id: email, label: email },
+            summary: `Super admin auto-promoted to owner via env SUPER_ADMIN_EMAIL`,
+            req,
+          });
+        } catch {}
+        invalidateUser(email);
+        return { email, role: 'owner', name: decoded.name };
+      }
+    } else if (!userDoc.exists) {
+      // No record. Promote IF the system has zero owners yet.
+      const ownersSnap = await db.collection('dashboard_users').where('role', '==', 'owner').limit(1).get();
+      if (ownersSnap.empty) {
+        await userRef.set({
+          email,
+          name: decoded.name || '',
+          role: 'owner',
+          bootstrap: true,
+          addedAt: admin.firestore.FieldValue.serverTimestamp(),
+          promotedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        try {
+          await logAudit(db, {
+            actor: { email },
+            kind: 'auth.bootstrap_owner',
+            target: { type: 'user', id: email, label: email },
+            summary: `First authenticated user auto-promoted to owner (bootstrap)`,
+            req,
+          });
+        } catch {}
+        invalidateUser(email);
+        return { email, role: 'owner', name: decoded.name };
+      }
+      return null;
+    }
 
     const userData = userDoc.data();
     if (!['owner', 'admin'].includes(userData.role)) return null;
