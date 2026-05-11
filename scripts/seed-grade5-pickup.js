@@ -77,6 +77,27 @@ const ROSTER = [
     terminalId: '2dc4c6f35f89',
     status: 'pending', cardState: 'yellow', decision: 'ok', minutesAgo: 1,
   },
+  // Extra 2-sibling pending — mother picking up two kids together
+  {
+    students: [
+      { id: '2470006068', name: 'Soyi Shin',          homeroom: '5A' },
+      { id: '1970003074', name: 'Shaylene Louise Mak', homeroom: '5B' },
+    ],
+    chaperone: { name: 'Min-Jung Shin', relation: 'Mother', phone: '+62 817 9090 1010' },
+    terminalId: 'cf18e11f9d8e',
+    status: 'pending', cardState: 'green', decision: 'ok', minutesAgo: 2,
+  },
+  // Extra 3-sibling held — driver collecting three siblings, parked under HELD
+  {
+    students: [
+      { id: '1870001744', name: 'Connor Henry Owen',  homeroom: '5A' },
+      { id: '2470006068', name: 'Soyi Shin',          homeroom: '5A' },
+      { id: '1970003074', name: 'Shaylene Louise Mak', homeroom: '5B' },
+    ],
+    chaperone: { name: 'Driver - Pak Joko', relation: 'Other', phone: '+62 856 1010 2020' },
+    terminalId: '875e8b213c76',
+    status: 'held', cardState: 'yellow', decision: 'ok', minutesAgo: 6,
+  },
   // ── HELD (below the divider, smaller cards in a grid) ────────────────────
   {
     student: { id: '2470006068', name: 'Soyi Shin', homeroom: '5A' },

@@ -16,7 +16,9 @@
 import Head from 'next/head';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const POLL_MS = 2500;
+const POLL_MS = 2500;            // when SSE is offline
+const POLL_MS_LIVE = 15_000;     // when SSE is healthy (just a safety net)
+const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 const TOKEN_KEY = 'pickup.tablet.deviceToken';
 const IDENTITY_KEY = 'pickup.tablet.identity';
 const BINUS_MAROON = '#8B1538';
@@ -716,6 +718,7 @@ export default function TeacherTabletPage() {
   const [exiting, setExiting] = useState({}); // id → 'release' | 'hold'
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
+  const [sseLive, setSseLive] = useState(false);
   const pollRef = useRef(null);
 
   // Load token + last-known identity from localStorage so the iPad reopens
@@ -821,8 +824,63 @@ export default function TeacherTabletPage() {
   useEffect(() => {
     if (!token || !identity) return;
     pollFeed();
-    pollRef.current = setInterval(pollFeed, POLL_MS);
+    // Cadence depends on SSE health: 2.5s when offline (fallback), 15s when
+    // the SSE channel is delivering live events. The SSE effect below adjusts
+    // sseLive which retriggers this effect via dep array.
+    const interval = sseLive ? POLL_MS_LIVE : POLL_MS;
+    pollRef.current = setInterval(pollFeed, interval);
     return () => clearInterval(pollRef.current);
+  }, [token, identity, pollFeed, sseLive]);
+
+  // ── Live SSE channel ────────────────────────────────────────────────
+  // Each `pickup_event` message wakes pollFeed() so shape/merge logic stays
+  // centralized in the feed endpoint. Falls back transparently to polling if
+  // the connection drops or Vercel idles us out.
+  useEffect(() => {
+    if (!token || !identity) return;
+    let es = null;
+    let reconnectTimer = null;
+    let cancelled = false;
+
+    const open = () => {
+      if (cancelled) return;
+      try {
+        es = new EventSource(`/api/pickup/tablet/stream?deviceToken=${encodeURIComponent(token)}&t=${Date.now()}`);
+      } catch (e) {
+        setSseLive(false);
+        return;
+      }
+      es.addEventListener('hello', () => { if (!cancelled) setSseLive(true); });
+      es.addEventListener('pickup_event', () => {
+        if (cancelled) return;
+        // Live nudge — pollFeed() handles the shape/merge.
+        pollFeed();
+      });
+      es.onerror = () => {
+        if (cancelled) return;
+        setSseLive(false);
+        try { es && es.close(); } catch {}
+        es = null;
+        // Reconnect quickly (browser will throttle if it's a hard failure).
+        if (!reconnectTimer) reconnectTimer = setTimeout(() => { reconnectTimer = null; open(); }, 3000);
+      };
+    };
+
+    open();
+    // Proactive reconnect to dodge Vercel's ~5min serverless duration cap.
+    const watchdog = setInterval(() => {
+      try { es && es.close(); } catch {}
+      es = null;
+      open();
+    }, SSE_RECONNECT_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(watchdog);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      try { es && es.close(); } catch {}
+      setSseLive(false);
+    };
   }, [token, identity, pollFeed]);
 
   const onAction = async (ev, action) => {
