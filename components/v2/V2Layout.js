@@ -52,6 +52,7 @@ const NAV_SECTIONS = [
 // Bottom standalone items (always visible, not in collapsible sections)
 const BOTTOM_NAV = [
   { href: '/v2/settings', icon: 'ph-gear-six', label: 'Settings' },
+  { href: '/v2/admin/downloads', icon: 'ph-download-simple', label: 'Downloads', permissionKey: 'downloads' },
   { href: '/v2/admin/rbac', icon: 'ph-shield-checkered', label: 'Admin Console', adminOnly: true, badge: 'ADMIN' },
 ];
 
@@ -276,6 +277,12 @@ export default function V2Layout({ children }) {
               if (item.adminOnly) {
                 const canSeeAdmin = !!(permissions?.user_management?.view || permissions?.security_audit?.view);
                 if (!canSeeAdmin) return null;
+              }
+              // Permission check: items with explicit permissionKey require that feature
+              if (item.permissionKey) {
+                const f = permissions?.[item.permissionKey];
+                const allowed = !!(f && (f.view || Object.values(f).some(Boolean)));
+                if (!allowed) return null;
               }
               const active = isActive(item.href);
               return (
