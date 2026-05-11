@@ -47,7 +47,7 @@ export const config = {
 const DEFAULT_SECTIONS = {
   summary: true, byDate: true, byGate: true, byClass: true,
   byTerminal: true, frFlags: true, topChaperones: true,
-  audit: true, chaperones: false, recent: true,
+  audit: false, chaperones: false, recent: true,
 };
 
 function getWIBToday() {

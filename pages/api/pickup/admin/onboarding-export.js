@@ -35,7 +35,7 @@ export const config = {
   api: { bodyParser: { sizeLimit: '256kb' }, responseLimit: false },
 };
 
-const DEFAULT_SECTIONS = { summary: true, records: true, chaperones: false, audit: true };
+const DEFAULT_SECTIONS = { summary: true, records: true, chaperones: false, audit: false };
 
 function isDate(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s); }
 function gradeOf(homeroom) {

@@ -30,7 +30,10 @@ const FORMATS = [
 const DEFAULT_SECTIONS = {
   summary: true, byDate: true, byGate: true, byClass: true,
   byTerminal: true, frFlags: true, topChaperones: true,
-  audit: true, recent: true, chaperones: false,
+  // Audit trail is OFF by default in routine reports — too noisy for parents/
+  // principals. The standalone Audit Log download in /v2/admin/downloads is
+  // where auditors should get the full trail. Users can still opt in here.
+  audit: false, recent: true, chaperones: false,
 };
 
 export default function PickupReportExportOverlay({

@@ -35,6 +35,12 @@ const ADMIN_NAV = [
     label: 'Security Audit',
     description: 'Access logs & anomalies',
   },
+  {
+    href: '/v2/admin/downloads',
+    icon: 'ph-download-simple',
+    label: 'Downloads',
+    description: 'Reports, audits & compliance exports',
+  },
 ];
 
 function getWIBTime() {

@@ -20,7 +20,9 @@ const FORMATS = [
   { id: 'csv',  label: 'CSV',          icon: 'ph-file-csv',             desc: 'Sectioned plain text' },
 ];
 
-const DEFAULT_SECTIONS = { summary: true, records: true, chaperones: false, audit: true };
+// Audit trail OFF by default in routine onboarding reports (opt-in via
+// checkbox). Standalone Audit Log export lives in /v2/admin/downloads.
+const DEFAULT_SECTIONS = { summary: true, records: true, chaperones: false, audit: false };
 
 export default function OnboardingExportOverlay({
   open, onClose,
