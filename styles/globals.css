@@ -92,6 +92,29 @@ img {
   background-attachment: fixed;
 }
 
+/* ── Light-mode override (toggled via html.dark vs not.dark) ────────── */
+/* Only re-themes the V2Layout chrome. Inner page content was authored
+   without dark: prefixes, so it stays dark for now. Documented limitation. */
+html:not(.dark) .aura-theme {
+  background-color: #f1f5f9;       /* slate-100 */
+  color: #0f172a;                  /* slate-900 */
+  background-image:
+    radial-gradient(circle at 15% 50%, rgba(6, 182, 212, 0.10) 0%, transparent 40%),
+    radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.10) 0%, transparent 40%);
+}
+html:not(.dark) .aura-theme .glass-panel {
+  background: rgba(255, 255, 255, 0.85) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  color: #0f172a;
+}
+/* Sidebar + topbar chrome flips to a slate-100 surface in light mode */
+html:not(.dark) .aura-theme aside,
+html:not(.dark) .aura-theme header.glass-panel {
+  background-color: rgba(248, 250, 252, 0.92) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+html:not(.dark) .aura-theme .noise-overlay { opacity: 0; }
+
 .aura-theme .noise-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
