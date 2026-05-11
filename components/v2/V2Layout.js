@@ -51,7 +51,7 @@ const NAV_SECTIONS = [
 // Bottom standalone items (always visible, not in collapsible sections)
 const BOTTOM_NAV = [
   { href: '/v2/settings', icon: 'ph-gear-six', label: 'Settings' },
-  { href: '/v2/settings?tab=user-management', icon: 'ph-users', label: 'User Management', rbac: true },
+  { href: '/v2/admin/rbac', icon: 'ph-shield-checkered', label: 'Admin Console', adminOnly: true, badge: 'ADMIN' },
 ];
 
 export default function V2Layout({ children }) {
@@ -270,8 +270,11 @@ export default function V2Layout({ children }) {
           )}
           <div className="space-y-1">
             {BOTTOM_NAV.map((item) => {
-              // Permission check: rbac items need user_management permission
-              if (item.rbac && !permissions?.user_management) return null;
+              // Permission check: adminOnly items need user_management view OR security_audit view
+              if (item.adminOnly) {
+                const canSeeAdmin = !!(permissions?.user_management?.view || permissions?.security_audit?.view);
+                if (!canSeeAdmin) return null;
+              }
               const active = isActive(item.href);
               return (
                 <Link
@@ -286,8 +289,8 @@ export default function V2Layout({ children }) {
                 >
                   <i className={`ph ${item.icon} text-xl flex-shrink-0`}></i>
                   {!collapsed && <span className="flex-1">{item.label}</span>}
-                  {!collapsed && item.rbac && (
-                    <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 border border-slate-700">RBAC</span>
+                  {!collapsed && item.badge && (
+                    <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">{item.badge}</span>
                   )}
                   {collapsed && (
                     <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-xs font-medium rounded-lg whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 pointer-events-none shadow-lg">
