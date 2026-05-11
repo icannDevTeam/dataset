@@ -441,15 +441,181 @@ function buildCsv({ data, filters, sections, audit, meta }) {
   return Buffer.from('\uFEFF' + lines.join('\n'), 'utf8');
 }
 
-// ── Handler ─────────────────────────────────────────────────────────────────
+// ── HTML print mode ─────────────────────────────────────────────────────────
+// Self-printing letterhead HTML for the pickup-report. Renders the same
+// sections as the PDF but as a browser-printable page; auto-fires
+// window.print() so the operator can Save-as-PDF or send to a real printer.
+function buildPrintHtml({ data, filters, sections, audit, meta }) {
+  const esc = (v) => safeStr(v).replace(/[&<>"']/g, (m) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
+  const tbl = (title, headers, rows) => {
+    if (!rows?.length) return '';
+    return `<section class="block"><h3>${esc(title)}</h3><table><thead><tr>${
+      headers.map(h => `<th>${esc(h)}</th>`).join('')
+    }</tr></thead><tbody>${
+      rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')
+    }</tbody></table></section>`;
+  };
+
+  const k = data.summary || {};
+  const summaryHtml = sections.summary ? `
+    <section class="block summary">
+      <h3>Summary</h3>
+      <div class="kpis">
+        ${[
+          ['Total pickups', k.totalPickups],['Auto approved', k.autoApproved],
+          ['Overrides', k.officerOverridden],['Flagged', k.flagged],
+          ['Avg/day', k.avgPerDay],['Approval rate', fmtPct(k.approvalRate)],
+          ['Override rate', fmtPct(k.overrideRate)],['Days', data.range.totalDays],
+        ].map(([l, v]) => `<div class="kpi"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join('')}
+      </div>
+    </section>` : '';
+
+  // Per-terminal detail cards (one block per terminal with its FR signals)
+  const terminalDetail = sections.byTerminal ? (data.byTerminal || []).map((t) => `
+    <section class="block term-detail">
+      <header class="term-head">
+        <div>
+          <div class="key">Terminal</div>
+          <h3>${esc(t.gate || t.terminalId)}</h3>
+          <div class="sub">ID: <code>${esc(t.terminalId)}</code></div>
+        </div>
+        <div class="term-kpis">
+          <div><strong>${esc(t.total)}</strong><span>Pickups</span></div>
+          <div><strong>${esc(t.avgConfidence ?? '—')}%</strong><span>Avg conf</span></div>
+          <div><strong>${esc(t.livenessPassRate ?? '—')}%</strong><span>Liveness</span></div>
+          <div><strong>${esc(t.spoof)}</strong><span>Spoof</span></div>
+          <div><strong>${esc(t.lowConfidence)}</strong><span>Low conf</span></div>
+          <div><strong>${esc(t.unknownChaperone)}</strong><span>Unknown</span></div>
+        </div>
+      </header>
+    </section>`).join('') : '';
+
+  // Per-event detail cards (terminal + chaperone + students for each recent event)
+  const eventDetail = sections.recent ? (data.recent || []).slice(0, 80).map((r) => `
+    <section class="block event-detail">
+      <header class="event-head">
+        <div>
+          <div class="key">Pickup event</div>
+          <h3>${esc((r.at||'').slice(0,19).replace('T',' '))}</h3>
+        </div>
+        <div class="event-meta">
+          <div>Gate:&nbsp;<code>${esc(r.gate || '—')}</code></div>
+          <div>State:&nbsp;<code>${esc(r.cardState || '—')}</code> ${r.isOverride ? '<span class="chip">OVERRIDE</span>' : ''}</div>
+          ${r.officer ? `<div>Officer:&nbsp;<code>${esc(r.officer)}</code></div>` : ''}
+        </div>
+      </header>
+      <div class="event-body">
+        <div class="col">
+          <div class="key">Chaperone</div>
+          <strong>${esc(r.chaperone || '—')}</strong>
+        </div>
+        <div class="col wide">
+          <div class="key">Students (${(r.students||[]).length})</div>
+          ${(r.students||[]).map((s) => `<div class="stu">• <strong>${esc(s.name)}</strong>${s.homeroom ? ` <span class="hr">(${esc(s.homeroom)})</span>` : ''}</div>`).join('') || '<em>none</em>'}
+        </div>
+      </div>
+    </section>`).join('') : '';
+
+  return Buffer.from(`<!doctype html>
+<html><head><meta charset="utf-8"><title>BINUS Pickup Report — ${esc(data.range.from)} → ${esc(data.range.to)}</title>
+<style>
+  *,*:before,*:after{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;color:#0f172a;background:#f1f5f9;margin:0;padding:24px}
+  .toolbar{position:sticky;top:0;background:#0f172a;color:#fff;padding:12px 18px;border-radius:10px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 6px 24px rgba(0,0,0,.15);margin-bottom:16px;z-index:10}
+  .toolbar h1{margin:0;font-size:14px;font-weight:600}
+  .toolbar button{background:#22d3ee;color:#0f172a;border:0;border-radius:6px;padding:7px 16px;font-weight:700;font-size:13px;cursor:pointer;margin-left:8px}
+  .toolbar button.alt{background:#475569;color:#fff}
+  .letterhead{background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:24px 28px;margin-bottom:14px;border-bottom:3px solid #0e7490}
+  .letterhead .school{font-size:11px;color:#c2410c;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px}
+  .letterhead h1{margin:0;font-size:22px;font-weight:700;color:#0f172a}
+  .letterhead .meta{font-size:11px;color:#475569;margin-top:6px}
+  .block{background:#fff;border:1px solid #cbd5e1;border-radius:10px;padding:18px 22px;margin-bottom:12px;page-break-inside:avoid}
+  .block h3{font-size:11px;color:#0e7490;letter-spacing:1.2px;text-transform:uppercase;margin:0 0 10px;font-weight:700}
+  .summary .kpis{display:grid;grid-template-columns:repeat(8,1fr);gap:10px}
+  .kpi{padding:8px;background:#f8fafc;border-radius:6px}
+  .kpi .v{font-size:18px;font-weight:700;color:#0e7490}
+  .kpi .l{font-size:9px;color:#64748b;margin-top:2px;text-transform:uppercase;letter-spacing:.6px}
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  th,td{border:1px solid #e2e8f0;padding:5px 8px;text-align:left;vertical-align:top}
+  th{background:#f1f5f9;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#475569}
+  .term-detail .term-head{display:flex;justify-content:space-between;align-items:flex-start}
+  .term-head h3{font-size:18px;color:#0f172a;margin:2px 0 2px;letter-spacing:0;text-transform:none}
+  .term-head .key,.event-head .key,.event-body .key{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.6px}
+  .term-head .sub{font-size:11px;color:#475569}
+  .term-kpis{display:flex;gap:14px}
+  .term-kpis div{text-align:right}
+  .term-kpis strong{display:block;font-size:14px;color:#0e7490;font-weight:700}
+  .term-kpis span{font-size:9px;color:#64748b;text-transform:uppercase;letter-spacing:.5px}
+  .event-detail .event-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #e2e8f0}
+  .event-head h3{font-size:14px;color:#0f172a;margin:2px 0;letter-spacing:0;text-transform:none;font-family:Menlo,Consolas,monospace}
+  .event-meta{font-size:11px;color:#475569;text-align:right}
+  .event-meta div{margin:1px 0}
+  .chip{background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.5px;margin-left:4px}
+  .event-body{display:flex;gap:18px}
+  .event-body .col{flex:1}
+  .event-body .col.wide{flex:2}
+  .event-body strong{font-size:13px;display:block;margin-top:2px}
+  .stu{font-size:12px;margin-top:2px}
+  .stu .hr{color:#64748b;font-size:11px}
+  code{font-family:Menlo,Consolas,monospace;font-size:.92em}
+  @media print {
+    body{background:#fff;padding:0;margin:0}
+    .toolbar{display:none !important}
+    .letterhead,.block{box-shadow:none;border-radius:0;border-left:0;border-right:0;border-top:0;margin:0 0 6px}
+    .block{page-break-inside:avoid}
+    @page{size:A4;margin:14mm}
+  }
+</style></head>
+<body>
+  <div class="toolbar">
+    <h1>BINUS Pickup Report — ${esc(data.range.from)} → ${esc(data.range.to)} · ${esc(data.range.totalDays)} days</h1>
+    <div>
+      <button class="alt" onclick="window.close()">Close</button>
+      <button onclick="window.print()">Print / Save as PDF</button>
+    </div>
+  </div>
+  <header class="letterhead">
+    <div class="school">BINUS School Simprug</div>
+    <h1>Pickup Operations Report</h1>
+    <div class="meta">
+      Range: <code>${esc(data.range.from)} → ${esc(data.range.to)}</code> ·
+      ${filters?.grade ? `Grade: <code>${esc(filters.grade)}</code> · ` : ''}
+      ${filters?.homeroom ? `Homeroom: <code>${esc(filters.homeroom)}</code> · ` : ''}
+      Generated by <code>${esc(meta.actor)}</code> on <code>${esc(new Date().toISOString().slice(0,19).replace('T',' '))}</code> UTC
+    </div>
+  </header>
+
+  ${summaryHtml}
+  ${tbl('By Date', ['Date','Total','Auto','Override','Green','Yellow','Red'],
+        sections.byDate ? (data.byDate||[]).map(r => [r.date,r.total,r.autoApproved,r.overridden,r.green,r.yellow,r.red]) : [])}
+  ${tbl('By Gate', ['Gate','Total','Auto','Override','Green','Yellow','Red'],
+        sections.byGate ? (data.byGate||[]).map(r => [r.gate,r.total,r.autoApproved,r.overridden,r.green,r.yellow,r.red]) : [])}
+  ${tbl('By Class', ['Homeroom','Pickups'],
+        sections.byClass ? (data.byClass||[]).map(r => [r.homeroom,r.total]) : [])}
+  ${tbl('Top Chaperones', ['Name','Pickups'],
+        sections.topChaperones ? (data.topChaperones||[]).map(r => [r.name,r.total]) : [])}
+  ${terminalDetail ? `<h2 style="margin:18px 0 6px;color:#0e7490;font-size:13px;text-transform:uppercase;letter-spacing:1.2px">Terminal Details</h2>${terminalDetail}` : ''}
+  ${sections.frFlags ? tbl('Low-Confidence Flags', ['When','Gate','Chaperone','Conf'],
+        (data.fr?.lowConfidenceFlags||[]).map(r => [r.at,r.gate,r.chaperone,r.confidence])) : ''}
+  ${sections.frFlags ? tbl('Spoof / Liveness Flags', ['When','Gate','Chaperone','Liveness'],
+        (data.fr?.spoofFlags||[]).map(r => [r.at,r.gate,r.chaperone,r.livenessScore ?? '—'])) : ''}
+  ${eventDetail ? `<h2 style="margin:18px 0 6px;color:#0e7490;font-size:13px;text-transform:uppercase;letter-spacing:1.2px">Recent Event Details</h2>${eventDetail}` : ''}
+  ${tbl(`Audit Trail (${audit?.length || 0})`, ['When','Kind','Actor','Target','Summary'],
+        (sections.audit && audit?.length) ? audit.map(r => [(r.at||'').slice(0,19).replace('T',' '), r.kind, r.actor, r.target, r.summary]) : [])}
+
+  <script>window.addEventListener('load',function(){setTimeout(function(){window.print();},300);});</script>
+</body></html>`, 'utf8');
+}
+
+// ── Handler ────────────────────────────────────────────────────────────────
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
 
   const today = getWIBToday();
   const body = req.body || {};
   const format = String(body.format || 'xlsx').toLowerCase();
-  if (!['xlsx', 'pdf', 'csv'].includes(format)) {
-    return res.status(400).json({ error: 'bad_format', message: "format must be 'xlsx', 'pdf' or 'csv'" });
+  if (!['xlsx', 'pdf', 'csv', 'print'].includes(format)) {
+    return res.status(400).json({ error: 'bad_format', message: "format must be 'xlsx', 'pdf', 'csv' or 'print'" });
   }
   const from = isDate(body.from) ? body.from : today;
   const to   = isDate(body.to)   ? body.to   : today;
@@ -488,6 +654,10 @@ async function handler(req, res) {
       buf = await buildPdf({ data, filters, sections, audit, meta });
       mime = 'application/pdf';
       filename = `${baseName}.pdf`;
+    } else if (format === 'print') {
+      buf = buildPrintHtml({ data, filters, sections, audit, meta });
+      mime = 'text/html; charset=utf-8';
+      filename = `${baseName}.html`;
     } else {
       buf = buildCsv({ data, filters, sections, audit, meta });
       mime = 'text/csv; charset=utf-8';
@@ -506,7 +676,8 @@ async function handler(req, res) {
     });
 
     res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    const disp = format === 'print' ? 'inline' : 'attachment';
+    res.setHeader('Content-Disposition', `${disp}; filename="${filename}"`);
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).send(Buffer.isBuffer(buf) ? buf : Buffer.from(buf));
   } catch (err) {

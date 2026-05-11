@@ -68,7 +68,8 @@ export default function PickupReportExportOverlay({
 
   const toggleSection = (k) => setSections((s) => ({ ...s, [k]: !s[k] }));
 
-  const submit = useCallback(async () => {
+  const submit = useCallback(async (overrideFormat) => {
+    const fmt = overrideFormat || format;
     setBusy(true); setErr(null);
     try {
       const res = await fetch('/api/pickup/admin/export', {
@@ -76,7 +77,7 @@ export default function PickupReportExportOverlay({
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          format,
+          format: fmt,
           from: from || undefined,
           to:   to   || undefined,
           filters: {
@@ -84,7 +85,7 @@ export default function PickupReportExportOverlay({
             homeroom: homeroom.trim() || undefined,
           },
           sections: enabledSections,
-          includeChaperonePhotos: format === 'xlsx' && includePhotos,
+          includeChaperonePhotos: fmt === 'xlsx' && includePhotos,
         }),
       });
       if (!res.ok) {
@@ -93,10 +94,17 @@ export default function PickupReportExportOverlay({
         throw new Error(msg);
       }
       const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (fmt === 'print') {
+        const w = window.open(url, '_blank');
+        if (!w) throw new Error('Pop-up blocked — allow pop-ups for this site, then retry.');
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        onClose?.();
+        return;
+      }
       const cd = res.headers.get('Content-Disposition') || '';
       const m = cd.match(/filename="([^"]+)"/);
-      const name = m ? m[1] : `pickup-report.${format}`;
-      const url = URL.createObjectURL(blob);
+      const name = m ? m[1] : `pickup-report.${fmt}`;
       const a = document.createElement('a');
       a.href = url; a.download = name;
       document.body.appendChild(a); a.click(); a.remove();
@@ -220,7 +228,12 @@ export default function PickupReportExportOverlay({
             className="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50">
             Cancel
           </button>
-          <button onClick={submit} disabled={busy}
+          <button onClick={() => submit('print')} disabled={busy}
+            title="Open a printable letterhead view in a new tab"
+            className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-50">
+            <i className="ph ph-printer"></i>Print preview
+          </button>
+          <button onClick={() => submit()} disabled={busy}
             className="px-5 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-slate-950 text-sm font-semibold flex items-center gap-2 disabled:opacity-50 shadow-[0_0_20px_rgba(6,182,212,0.3)]">
             {busy
               ? <><i className="ph ph-spinner-gap animate-spin"></i>Generating…</>
