@@ -466,7 +466,10 @@ function ChaperoneCard({ c, checked, onCheck, onEnroll, onPhoto, busy, busyHere 
           className={`relative w-20 h-20 rounded-xl overflow-hidden ring-4 ${ringClass} ring-offset-2 ring-offset-slate-950 flex-shrink-0 ${
             c.facePhotoUrl ? 'cursor-zoom-in hover:scale-105 transition-transform' : 'cursor-default'
           }`}
-          title={c.facePhotoUrl ? 'Click to view full photo' : 'No face photo'}
+          title={[
+            c.employeeNo ? `Hikvision #${c.employeeNo}` : null,
+            c.facePhotoUrl ? 'Click to view full photo' : 'No face photo',
+          ].filter(Boolean).join(' · ')}
         >
           {c.facePhotoUrl ? (
             <img src={c.facePhotoUrl} alt={c.name} className="w-full h-full object-cover" />
@@ -488,12 +491,6 @@ function ChaperoneCard({ c, checked, onCheck, onEnroll, onPhoto, busy, busyHere 
             <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
               {REL_LABEL[c.relation] || c.relation}
             </span>
-            {c.employeeNo && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
-                title="Hikvision employeeNo">
-                #{c.employeeNo}
-              </span>
-            )}
           </div>
           {c.phone && (
             <div className="text-[11px] text-slate-400 mt-1.5 truncate">
@@ -550,12 +547,6 @@ function ChaperoneCard({ c, checked, onCheck, onEnroll, onPhoto, busy, busyHere 
               {d.name.replace(/\s*\(.*\)\s*$/, '').replace(/\s*\(.*\)/, '')}
             </span>
           ))}
-          {c.enrollment.unmatched.length > 0 && (
-            <span title={`Out of grade scope: ${c.enrollment.unmatched.map((d) => d.name).join(', ')}`}
-              className="text-[10px] px-1.5 py-0.5 rounded border font-mono bg-slate-900/40 text-slate-600 border-slate-800">
-              +{c.enrollment.unmatched.length} other (out of scope)
-            </span>
-          )}
         </div>
       </div>
 
@@ -568,7 +559,7 @@ function ChaperoneCard({ c, checked, onCheck, onEnroll, onPhoto, busy, busyHere 
           </a>
         ) : c.matchedDeviceCount === 0 ? (
           <div className="text-center text-[11px] text-slate-500 px-2 py-2">
-            No grade-{c.studentGrades[0] || '?'} terminal configured.
+            No terminal in grade {c.studentGrades[0] || '?'}
           </div>
         ) : (
           <button

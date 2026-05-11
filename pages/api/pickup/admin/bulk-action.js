@@ -59,29 +59,10 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
     throw new Error('no chaperones in record');
   }
 
-  // Server-side mirror of the UI gate: every student on the form must have
-  // an admin-uploaded canonical photo before bulk-approval can proceed.
+  // Sanity: the form must have at least one student linked. Student photos
+  // are NOT required — the iPad teacher cards show name + homeroom only.
   const recStudents = Array.isArray(rec.students) ? rec.students : [];
   if (recStudents.length === 0) throw new Error('no students in record');
-  const missingStudentPhotos = [];
-  for (const s of recStudents) {
-    if (!s || !s.id) { missingStudentPhotos.push(s?.name || s?.id || '(unknown)'); continue; }
-    let hasPhoto = false;
-    try {
-      const tenantSnap = await db.doc(`${tenancy.studentsPath(tid)}/${s.id}`).get();
-      if (tenantSnap.exists && (tenantSnap.data() || {}).photoPath) hasPhoto = true;
-    } catch {}
-    if (!hasPhoto) {
-      try {
-        const legacy = await db.doc(`students/${s.id}`).get();
-        if (legacy.exists && (legacy.data() || {}).photoPath) hasPhoto = true;
-      } catch {}
-    }
-    if (!hasPhoto) missingStudentPhotos.push(s.name || s.id);
-  }
-  if (missingStudentPhotos.length > 0) {
-    throw new Error(`student_photos_required: ${missingStudentPhotos.join(', ')}`);
-  }
 
   const now = new Date().toISOString();
   const created = [];

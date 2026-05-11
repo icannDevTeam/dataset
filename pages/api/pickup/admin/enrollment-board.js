@@ -92,12 +92,25 @@ async function handler(req, res) {
     const chaperones = [];
     const facePathsToSign = new Set();
     snap.forEach((d) => {
-      const c = d.data();
+      const c = d.data() || {};
+      // Only show approved (or approved-pending-faces) and not-suspended chaperones.
+      // Pending/rejected/suspended records belong to the admin queue, not the
+      // enrollment board.
+      if (c.suspendedAt) return;
+      if (!['approved', 'approved_pending_faces'].includes(c.status)) return;
       chaperones.push({ id: d.id, ...c });
       (c.authorizedStudentIds || []).forEach((sid) => sid && allStudentIds.add(sid));
       const first = (c.facePaths || [])[0];
       if (first) facePathsToSign.add(first);
     });
+    if (chaperones.length === 0) {
+      return res.status(200).json({
+        ok: true,
+        devices: devicesPublic,
+        groups: [],
+        summary: { totalChaperones: 0, fullyEnrolled: 0, partiallyEnrolled: 0, neverEnrolled: 0, awaitingPhotos: 0 },
+      });
+    }
 
     const [studentEntries, signedEntries] = await Promise.all([
       Promise.all([...allStudentIds].map(async (sid) => {
