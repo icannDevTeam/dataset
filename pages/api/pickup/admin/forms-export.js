@@ -91,6 +91,7 @@ async function handler(req, res) {
 
       records.push({
         id: r.id,
+        formNumber: r.formNumber || null,
         status: r.status,
         submittedAt: submittedIso,
         guardian: r.guardian || null,

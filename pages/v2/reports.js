@@ -2002,6 +2002,7 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     const hay = [
+      r.formNumber, r.id,
       r.guardian?.name, r.guardian?.email, r.guardian?.phone,
       ...(r.students || []).flatMap((s) => [s.name, s.id, s.homeroom]),
       ...(r.chaperones || []).flatMap((c) => [c.name, c.phone, c.email, c.idNumber]),
@@ -2024,7 +2025,7 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
   const exportCSV = () => {
     if (!filtered.length) return;
     const rows = [[
-      'Form ID', 'Status', 'Submitted', 'Reviewed', 'Reviewer',
+      'Form Number', 'Form ID', 'Status', 'Submitted', 'Reviewed', 'Reviewer',
       'Guardian Name', 'Guardian Email', 'Guardian Phone',
       'Student ID', 'Student Name', 'Homeroom',
       'Chaperone Name', 'Relation', 'Chaperone Phone', 'Chaperone Email',
@@ -2036,7 +2037,7 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
       students.forEach((s) => {
         chaperones.forEach((c) => {
           rows.push([
-            r.id, r.status, r.submittedAt || '', r.reviewedAt || '', r.reviewedBy || '',
+            r.formNumber || '', r.id, r.status, r.submittedAt || '', r.reviewedAt || '', r.reviewedBy || '',
             r.guardian?.name || '', r.guardian?.email || '', r.guardian?.phone || '',
             s.id || '', s.name || '', s.homeroom || '',
             c.name || '', c.relation || '', c.phone || '', c.email || '',
@@ -2131,7 +2132,7 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
 
         <div className="flex flex-wrap gap-3 items-center">
           <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search inside results (name / phone / email)…"
+            placeholder="Search inside results (form #, name, phone, email)…"
             className="flex-1 min-w-[220px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600" />
           <button onClick={fetchForms} disabled={loading}
             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50">
@@ -2184,6 +2185,7 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
             <table className="w-full text-sm">
               <thead className="bg-slate-900/60 text-[10px] uppercase tracking-wider text-slate-500">
                 <tr>
+                  <th className="text-left px-3 py-2">Form #</th>
                   <th className="text-left px-3 py-2">Submitted</th>
                   <th className="text-left px-3 py-2">Status</th>
                   <th className="text-left px-3 py-2">Guardian</th>
@@ -2195,6 +2197,16 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
               <tbody className="divide-y divide-slate-800/60">
                 {filtered.map((r) => (
                   <tr key={r.id} className="hover:bg-slate-800/30">
+                    <td className="px-3 py-2 text-xs whitespace-nowrap">
+                      {r.formNumber ? (
+                        <span className="font-mono font-semibold text-emerald-300 text-[11px]
+                          bg-emerald-500/10 border border-emerald-500/30 rounded px-2 py-0.5">
+                          {r.formNumber}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-xs text-slate-300 whitespace-nowrap">
                       {r.submittedAt ? fmtDate(r.submittedAt.slice(0, 10)) : '—'}
                     </td>

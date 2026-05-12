@@ -1494,6 +1494,65 @@ export default function PickupOnboardingPage() {
                 </div>
               )}
 
+              {/* Save / print receipt — placed RIGHT under the form number
+                  so it's the first thing parents see and act on, before
+                  the long disclaimer text. Pure client-side blob so it
+                  works even with weak signal at the gate later. */}
+              <div style={{
+                margin: '6px 0 18px',
+                background: '#fff',
+                border: `1.5px solid ${BRAND.success}`,
+                borderRadius: 12, padding: 14,
+                display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center',
+              }}>
+                <div style={{
+                  fontSize: 13, fontWeight: 700, color: BRAND.success,
+                  marginRight: 'auto',
+                }}>
+                  Save your form for later →
+                </div>
+                <button type="button"
+                  style={btn({ padding: '10px 18px', fontSize: 13.5, background: BRAND.navy })}
+                  onClick={() => downloadReceipt({
+                    formNumber: done.formNumber,
+                    submittedAt: done.at,
+                    guardianName, guardianEmail, guardianPhone,
+                    students, chaperones, signature,
+                  })}>
+                  Download receipt
+                </button>
+                <button type="button"
+                  style={btnSecondary({ padding: '10px 18px', fontSize: 13.5 })}
+                  onClick={() => printReceipt({
+                    formNumber: done.formNumber,
+                    submittedAt: done.at,
+                    guardianName, guardianEmail, guardianPhone,
+                    students, chaperones, signature,
+                  })}>
+                  Print / Save as PDF
+                </button>
+                {done.formNumber && (
+                  <button type="button"
+                    style={btnGhost({ padding: '10px 18px', fontSize: 13.5 })}
+                    onClick={async () => {
+                      try {
+                        if (navigator.clipboard) {
+                          await navigator.clipboard.writeText(done.formNumber);
+                        } else {
+                          // Fallback for older browsers
+                          const ta = document.createElement('textarea');
+                          ta.value = done.formNumber;
+                          document.body.appendChild(ta);
+                          ta.select(); document.execCommand('copy');
+                          ta.remove();
+                        }
+                      } catch {}
+                    }}>
+                    Copy form number
+                  </button>
+                )}
+              </div>
+
               <p style={{ color: '#166534', fontSize: 14, lineHeight: 1.6 }}>
                 Please save the form number above for your reference. The school
                 office will review your submission. Once approved, each authorized
@@ -1523,45 +1582,6 @@ export default function PickupOnboardingPage() {
                   </strong>
                 </p>
               )}
-
-              {/* Save / share the receipt — purely client-side so it works
-                  even if the parent has weak signal at the gate later. */}
-              <div style={{
-                marginTop: 18, paddingTop: 16, borderTop: '1px dashed #86EFAC',
-                display: 'flex', flexWrap: 'wrap', gap: 10,
-              }}>
-                <button type="button"
-                  style={btn({ padding: '10px 18px', fontSize: 13.5, background: BRAND.navy })}
-                  onClick={() => downloadReceipt({
-                    formNumber: done.formNumber,
-                    submittedAt: done.at,
-                    guardianName, guardianEmail, guardianPhone,
-                    students, chaperones, signature,
-                  })}>
-                  💾 Save receipt to device
-                </button>
-                <button type="button"
-                  style={btnSecondary({ padding: '10px 18px', fontSize: 13.5 })}
-                  onClick={() => printReceipt({
-                    formNumber: done.formNumber,
-                    submittedAt: done.at,
-                    guardianName, guardianEmail, guardianPhone,
-                    students, chaperones, signature,
-                  })}>
-                  🖨 Print / save as PDF
-                </button>
-                {done.formNumber && navigator.clipboard && (
-                  <button type="button"
-                    style={btnGhost({ padding: '10px 18px', fontSize: 13.5 })}
-                    onClick={() => {
-                      try {
-                        navigator.clipboard.writeText(done.formNumber);
-                      } catch {}
-                    }}>
-                    📋 Copy form number
-                  </button>
-                )}
-              </div>
             </div>
           )}
 
@@ -1604,7 +1624,7 @@ export default function PickupOnboardingPage() {
                 })}
               </div>
 
-              <form onSubmit={submit}>
+              <form onSubmit={(e) => { e.preventDefault(); openPreview(); }}>
                 <div style={card()}>
                   {sectionHeading(1, 'Your information',
                     'The parent or legal guardian making this request.')}
@@ -1978,14 +1998,14 @@ export default function PickupOnboardingPage() {
                     marginTop: 20, display: 'flex', justifyContent: 'flex-end',
                     gap: 10, flexWrap: 'wrap',
                   }}>
-                    <button type="button" style={btnSecondary({ padding: '14px 22px', fontSize: 14 })}
-                      disabled={submitting}
-                      onClick={openPreview}>
-                      👁  Preview before submitting
-                    </button>
-                    <button type="submit" style={btn({ padding: '14px 28px', fontSize: 15 })}
+                    {/* Single primary action — keeps the flow linear:
+                        fill in everything → preview → confirm & submit.
+                        The actual /submit POST happens only inside the
+                        preview modal, so parents always get a chance to
+                        review before anything leaves their phone. */}
+                    <button type="submit" style={btn({ padding: '14px 30px', fontSize: 15 })}
                       disabled={submitting}>
-                      {submitting ? 'Submitting…' : 'Submit for school approval →'}
+                      Preview & submit →
                     </button>
                   </div>
                 </div>
