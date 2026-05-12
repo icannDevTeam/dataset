@@ -103,7 +103,7 @@ export default function PickupAdminPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [working, setWorking] = useState({});       // recordId -> 'approve'|'reject'|'reenroll'
-  const [expanded, setExpanded] = useState({});     // recordId -> bool
+  const [selectedId, setSelectedId] = useState(null); // recordId currently open in detail drawer
   const [rejectingId, setRejectingId] = useState(null);  // inline reject form
   const [rejectReason, setRejectReason] = useState('');
   const [lightbox, setLightbox] = useState(null);
@@ -299,6 +299,41 @@ export default function PickupAdminPage() {
   // Clear selection when tab changes
   useEffect(() => { setSelected({}); setRejectingId(null); }, [tab]);
 
+  // ─── Detail drawer URL sync (?pkp=<id>) ─────────────────────────────────
+  useEffect(() => {
+    if (!router.isReady) return;
+    const p = router.query.pkp;
+    if (typeof p === 'string' && p) setSelectedId(p);
+    else setSelectedId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.pkp]);
+
+  // Push selectedId into URL (shallow, no scroll)
+  useEffect(() => {
+    if (!router.isReady) return;
+    if (view !== 'onboarding') return;
+    const cur = router.query.pkp;
+    if ((cur || '') === (selectedId || '')) return;
+    const next = { ...router.query };
+    if (selectedId) next.pkp = selectedId;
+    else delete next.pkp;
+    router.replace({ pathname: router.pathname, query: next }, undefined, { shallow: true, scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, view, router.isReady]);
+
+  // Esc closes drawer
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKey = (e) => { if (e.key === 'Escape') setSelectedId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedId]);
+
+  const selectedRecord = useMemo(
+    () => (selectedId ? records.find((r) => r.id === selectedId) || null : null),
+    [selectedId, records]
+  );
+
   // Admin uploads a student profile photo from the form details view.
   // The parent form only collects student id+name; admins fill in the photo here.
   const uploadStudentPhoto = useCallback(async (studentId, file) => {
@@ -462,6 +497,22 @@ export default function PickupAdminPage() {
     };
     return [...list].sort(sorters[sort] || sorters.newest);
   }, [records, search, sort]);
+
+  // J/K to navigate between records when drawer is open
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKey = (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+      if (e.key !== 'j' && e.key !== 'k' && e.key !== 'J' && e.key !== 'K') return;
+      const idx = visibleRecords.findIndex((r) => r.id === selectedId);
+      if (idx < 0) return;
+      const dir = (e.key === 'j' || e.key === 'J') ? 1 : -1;
+      const next = visibleRecords[idx + dir];
+      if (next) setSelectedId(next.id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedId, visibleRecords]);
 
   const selectedIds = useMemo(() => Object.keys(selected).filter((k) => selected[k]), [selected]);
   const allSelected = visibleRecords.length > 0 && visibleRecords.every((r) => selected[r.id]);
@@ -890,7 +941,7 @@ export default function PickupAdminPage() {
               {search ? `No results for "${search}".` : `No ${tab} submissions.`}
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-2">
               {visibleRecords.map((rec) => (
                 <RecordCard
                   key={rec.id}
@@ -898,23 +949,12 @@ export default function PickupAdminPage() {
                   thumbnails={thumbnails}
                   selected={!!selected[rec.id]}
                   onToggleSelect={() => setSelected((s) => ({ ...s, [rec.id]: !s[rec.id] }))}
-                  expanded={!!expanded[rec.id]}
-                  onToggle={() => setExpanded((x) => ({ ...x, [rec.id]: !x[rec.id] }))}
+                  isActive={selectedId === rec.id}
+                  onOpen={() => setSelectedId(rec.id)}
                   onApprove={() => approve(rec)}
-                  onStartReject={() => { setRejectingId(rec.id); setRejectReason(''); setExpanded((x) => ({ ...x, [rec.id]: true })); }}
-                  onCancelReject={() => { setRejectingId(null); setRejectReason(''); }}
-                  onSubmitReject={() => submitReject(rec)}
-                  onReenroll={() => reenroll(rec)}
-                  onPhoto={(url, caption) => setLightbox({ url, caption })}
+                  onStartReject={() => { setRejectingId(rec.id); setRejectReason(''); setSelectedId(rec.id); }}
                   onPrint={() => setPrintRec(rec)}
-                  onUploadStudentPhoto={uploadStudentPhoto}
-                  onUploadChaperonePhoto={uploadChaperonePhoto}
-                  onUploadPendingChaperoneFace={uploadPendingChaperoneFace}
-                  onOnboardingEdit={submitOnboardingEdit}
                   busy={working[rec.id]}
-                  rejecting={rejectingId === rec.id}
-                  rejectReason={rejectReason}
-                  setRejectReason={setRejectReason}
                   showSelect={tab === 'pending'}
                 />
               ))}
@@ -936,6 +976,41 @@ export default function PickupAdminPage() {
             </div>
           </div>
         )}
+
+        {/* Detail drawer (right slide-in) */}
+        <DetailDrawer
+          open={view === 'onboarding' && !!selectedRecord}
+          rec={selectedRecord}
+          thumbnails={thumbnails}
+          onClose={() => { setSelectedId(null); setRejectingId(null); }}
+          onApprove={selectedRecord ? () => approve(selectedRecord) : undefined}
+          onStartReject={selectedRecord ? () => { setRejectingId(selectedRecord.id); setRejectReason(''); } : undefined}
+          onCancelReject={() => { setRejectingId(null); setRejectReason(''); }}
+          onSubmitReject={selectedRecord ? () => submitReject(selectedRecord) : undefined}
+          onReenroll={selectedRecord ? () => reenroll(selectedRecord) : undefined}
+          onPhoto={(url, caption) => setLightbox({ url, caption })}
+          onPrint={selectedRecord ? () => setPrintRec(selectedRecord) : undefined}
+          onUploadStudentPhoto={uploadStudentPhoto}
+          onUploadChaperonePhoto={uploadChaperonePhoto}
+          onUploadPendingChaperoneFace={uploadPendingChaperoneFace}
+          onOnboardingEdit={submitOnboardingEdit}
+          busy={selectedRecord ? working[selectedRecord.id] : null}
+          rejecting={selectedRecord ? rejectingId === selectedRecord.id : false}
+          rejectReason={rejectReason}
+          setRejectReason={setRejectReason}
+          // siblings for prev/next nav
+          prevId={(() => {
+            if (!selectedRecord) return null;
+            const i = visibleRecords.findIndex((r) => r.id === selectedRecord.id);
+            return i > 0 ? visibleRecords[i - 1].id : null;
+          })()}
+          nextId={(() => {
+            if (!selectedRecord) return null;
+            const i = visibleRecords.findIndex((r) => r.id === selectedRecord.id);
+            return i >= 0 && i < visibleRecords.length - 1 ? visibleRecords[i + 1].id : null;
+          })()}
+          onJump={(id) => setSelectedId(id)}
+        />
 
         {printRec && (
           <PrintFormModal rec={printRec} thumbnails={thumbnails} onClose={() => setPrintRec(null)} />
@@ -1453,27 +1528,16 @@ function StatusPill({ status }) {
   );
 }
 
-// ─── Record card ────────────────────────────────────────────────────────────
+// ─── Record card (slim, clickable list row) ────────────────────────────────
+// Compact summary row. Clicking anywhere opens the right-hand DetailDrawer.
+// Quick actions (checkbox, Approve, Print) stop propagation so the row click
+// doesn't fire when activating them.
 function RecordCard(props) {
   const {
-    rec, thumbnails, selected, onToggleSelect, expanded, onToggle,
-    onApprove, onStartReject, onCancelReject, onSubmitReject, onReenroll,
-    onPhoto, onPrint, onUploadStudentPhoto, onUploadChaperonePhoto,
-    onUploadPendingChaperoneFace,
-    onOnboardingEdit,
-    busy, rejecting, rejectReason, setRejectReason, showSelect,
+    rec, selected, onToggleSelect, isActive, onOpen,
+    onApprove, onPrint, busy, showSelect,
   } = props;
 
-  const enrichedStudents = (rec.students || []).map((s) => ({
-    ...s,
-    photoUrl: s.photoUrl || thumbnails[s.id] || thumbnails[`name:${s.name}`] || null,
-  }));
-
-  // Student photos are not required for approval — only chaperone face
-  // photos drive verification at the pickup gate.
-  const approveBlocked = false;
-
-  // Per-record device-enrollment summary
   const enrollSummary = useMemo(() => {
     if (rec.status !== 'approved') return null;
     const allocated = rec.allocatedChaperones || [];
@@ -1486,21 +1550,45 @@ function RecordCard(props) {
     return { ok, fail, total: allocated.length };
   }, [rec]);
 
+  const handleRowClick = (e) => {
+    if (e.target.closest('button,a,input,label,kbd')) return;
+    onOpen();
+  };
+
   return (
-    <div className={`bg-white/5 border rounded-xl overflow-hidden transition-colors ${
-      selected ? 'border-brand-500/50 ring-1 ring-brand-500/30' : 'border-slate-800'
-    }`}>
-      {/* Header strip */}
-      <div className="px-5 py-4 flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3 min-w-0">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleRowClick}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onOpen(); } }}
+      className={`group relative bg-white/5 border rounded-xl overflow-hidden transition-all cursor-pointer ${
+        isActive
+          ? 'border-brand-500/60 ring-2 ring-brand-500/30 bg-white/[0.07]'
+          : selected
+          ? 'border-brand-500/40 ring-1 ring-brand-500/20'
+          : 'border-slate-800 hover:border-slate-600 hover:bg-white/[0.06]'
+      }`}
+    >
+      {isActive && (
+        <span className="absolute left-0 top-0 bottom-0 w-1 bg-brand-400 rounded-r" aria-hidden></span>
+      )}
+
+      <div className="px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+        {/* Left: identity */}
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           {showSelect && (
-            <input type="checkbox" checked={selected} onChange={onToggleSelect}
-              className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500/40 flex-shrink-0" />
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggleSelect}
+              onClick={(e) => e.stopPropagation()}
+              className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500/40 flex-shrink-0"
+            />
           )}
           <div className="w-10 h-10 rounded-full bg-brand-500/15 text-brand-300 flex items-center justify-center font-bold flex-shrink-0">
             {(rec.guardian?.name || '?').charAt(0).toUpperCase()}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold text-white truncate flex items-center gap-2 flex-wrap">
               {rec.guardian?.name || '—'}
               <StatusPill status={rec.status} />
@@ -1512,9 +1600,7 @@ function RecordCard(props) {
                   <i className="ph ph-hash"></i>{rec.formNumber}
                 </span>
               )}
-              {enrollSummary && (
-                <EnrollPill summary={enrollSummary} />
-              )}
+              {enrollSummary && <EnrollPill summary={enrollSummary} />}
             </div>
             <div className="text-xs text-slate-500 truncate">
               {rec.guardian?.email} · {rec.guardian?.phone}
@@ -1523,173 +1609,340 @@ function RecordCard(props) {
             </div>
           </div>
         </div>
+
+        {/* Right: counts + quick actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-slate-400 px-2 py-1 rounded bg-white/5 border border-slate-800">
+          <span className="text-xs text-slate-400 px-2 py-1 rounded bg-white/5 border border-slate-800" title="Students">
             <i className="ph ph-graduation-cap mr-1"></i>{rec.students?.length || 0}
           </span>
-          <span className="text-xs text-slate-400 px-2 py-1 rounded bg-white/5 border border-slate-800">
+          <span className="text-xs text-slate-400 px-2 py-1 rounded bg-white/5 border border-slate-800" title="Chaperones">
             <i className="ph ph-users mr-1"></i>{rec.chaperones?.length || 0}
           </span>
-          <button onClick={onPrint}
-            className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10"
-            title="Open printable form view">
-            <i className="ph ph-printer mr-1"></i>Form
+          <button
+            onClick={(e) => { e.stopPropagation(); onPrint(); }}
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10"
+            title="Open printable form view"
+            aria-label="Print form"
+          >
+            <i className="ph ph-printer"></i>
           </button>
           {rec.status === 'pending' && (
-            <button onClick={onApprove} disabled={!!busy}
-              title={'Approve and allocate chaperone IDs'}
-              className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50">
+            <button
+              onClick={(e) => { e.stopPropagation(); onApprove(); }}
+              disabled={!!busy}
+              title="Approve and allocate chaperone IDs"
+              className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+            >
               {busy === 'approve' ? '…' : <><i className="ph ph-check mr-1"></i>Approve</>}
             </button>
           )}
-          <button onClick={onToggle}
-            className="text-xs px-3 py-1.5 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
-            <i className={`ph ${expanded ? 'ph-caret-up' : 'ph-caret-down'} mr-1`}></i>
-            {expanded ? 'Collapse' : 'Details'}
-          </button>
+          <i className="ph ph-caret-right text-slate-600 group-hover:text-slate-300 transition-colors" aria-hidden></i>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Detail body (used inside DetailDrawer) ────────────────────────────────
+function RecordDetail(props) {
+  const {
+    rec, thumbnails,
+    onPhoto, onUploadStudentPhoto, onUploadChaperonePhoto,
+    onUploadPendingChaperoneFace, onOnboardingEdit,
+  } = props;
+  if (!rec) return null;
+
+  const enrichedStudents = (rec.students || []).map((s) => ({
+    ...s,
+    photoUrl: s.photoUrl || (thumbnails || {})[s.id] || (thumbnails || {})[`name:${s.name}`] || null,
+  }));
+
+  return (
+    <div className="px-5 py-5 space-y-5">
+      {/* Submission metadata grid */}
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <MetaCell label="Submitted" value={fmtTime(rec.submittedAt)} />
+        <MetaCell label="Reviewed" value={rec.reviewedAt ? fmtTime(rec.reviewedAt) : '—'} />
+        <MetaCell label="Reviewer" value={rec.reviewedBy || '—'} mono />
+        <MetaCell label="Token TTL" value={rec.tokenExp ? fmtTime(new Date(rec.tokenExp * 1000).toISOString()) : '—'} />
+      </div>
+
+      {/* Students */}
+      <div>
+        <SectionHeader icon="ph-graduation-cap" label={`Students on this form (${enrichedStudents.length})`} />
+        {enrichedStudents.length > 1 && (
+          <p className="text-[11px] text-slate-500 -mt-1 mb-3">
+            <i className="ph ph-info mr-1"></i>{enrichedStudents.length} siblings on a single submission.
+          </p>
+        )}
+        <div className="grid grid-cols-1 gap-3">
+          {enrichedStudents.map((s, i) => (
+            <StudentTile
+              key={s.id}
+              s={s}
+              index={i}
+              total={enrichedStudents.length}
+              canEdit={rec.status === 'pending' && !!onOnboardingEdit}
+              canDelete={rec.status === 'pending' && !!onOnboardingEdit && enrichedStudents.length > 1}
+              onEdit={(patch) => onOnboardingEdit({ recordId: rec.id, target: 'student', id: s.id, action: 'update', patch })}
+              onDelete={() => onOnboardingEdit({ recordId: rec.id, target: 'student', id: s.id, action: 'delete' })}
+            />
+          ))}
         </div>
       </div>
 
-      {expanded && (
-        <div className="border-t border-slate-800 px-5 py-5 space-y-5 bg-slate-950/40">
-          {/* Submission metadata grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <MetaCell label="Submitted" value={fmtTime(rec.submittedAt)} />
-            <MetaCell label="Reviewed" value={rec.reviewedAt ? fmtTime(rec.reviewedAt) : '—'} />
-            <MetaCell label="Reviewer" value={rec.reviewedBy || '—'} mono />
-            <MetaCell label="Token TTL" value={rec.tokenExp ? fmtTime(new Date(rec.tokenExp * 1000).toISOString()) : '—'} />
-          </div>
+      {/* Chaperones */}
+      <div>
+        <SectionHeader icon="ph-users" label={`Authorized Adults (${rec.chaperones?.length || 0})`} />
+        <div className="space-y-3">
+          {(rec.chaperones || []).map((c, i) => {
+            const allocated = rec.allocatedChaperones?.[i];
+            const enrol = (rec.enrollment || []).find((e) => e.chaperoneId === allocated?.chaperoneId);
+            const editable = rec.status === 'pending' && !!onOnboardingEdit;
+            return (
+              <ChaperoneRow
+                key={c.tempId || i}
+                c={c}
+                index={i}
+                allocated={allocated}
+                enrol={enrol}
+                enrichedStudents={enrichedStudents}
+                onPhoto={onPhoto}
+                onUpload={onUploadChaperonePhoto && allocated
+                  ? (file, opts) => onUploadChaperonePhoto(allocated.chaperoneId, file, opts)
+                  : null}
+                onUploadPendingFace={editable && onUploadPendingChaperoneFace
+                  ? (file) => onUploadPendingChaperoneFace({ recordId: rec.id, tempId: c.tempId, file })
+                  : null}
+                canEdit={editable}
+                onEdit={editable ? (patch) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'update', patch }) : null}
+                onDelete={editable ? () => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete' }) : null}
+                onDeleteFace={editable ? (facePath) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete-face', facePath }) : null}
+              />
+            );
+          })}
+        </div>
+      </div>
 
-          {/* Students */}
-          <div>
-            <SectionHeader icon="ph-graduation-cap" label={`Students on this form (${enrichedStudents.length})`} />
-            {enrichedStudents.length > 1 && (
-              <p className="text-[11px] text-slate-500 -mt-1 mb-3">
-                <i className="ph ph-info mr-1"></i>
-                {enrichedStudents.length} siblings on a single submission.
-              </p>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {enrichedStudents.map((s, i) => (
-                <StudentTile
-                  key={s.id}
-                  s={s}
-                  index={i}
-                  total={enrichedStudents.length}
-                  canEdit={rec.status === 'pending' && !!onOnboardingEdit}
-                  canDelete={rec.status === 'pending' && !!onOnboardingEdit && enrichedStudents.length > 1}
-                  onEdit={(patch) => onOnboardingEdit({ recordId: rec.id, target: 'student', id: s.id, action: 'update', patch })}
-                  onDelete={() => onOnboardingEdit({ recordId: rec.id, target: 'student', id: s.id, action: 'delete' })}
-                />
-              ))}
-            </div>
+      {/* Consent panel */}
+      <div className="px-3 py-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-start gap-3">
+        <i className="ph ph-signature text-emerald-400 mt-0.5"></i>
+        <div className="flex-1 text-xs">
+          <div className="text-slate-400">
+            Consent signature:&nbsp;
+            <strong className="text-white">{rec.guardian?.signatureRef || rec.consentSignature || '—'}</strong>
           </div>
-
-          {/* Chaperones */}
-          <div>
-            <SectionHeader icon="ph-users" label={`Authorized Adults (${rec.chaperones?.length || 0})`} />
-            <div className="space-y-3">
-              {(rec.chaperones || []).map((c, i) => {
-                const allocated = rec.allocatedChaperones?.[i];
-                const enrol = (rec.enrollment || []).find((e) => e.chaperoneId === allocated?.chaperoneId);
-                const editable = rec.status === 'pending' && !!onOnboardingEdit;
-                return (
-                  <ChaperoneRow key={c.tempId || i} c={c} index={i} allocated={allocated} enrol={enrol}
-                    enrichedStudents={enrichedStudents} onPhoto={onPhoto}
-                    onUpload={onUploadChaperonePhoto && allocated
-                      ? (file, opts) => onUploadChaperonePhoto(allocated.chaperoneId, file, opts)
-                      : null}
-                    onUploadPendingFace={editable && onUploadPendingChaperoneFace
-                      ? (file) => onUploadPendingChaperoneFace({ recordId: rec.id, tempId: c.tempId, file })
-                      : null}
-                    canEdit={editable}
-                    onEdit={editable ? (patch) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'update', patch }) : null}
-                    onDelete={editable ? () => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete' }) : null}
-                    onDeleteFace={editable ? (facePath) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete-face', facePath }) : null}
-                  />
-                );
-              })}
-            </div>
+          <div className="text-slate-500 mt-0.5">
+            By submitting, the guardian acknowledged biometric processing of the
+            listed adults strictly for school pickup verification, and authorises
+            BINUS to retain face data for 12 months after which re-enrollment is
+            required.
           </div>
+        </div>
+      </div>
 
-          {/* Consent panel */}
-          <div className="px-3 py-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-start gap-3">
-            <i className="ph ph-signature text-emerald-400 mt-0.5"></i>
-            <div className="flex-1 text-xs">
-              <div className="text-slate-400">
-                Consent signature:&nbsp;
-                <strong className="text-white">{rec.guardian?.signatureRef || rec.consentSignature || '—'}</strong>
-              </div>
-              <div className="text-slate-500 mt-0.5">
-                By submitting, the guardian acknowledged biometric processing of the
-                listed adults strictly for school pickup verification, and authorises
-                BINUS to retain face data for 12 months after which re-enrollment is
-                required.
-              </div>
-            </div>
+      {/* Decision metadata (post-review) */}
+      {rec.status !== 'pending' && (
+        <div className="text-xs text-slate-500 pt-1 border-t border-slate-800">
+          <div className="mt-3">
+            {rec.status === 'approved' ? 'Approved' : 'Rejected'} {fmtTime(rec.reviewedAt)} by{' '}
+            <span className="font-mono text-slate-400">{rec.reviewedBy || '—'}</span>
+            {rec.rejectionReason && <div className="mt-1 text-red-400">Reason: {rec.rejectionReason}</div>}
+            {rec.approvalNotes && <div className="mt-1 text-emerald-400">Notes: {rec.approvalNotes}</div>}
+            {rec.lastReenrollAt && <div className="mt-1 text-slate-500">Last re-push: {fmtTime(rec.lastReenrollAt)}</div>}
           </div>
-
-          {/* Action bar */}
-          {rec.status === 'pending' ? (
-            rejecting ? (
-              <div className="pt-2 border-t border-slate-800 space-y-2">
-                <label className="text-xs font-medium text-red-300 block">
-                  Rejection reason (visible to parent on follow-up):
-                </label>
-                <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
-                  rows={2} placeholder="e.g. Chaperone face photos are blurry — please re-upload."
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-red-500/50" />
-                <div className="flex items-center justify-end gap-2">
-                  <button onClick={onCancelReject} disabled={!!busy}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
-                    Cancel
-                  </button>
-                  <button onClick={onSubmitReject} disabled={!!busy || rejectReason.trim().length < 4}
-                    className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-40">
-                    {busy === 'reject' ? 'Rejecting…' : 'Confirm rejection'}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800 flex-wrap">
-                <button onClick={onStartReject} disabled={!!busy}
-                  className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 disabled:opacity-50">
-                  <i className="ph ph-x mr-1"></i>Reject
-                </button>
-                <button onClick={onApprove} disabled={!!busy || approveBlocked}
-                  title={'Approve & enrol'}
-                  className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">
-                  {busy === 'approve' ? 'Approving…' : <><i className="ph ph-check mr-1"></i>Approve & enrol</>}
-                </button>
-              </div>
-            )
-          ) : (
-            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800 flex-wrap">
-              <div className="text-xs text-slate-500">
-                {rec.status === 'approved' ? 'Approved' : 'Rejected'} {fmtTime(rec.reviewedAt)} by{' '}
-                <span className="font-mono text-slate-400">{rec.reviewedBy || '—'}</span>
-                {rec.rejectionReason && <div className="mt-1 text-red-400">Reason: {rec.rejectionReason}</div>}
-                {rec.approvalNotes && <div className="mt-1 text-emerald-400">Notes: {rec.approvalNotes}</div>}
-                {rec.lastReenrollAt && (
-                  <div className="mt-1 text-slate-500">Last re-push: {fmtTime(rec.lastReenrollAt)}</div>
-                )}
-              </div>
-              {rec.status === 'approved' && rec.allocatedChaperones?.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <a
-                    href="/v2/pickup-enroll"
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500/10 border border-brand-500/30 text-brand-300 hover:bg-brand-500/20"
-                    title="Push these chaperones to the right grade-level Hikvision terminal"
-                  >
-                    <i className="ph ph-fingerprint mr-1"></i>Open Enrolment board
-                  </a>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Right slide-in detail drawer ──────────────────────────────────────────
+// Replaces the old inline expand-in-place pattern. Sticky header with quick
+// nav (J/K + Esc shortcuts), scrollable body, sticky footer with primary
+// approve/reject actions. Locks body scroll while open.
+function DetailDrawer(props) {
+  const {
+    open, onClose, rec, prevId, nextId, onJump,
+    onApprove, onStartReject, onCancelReject, onSubmitReject, onReenroll,
+    onPrint, busy, rejecting, rejectReason, setRejectReason,
+  } = props;
+
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        className={`fixed inset-0 z-40 transition-opacity duration-200 bg-black/50 backdrop-blur-sm ${
+          open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        aria-hidden="true"
+      />
+
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label={rec ? `Submission ${rec.formNumber || rec.id}` : 'Submission detail'}
+        className={`fixed right-0 top-0 bottom-0 z-50 w-full sm:w-[560px] lg:w-[640px] bg-slate-950 border-l border-slate-800 shadow-2xl shadow-black/60 flex flex-col transform transition-transform duration-200 ease-out ${
+          open ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {!rec ? null : (
+          <>
+            {/* Sticky header */}
+            <header className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-800 bg-slate-950/95 backdrop-blur-md">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <StatusPill status={rec.status} />
+                  {rec.formNumber && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold border bg-brand-500/15 text-brand-200 border-brand-500/40">
+                      <i className="ph ph-hash"></i>{rec.formNumber}
+                    </span>
+                  )}
+                  <span className="text-[11px] text-slate-500" title={fmtTime(rec.submittedAt)}>
+                    {timeAgo(rec.submittedAt)}
+                  </span>
+                </div>
+                <div className="text-base font-bold text-white truncate" title={rec.guardian?.name}>
+                  {rec.guardian?.name || '—'}
+                </div>
+                <div className="text-xs text-slate-500 truncate mt-0.5">
+                  {rec.guardian?.email}{rec.guardian?.phone ? ` · ${rec.guardian?.phone}` : ''}
+                </div>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button
+                  onClick={() => prevId && onJump(prevId)}
+                  disabled={!prevId}
+                  className="p-1.5 rounded-lg text-slate-400 hover:bg-white/5 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="Previous (K)" aria-label="Previous submission"
+                >
+                  <i className="ph ph-caret-up"></i>
+                </button>
+                <button
+                  onClick={() => nextId && onJump(nextId)}
+                  disabled={!nextId}
+                  className="p-1.5 rounded-lg text-slate-400 hover:bg-white/5 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="Next (J)" aria-label="Next submission"
+                >
+                  <i className="ph ph-caret-down"></i>
+                </button>
+                <span className="w-px h-5 bg-slate-800 mx-1" aria-hidden></span>
+                <button
+                  onClick={onPrint}
+                  className="p-1.5 rounded-lg text-slate-400 hover:bg-white/5 hover:text-white"
+                  title="Open printable form view" aria-label="Print form"
+                >
+                  <i className="ph ph-printer"></i>
+                </button>
+                <button
+                  onClick={onClose}
+                  className="p-1.5 rounded-lg text-slate-400 hover:bg-white/5 hover:text-white"
+                  title="Close (Esc)" aria-label="Close drawer"
+                >
+                  <i className="ph ph-x text-lg"></i>
+                </button>
+              </div>
+            </header>
+
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto">
+              <RecordDetail {...props} />
+            </div>
+
+            {/* Sticky footer with primary actions */}
+            <footer className="border-t border-slate-800 bg-slate-950/95 backdrop-blur-md px-5 py-3">
+              {rec.status === 'pending' ? (
+                rejecting ? (
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-red-300 block">
+                      Rejection reason (visible to parent on follow-up):
+                    </label>
+                    <textarea
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      rows={2}
+                      placeholder="e.g. Chaperone face photos are blurry — please re-upload."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-red-500/50"
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={onCancelReject}
+                        disabled={!!busy}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={onSubmitReject}
+                        disabled={!!busy || rejectReason.trim().length < 4}
+                        className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-40"
+                      >
+                        {busy === 'reject' ? 'Rejecting…' : 'Confirm rejection'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-end gap-2 flex-wrap">
+                    <button
+                      onClick={onStartReject}
+                      disabled={!!busy}
+                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+                    >
+                      <i className="ph ph-x mr-1"></i>Reject
+                    </button>
+                    <button
+                      onClick={onApprove}
+                      disabled={!!busy}
+                      title="Approve & enrol"
+                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50"
+                    >
+                      {busy === 'approve' ? 'Approving…' : <><i className="ph ph-check mr-1"></i>Approve & enrol</>}
+                    </button>
+                  </div>
+                )
+              ) : (
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="text-[11px] text-slate-500">
+                    <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[10px]">J</kbd>
+                    {' / '}
+                    <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[10px]">K</kbd>
+                    {' next/prev '}
+                    <kbd className="ml-2 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[10px]">Esc</kbd>
+                    {' close'}
+                  </div>
+                  {rec.status === 'approved' && rec.allocatedChaperones?.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={onReenroll}
+                        disabled={!!busy}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-white/5 border border-slate-700 text-slate-300 hover:bg-white/10 disabled:opacity-50"
+                        title="Re-push these chaperones to all configured Hikvision devices"
+                      >
+                        {busy === 'reenroll' ? '…' : <><i className="ph ph-arrows-clockwise mr-1"></i>Re-push</>}
+                      </button>
+                      <a
+                        href="/v2/pickup-enroll"
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500/10 border border-brand-500/30 text-brand-300 hover:bg-brand-500/20"
+                        title="Push these chaperones to the right grade-level Hikvision terminal"
+                      >
+                        <i className="ph ph-fingerprint mr-1"></i>Enrolment board
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+            </footer>
+          </>
+        )}
+      </aside>
+    </>
   );
 }
 
