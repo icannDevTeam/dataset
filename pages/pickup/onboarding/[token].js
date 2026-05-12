@@ -112,6 +112,28 @@ const btnAccent = (extra = {}) => btn({
   ...extra,
 });
 
+// ─── Preview-modal styling helpers ──────────────────────────────────
+const previewSectionTitle = {
+  fontSize: 11, color: BRAND.textSubtle, fontWeight: 700,
+  letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8,
+};
+const previewKvGrid = {
+  display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+  gap: 10,
+};
+const previewItemBox = {
+  background: '#F8FAFC', border: '1px solid #E2E8F0',
+  borderRadius: 10, padding: '10px 12px',
+};
+function previewKv(k, v) {
+  return (
+    <div style={previewItemBox} key={k}>
+      <div style={{ fontSize: 10.5, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 700 }}>{k}</div>
+      <div style={{ fontSize: 13.5, color: '#0F172A', fontWeight: 600, marginTop: 3, wordBreak: 'break-word' }}>{v || '—'}</div>
+    </div>
+  );
+}
+
 const sectionHeading = (n, title, subtitle) => (
   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
     <div style={{
@@ -598,6 +620,7 @@ export default function PickupOnboardingPage() {
   const [signature, setSignature] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
   // Phase 3: welcome modal + dedupe conflict surfacing.
   const [welcomeAcked, setWelcomeAcked] = useState(true);   // default true; flipped after token validates
   const [conflict, setConflict] = useState(null);
@@ -804,13 +827,46 @@ export default function PickupOnboardingPage() {
       name: '', relation: 'mother', phone: '', email: '', idNumber: '',
       authorizedStudentIds: students.map((s) => s.id),
       facePaths: [],
+      confirmed: false,
     }]);
   }
   function updateChaperone(idx, patch) {
-    setChaperones((prev) => prev.map((c, i) => i === idx ? { ...c, ...patch } : c));
+    // Editing any field re-opens the card (clears confirmed)
+    setChaperones((prev) => prev.map((c, i) =>
+      i === idx ? { ...c, ...patch, confirmed: false } : c
+    ));
   }
   function removeChaperone(idx) {
     setChaperones((prev) => prev.filter((_, i) => i !== idx));
+  }
+  function confirmChaperone(idx) {
+    setError(null);
+    const c = chaperones[idx];
+    if (!c) return;
+    if (!c.name.trim()) {
+      setError(`Person #${idx + 1}: name is required.`);
+      return;
+    }
+    if (!c.phone.trim()) {
+      setError(`Person #${idx + 1}: phone number is required.`);
+      return;
+    }
+    if (!c.relation || !String(c.relation).trim()) {
+      setError(`Person #${idx + 1}: relationship is required.`);
+      return;
+    }
+    if (c.authorizedStudentIds.length === 0) {
+      setError(`Person #${idx + 1}: select at least one student they may pick up.`);
+      return;
+    }
+    setChaperones((prev) => prev.map((x, i) =>
+      i === idx ? { ...x, confirmed: true } : x
+    ));
+  }
+  function reopenChaperone(idx) {
+    setChaperones((prev) => prev.map((x, i) =>
+      i === idx ? { ...x, confirmed: false } : x
+    ));
   }
   function toggleChaperoneStudent(idx, sid) {
     setChaperones((prev) => prev.map((c, i) => {
@@ -818,6 +874,7 @@ export default function PickupOnboardingPage() {
       const has = c.authorizedStudentIds.includes(sid);
       return {
         ...c,
+        confirmed: false,
         authorizedStudentIds: has
           ? c.authorizedStudentIds.filter((x) => x !== sid)
           : [...c.authorizedStudentIds, sid],
@@ -826,25 +883,11 @@ export default function PickupOnboardingPage() {
   }
 
   async function submit(e) {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
+    const err = validateBeforeSubmit();
+    if (err) { setError(err); return; }
     setError(null);
     setConflict(null);
-    if (chaperones.length > 5) return setError('Maximum 5 authorized people.');
-    if (!guardianName.trim()) return setError('Your full name is required.');
-    if (signature.trim().toLowerCase() !== guardianName.trim().toLowerCase()) {
-      return setError('Type your full name exactly as the signature.');
-    }
-    if (students.length === 0) return setError('Add at least one student.');
-    const stubStudent = students.find((s) => s._needsManual);
-    if (stubStudent) {
-      return setError(`Please complete the details for student ${stubStudent.id} before submitting.`);
-    }
-    if (chaperones.length === 0) return setError('Add at least one chaperone.');
-    for (const c of chaperones) {
-      if (!c.name.trim()) return setError('Every chaperone needs a name.');
-      if (!c.phone.trim()) return setError(`Phone number missing for ${c.name || 'a chaperone'}.`);
-      if (c.authorizedStudentIds.length === 0) return setError(`${c.name} must be authorized for at least one student.`);
-    }
     setSubmitting(true);
     try {
       const r = await fetch('/api/pickup/onboarding/submit', {
@@ -860,21 +903,56 @@ export default function PickupOnboardingPage() {
       const j = await r.json();
       if (r.status === 409 && j.error === 'student-already-registered') {
         setConflict(j);
+        setShowPreview(false);
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
       }
       if (!r.ok) throw new Error(j.message || j.error || 'submission failed');
+      setShowPreview(false);
       setDone({ recordId: j.recordId, formNumber: j.formNumber, at: new Date().toISOString() });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) { setError(e.message); }
     finally { setSubmitting(false); }
   }
 
+  // Shared guards for both Preview and final Submit so the modal can never
+  // open with invalid data and the user sees the same error in both flows.
+  function validateBeforeSubmit() {
+    if (chaperones.length > 5) return 'Maximum 5 authorized people.';
+    if (!guardianName.trim()) return 'Your full name is required.';
+    if (signature.trim().toLowerCase() !== guardianName.trim().toLowerCase()) {
+      return 'Type your full name exactly as the signature.';
+    }
+    if (students.length === 0) return 'Add at least one student.';
+    const stubStudent = students.find((s) => s._needsManual);
+    if (stubStudent) {
+      return `Please complete the details for student ${stubStudent.id} before submitting.`;
+    }
+    if (chaperones.length === 0) return 'Add at least one chaperone.';
+    const unsaved = chaperones.findIndex((c) => !c.confirmed);
+    if (unsaved !== -1) {
+      return `Please tap "Save this person" on Person #${unsaved + 1} before submitting.`;
+    }
+    for (const c of chaperones) {
+      if (!c.name.trim()) return 'Every chaperone needs a name.';
+      if (!c.phone.trim()) return `Phone number missing for ${c.name || 'a chaperone'}.`;
+      if (c.authorizedStudentIds.length === 0) return `${c.name} must be authorized for at least one student.`;
+    }
+    return null;
+  }
+
+  function openPreview() {
+    setError(null);
+    const err = validateBeforeSubmit();
+    if (err) { setError(err); return; }
+    setShowPreview(true);
+  }
+
   // Step indicator state
   const stepDone = {
     1: !!(guardianName.trim() && guardianEmail.trim() && guardianPhone.trim()),
     2: students.length > 0,
-    3: chaperones.length > 0 && chaperones.every((c) => c.name.trim() && c.phone.trim() && c.authorizedStudentIds.length > 0),
+    3: chaperones.length > 0 && chaperones.every((c) => c.confirmed && c.name.trim() && c.phone.trim() && c.authorizedStudentIds.length > 0),
     4: !!done,
   };
 
@@ -953,6 +1031,162 @@ export default function PickupOnboardingPage() {
                     setWelcomeAcked(true);
                   }}>
                   I understand, continue
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ───── Preview-before-submit modal ─────
+            Shows a read-only summary of everything the parent has filled
+            in. Submitting from here is the same code path as the form's
+            Submit button (no second validate needed — openPreview already
+            ran the guards). */}
+        {showPreview && (
+          <div role="dialog" aria-modal="true" style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(15,23,42,0.65)',
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+            padding: 16, overflowY: 'auto',
+          }}
+          onClick={() => !submitting && setShowPreview(false)}>
+            <div onClick={(e) => e.stopPropagation()} style={{
+              background: '#fff', borderRadius: 16, maxWidth: 720, width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+              padding: 0, fontFamily: FONT_STACK, marginTop: 24, marginBottom: 24,
+              overflow: 'hidden',
+            }}>
+              {/* Header */}
+              <div style={{
+                background: `linear-gradient(135deg, ${BRAND.navy} 0%, ${BRAND.navyLight} 100%)`,
+                color: '#fff', padding: '20px 24px',
+              }}>
+                <div style={{ fontSize: 12, opacity: 0.85, letterSpacing: 1, textTransform: 'uppercase', fontWeight: 700 }}>
+                  Review before submitting
+                </div>
+                <h2 style={{ margin: '4px 0 0', fontSize: 20 }}>
+                  Pickup Authorization — Preview
+                </h2>
+                <div style={{ fontSize: 12.5, opacity: 0.9, marginTop: 4 }}>
+                  Please double-check the details below. Once you submit, this form cannot be edited through this link.
+                </div>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '20px 24px', maxHeight: '65vh', overflowY: 'auto' }}>
+                {/* Guardian */}
+                <div style={{ marginBottom: 22 }}>
+                  <div style={previewSectionTitle}>Parent / Guardian</div>
+                  <div style={previewKvGrid}>
+                    {previewKv('Full name', guardianName)}
+                    {previewKv('Email', guardianEmail)}
+                    {previewKv('Phone', guardianPhone)}
+                  </div>
+                </div>
+
+                {/* Students */}
+                <div style={{ marginBottom: 22 }}>
+                  <div style={previewSectionTitle}>
+                    Students ({students.length})
+                  </div>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {students.map((s) => (
+                      <div key={s.id} style={previewItemBox}>
+                        <div style={{ fontWeight: 700, color: BRAND.text, fontSize: 14 }}>
+                          {s.name || '—'}
+                        </div>
+                        <div style={{ color: BRAND.textSubtle, fontSize: 12.5, marginTop: 2 }}>
+                          Binusian ID {s.id}
+                          {s.grade && <> · Grade {s.grade}</>}
+                          {s.homeroom && <> · {s.homeroom}</>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Chaperones */}
+                <div style={{ marginBottom: 22 }}>
+                  <div style={previewSectionTitle}>
+                    Authorized pickup people ({chaperones.length})
+                  </div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {chaperones.map((c, i) => {
+                      const authNames = c.authorizedStudentIds
+                        .map((sid) => (students.find((s) => s.id === sid) || {}).name || sid)
+                        .filter(Boolean);
+                      const relLabel = (RELATIONS.find((r) => r.v === c.relation) || {}).l || c.relation || '—';
+                      return (
+                        <div key={c.tempId} style={previewItemBox}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: 700, color: BRAND.text, fontSize: 14 }}>
+                                {i + 1}. {c.name || '—'}
+                              </div>
+                              <div style={{ color: BRAND.textSubtle, fontSize: 12.5, marginTop: 2 }}>
+                                {relLabel} · {c.phone || 'no phone'}
+                                {c.email && <> · {c.email}</>}
+                                {c.idNumber && <> · ID {c.idNumber}</>}
+                              </div>
+                              <div style={{ color: BRAND.textMuted, fontSize: 12.5, marginTop: 6 }}>
+                                <strong style={{ color: BRAND.text }}>Authorized for:</strong>{' '}
+                                {authNames.length ? authNames.join(', ') : '—'}
+                              </div>
+                              <div style={{ color: BRAND.textSubtle, fontSize: 12, marginTop: 4 }}>
+                                {c.facePaths.length > 0
+                                  ? `📷 ${c.facePaths.length} face photo${c.facePaths.length === 1 ? '' : 's'} attached`
+                                  : '📷 No photos yet — ACOP can capture at the office'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Signature */}
+                <div style={{ marginBottom: 6 }}>
+                  <div style={previewSectionTitle}>Consent signature</div>
+                  <div style={{
+                    ...previewItemBox,
+                    fontFamily: '"Brush Script MT", "Lucida Handwriting", cursive',
+                    fontSize: 22, color: BRAND.navy, padding: '14px 16px',
+                  }}>
+                    {signature || '—'}
+                  </div>
+                  <div style={{ color: BRAND.textSubtle, fontSize: 11.5, marginTop: 6 }}>
+                    By submitting, you confirm the information above is accurate and you authorize these adults to pick up the listed children.
+                  </div>
+                </div>
+
+                {error && (
+                  <div style={{
+                    marginTop: 14, padding: '10px 14px',
+                    background: BRAND.dangerBg, color: BRAND.danger,
+                    fontSize: 13.5, borderRadius: 8,
+                    border: `1px solid ${BRAND.danger}33`,
+                  }}>{error}</div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{
+                padding: '14px 24px', borderTop: `1px solid ${BRAND.border}`,
+                background: BRAND.surfaceAlt,
+                display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap',
+              }}>
+                <button type="button"
+                  style={btnSecondary({ padding: '12px 18px', fontSize: 14 })}
+                  disabled={submitting}
+                  onClick={() => setShowPreview(false)}>
+                  ← Back to edit
+                </button>
+                <button type="button"
+                  style={btn({ padding: '12px 22px', fontSize: 14, background: BRAND.success })}
+                  disabled={submitting}
+                  onClick={() => submit()}>
+                  {submitting ? 'Submitting…' : '✓ Confirm & submit'}
                 </button>
               </div>
             </div>
@@ -1332,28 +1566,52 @@ export default function PickupOnboardingPage() {
 
                   {chaperones.map((c, idx) => (
                     <div key={c.tempId} style={{
-                      border: `1px solid ${BRAND.border}`, borderRadius: 12,
-                      padding: 18, marginBottom: 14, background: BRAND.surfaceAlt,
+                      border: `1px solid ${c.confirmed ? BRAND.success : BRAND.border}`,
+                      borderRadius: 12,
+                      padding: 18, marginBottom: 14,
+                      background: c.confirmed ? BRAND.successBg : BRAND.surfaceAlt,
+                      transition: 'background 0.15s ease, border-color 0.15s ease',
                     }}>
                       <div style={{
                         display: 'flex', justifyContent: 'space-between',
-                        alignItems: 'center', marginBottom: 14,
+                        alignItems: 'center', marginBottom: c.confirmed ? 0 : 14,
                       }}>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
                           <span style={{
                             width: 28, height: 28, borderRadius: '50%',
-                            background: BRAND.orange, color: '#fff',
+                            background: c.confirmed ? BRAND.success : BRAND.orange, color: '#fff',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             fontWeight: 700, fontSize: 13,
-                          }}>{idx + 1}</span>
-                          <strong style={{ color: BRAND.text, fontSize: 15 }}>
-                            {c.name || `Person #${idx + 1}`}
-                          </strong>
+                          }}>{c.confirmed ? '✓' : idx + 1}</span>
+                          <div>
+                            <strong style={{ color: BRAND.text, fontSize: 15 }}>
+                              {c.name || `Person #${idx + 1}`}
+                            </strong>
+                            {c.confirmed && (
+                              <div style={{ color: BRAND.textSubtle, fontSize: 12, marginTop: 2 }}>
+                                {c.relation || 'pickup'} · {c.phone}
+                                {c.authorizedStudentIds.length > 0 && (
+                                  <> · authorized for {c.authorizedStudentIds.length} student{c.authorizedStudentIds.length === 1 ? '' : 's'}</>
+                                )}
+                                {c.facePaths.length > 0 && (
+                                  <> · {c.facePaths.length} photo{c.facePaths.length === 1 ? '' : 's'}</>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <button type="button" style={btnDanger()}
-                          onClick={() => removeChaperone(idx)}>Remove</button>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                          {c.confirmed && (
+                            <button type="button" style={btnSecondary({ padding: '6px 12px', fontSize: 13 })}
+                              onClick={() => reopenChaperone(idx)}>Edit</button>
+                          )}
+                          <button type="button" style={btnDanger({ padding: '6px 12px', fontSize: 13 })}
+                            onClick={() => removeChaperone(idx)}>Remove</button>
+                        </div>
                       </div>
 
+                      {!c.confirmed && (
+                        <>
                       <div className="pog-grid-2" style={{
                         display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12,
                       }}>
@@ -1446,14 +1704,44 @@ export default function PickupOnboardingPage() {
                           disabled={submitting}
                         />
                       </div>
+
+                      {/* Save this person — locks the card so the parent
+                          gets a clear "this one is done" moment before
+                          adding another or signing. */}
+                      <div style={{
+                        marginTop: 18, paddingTop: 14,
+                        borderTop: `1px dashed ${BRAND.border}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        gap: 10, flexWrap: 'wrap',
+                      }}>
+                        <span style={{ color: BRAND.textSubtle, fontSize: 12.5 }}>
+                          Done filling in this person? Save them so you can add another or sign.
+                        </span>
+                        <button type="button"
+                          style={btn({ padding: '10px 20px', fontSize: 14, background: BRAND.success })}
+                          onClick={() => confirmChaperone(idx)}>
+                          ✓ Save this person
+                        </button>
+                      </div>
+                        </>
+                      )}
                     </div>
                   ))}
 
                   <button type="button" style={btnSecondary()} onClick={addChaperone}
-                    disabled={students.length === 0 || chaperones.length >= 5}>
+                    disabled={
+                      students.length === 0 ||
+                      chaperones.length >= 5 ||
+                      chaperones.some((c) => !c.confirmed)
+                    }
+                    title={chaperones.some((c) => !c.confirmed)
+                      ? 'Save the current person above before adding another'
+                      : ''}>
                     {chaperones.length >= 5
                       ? 'Maximum 5 people'
-                      : '+ Add another person (max 5)'}
+                      : chaperones.some((c) => !c.confirmed)
+                        ? 'Save current person above first'
+                        : '+ Add another person (max 5)'}
                   </button>
                 </div>
 
@@ -1494,7 +1782,15 @@ export default function PickupOnboardingPage() {
                     }}>{error}</div>
                   )}
 
-                  <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+                  <div style={{
+                    marginTop: 20, display: 'flex', justifyContent: 'flex-end',
+                    gap: 10, flexWrap: 'wrap',
+                  }}>
+                    <button type="button" style={btnSecondary({ padding: '14px 22px', fontSize: 14 })}
+                      disabled={submitting}
+                      onClick={openPreview}>
+                      👁  Preview before submitting
+                    </button>
                     <button type="submit" style={btn({ padding: '14px 28px', fontSize: 15 })}
                       disabled={submitting}>
                       {submitting ? 'Submitting…' : 'Submit for school approval →'}

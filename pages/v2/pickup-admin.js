@@ -3027,25 +3027,32 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle,
         </button>
       </div>
 
-      {/* Actions */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => onCopy(invite.url, 'Invite URL copied')}
-          className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white">
-          <i className="ph ph-copy mr-1"></i>Copy link
-        </button>
-        <button onClick={onSend}
-          className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white">
-          <i className="ph ph-paper-plane-tilt mr-1"></i>Send
-        </button>
-        <button onClick={onPreview}
-          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
-          <i className="ph ph-arrow-square-out mr-1"></i>Preview
-        </button>
-        <button onClick={onShowQr}
-          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
-          <i className="ph ph-qr-code mr-1"></i>QR
-        </button>
-        <div className="ml-auto flex items-center gap-2">
+      {/* Actions ───────────────────────────────────────────────────────
+          Two cohesive clusters separated by a thin divider.
+          Each cluster wraps as a unit so buttons never split awkwardly. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 pt-1">
+        {/* Share / preview cluster */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => onCopy(invite.url, 'Invite URL copied')}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white shadow-sm">
+            <i className="ph ph-copy mr-1"></i>Copy link
+          </button>
+          <button onClick={onSend}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm">
+            <i className="ph ph-paper-plane-tilt mr-1"></i>Send
+          </button>
+          <button onClick={onPreview}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
+            <i className="ph ph-arrow-square-out mr-1"></i>Preview
+          </button>
+          <button onClick={onShowQr}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
+            <i className="ph ph-qr-code mr-1"></i>QR
+          </button>
+        </div>
+
+        {/* Lifecycle cluster — stays grouped on wrap */}
+        <div className="flex flex-wrap items-center gap-2">
           {!invite.revoked && (
             <button
               onClick={() => onToggle(!invite.enabled)}
