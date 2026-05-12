@@ -8,6 +8,7 @@ import { withApi } from '../../../lib/api-auth';
 const { renderDownload, validateExportRequest, buildPreview, MAX_ROWS } = require('../../../lib/downloads-helpers');
 const tenancy = require('../../../lib/tenancy');
 const { logAudit } = require('../../../lib/audit-log');
+const { verifyReauth } = require('../../../lib/reauth');
 
 export const config = { api: { bodyParser: { sizeLimit: '128kb' }, responseLimit: false } };
 
@@ -91,6 +92,22 @@ async function handler(req, res) {
     return res.status(200).json(buildPreview(payload));
   }
 
+  const reauth = await verifyReauth(req, { maxAgeSec: 300 });
+  if (!reauth.ok) {
+    try {
+      await logAudit(db, {
+        tenantId: tid, actor: req.user || null,
+        kind: 'downloads.chaperone_roster.reauth_failed',
+        target: { type: 'report', id: 'chaperone-roster' },
+        summary: `Re-auth failed for chaperone roster download: ${reauth.error}`,
+        metadata: { error: reauth.error, format: fmt },
+        req,
+      });
+    } catch {}
+    if (reauth.retryAfterSec) res.setHeader('Retry-After', reauth.retryAfterSec);
+    return res.status(reauth.status).json({ error: reauth.error, message: reauth.message, retryAfter: reauth.retryAfterSec });
+  }
+
   const out = await renderDownload(payload);
 
   try {
@@ -100,7 +117,7 @@ async function handler(req, res) {
       kind: 'downloads.chaperone_roster.export',
       target: { type: 'report', id: 'chaperone-roster', label: out.filename },
       summary: `Downloaded chaperone roster (${fmt.toUpperCase()})`,
-      metadata: { format: fmt, rows: rows.length, truncated },
+      metadata: { format: fmt, rows: rows.length, truncated, reauthAuthTime: reauth.authTime },
       req,
     });
   } catch {}
@@ -111,4 +128,4 @@ async function handler(req, res) {
   return res.status(200).send(Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf));
 }
 
-export default withApi(handler, { methods: ['POST'], permission: 'downloads.download_operational' });
+export default withApi(handler, { methods: ['POST'], permission: 'downloads.download_operational', rateLimit: 30 });

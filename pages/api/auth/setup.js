@@ -6,9 +6,20 @@
 import { initializeFirebase, getFirestoreDB } from '../../../lib/firebase-admin';
 import { withAuth } from '../../../lib/auth-middleware';
 import admin from 'firebase-admin';
+import crypto from 'crypto';
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
 const SUPER_ADMIN_PASS = process.env.SUPER_ADMIN_PASSWORD || '';
+
+/**
+ * Constant-time string comparison. Hashes both inputs first so the underlying
+ * length is never observable through the comparator.
+ */
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
 
 async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -22,13 +33,13 @@ async function handler(req, res) {
 
   const cleanEmail = email.toLowerCase().trim();
 
-  // Only the super admin can be auto-seeded
-  if (!SUPER_ADMIN || cleanEmail !== SUPER_ADMIN) {
+  // Only the super admin can be auto-seeded — constant-time comparison
+  if (!SUPER_ADMIN || !safeEqual(cleanEmail, SUPER_ADMIN)) {
     return res.status(403).json({ error: 'Invalid credentials.' });
   }
 
-  // Verify the password matches the server-side secret
-  if (password !== SUPER_ADMIN_PASS) {
+  // Verify the password matches the server-side secret — constant-time
+  if (!SUPER_ADMIN_PASS || !safeEqual(password, SUPER_ADMIN_PASS)) {
     return res.status(403).json({ error: 'Invalid credentials.' });
   }
 

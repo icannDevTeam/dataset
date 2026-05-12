@@ -25,37 +25,19 @@
  */
 import admin from 'firebase-admin';
 import { initializeFirebase, getFirestoreDB } from '../../../lib/firebase-admin';
+import { withApi } from '../../../lib/api-auth';
 const { sanitizeClassScopes, isTeacherEmail } = require('../../../lib/teacher-auth');
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
 const TEACHER_EMAIL_DOMAIN = (process.env.TEACHER_EMAIL_DOMAIN || 'binus.edu').toLowerCase();
 const MAX_ROWS = 50;
 
-async function verifyAdmin(req) {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  const idToken = authHeader.slice(7);
-  try {
-    const decoded = await admin.auth().verifyIdToken(idToken);
-    const email = decoded.email?.toLowerCase();
-    if (!email) return null;
-    const db = getFirestoreDB();
-    const doc = await db.collection('dashboard_users').doc(email).get();
-    if (!doc.exists) return null;
-    const data = doc.data();
-    if (!['owner', 'admin'].includes(data.role)) return null;
-    return { email, role: data.role };
-  } catch {
-    return null;
-  }
-}
-
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
+async function handler(req, res) {
   initializeFirebase();
-  const caller = await verifyAdmin(req);
-  if (!caller) return res.status(403).json({ error: 'Admin access required.' });
+  const caller = { email: (req.user.email || '').toLowerCase(), role: req.user.role };
+  if (!['owner', 'admin'].includes(caller.role)) {
+    return res.status(403).json({ error: 'Admin access required.' });
+  }
 
   const { users } = req.body || {};
   if (!Array.isArray(users) || users.length === 0) {
@@ -151,3 +133,9 @@ export default async function handler(req, res) {
     results,
   });
 }
+
+export default withApi(handler, {
+  methods: ['POST'],
+  role: ['owner', 'admin'],
+  rateLimit: 10,
+});

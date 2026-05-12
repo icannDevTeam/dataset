@@ -10,6 +10,7 @@ import Head from 'next/head';
 import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import AdminLayout from '../../../components/v2/AdminLayout';
+import ReauthModal from '../../../components/v2/ReauthModal';
 
 const today = () => {
   const d = new Date(Date.now() + 7 * 3600 * 1000);
@@ -251,6 +252,7 @@ function DownloadCard({ card }) {
   const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState(null);
+  const [reauthOpen, setReauthOpen] = useState(false);
 
   const setRange = (n) => { setFrom(daysAgo(n - 1)); setTo(today()); };
 
@@ -258,18 +260,30 @@ function DownloadCard({ card }) {
     card.needsRange ? { format, from, to, filters, ...extra } : { format, ...extra }
   );
 
-  const generate = useCallback(async () => {
+  const runGenerate = useCallback(async (reauthToken) => {
     setBusy(true); setMsg(null);
     try {
       const res = await fetch(card.endpoint, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(reauthToken ? { 'X-Reauth-Token': reauthToken } : {}),
+        },
         body: JSON.stringify(buildBody()),
       });
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
-        try { const j = await res.json(); detail = j.error || j.message || detail; } catch {}
+        let errCode = '';
+        try { const j = await res.json(); detail = j.message || j.error || detail; errCode = j.error || ''; } catch {}
+        // If server demands re-auth, re-open the password modal automatically.
+        if (res.status === 401 && /^reauth_/.test(errCode)) {
+          setReauthOpen(true);
+          throw new Error(detail);
+        }
+        if (res.status === 423) {
+          throw new Error(detail);
+        }
         throw new Error(detail);
       }
       const blob = await res.blob();
@@ -291,6 +305,12 @@ function DownloadCard({ card }) {
       setBusy(false);
     }
   }, [card, format, from, to, filters]);
+
+  // Public "Generate" button → ALWAYS prompts for password first.
+  const generate = useCallback(() => {
+    setMsg(null);
+    setReauthOpen(true);
+  }, []);
 
   const runPreview = useCallback(async () => {
     setPreviewing(true); setMsg(null);
@@ -439,6 +459,14 @@ function DownloadCard({ card }) {
           onConfirm={() => { setPreview(null); generate(); }}
         />
       )}
+
+      <ReauthModal
+        open={reauthOpen}
+        title="Confirm download"
+        action={`download the ${card.title.toLowerCase()}`}
+        onCancel={() => setReauthOpen(false)}
+        onConfirm={(token) => { setReauthOpen(false); runGenerate(token); }}
+      />
     </div>
   );
 }

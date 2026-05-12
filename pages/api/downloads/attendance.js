@@ -12,6 +12,7 @@ import { withApi } from '../../../lib/api-auth';
 const { renderDownload, validateExportRequest, buildPreview, MAX_ROWS } = require('../../../lib/downloads-helpers');
 const tenancy = require('../../../lib/tenancy');
 const { logAudit } = require('../../../lib/audit-log');
+const { verifyReauth } = require('../../../lib/reauth');
 
 export const config = { api: { bodyParser: { sizeLimit: '128kb' }, responseLimit: false } };
 
@@ -128,6 +129,24 @@ async function handler(req, res) {
     return res.status(200).json(buildPreview(payload));
   }
 
+  // Step-up auth: actual downloads require a fresh password proof (sudo mode).
+  const reauth = await verifyReauth(req, { maxAgeSec: 300 });
+  if (!reauth.ok) {
+    try {
+      await logAudit(db, {
+        tenantId: tenancy.getTenantId(),
+        actor: req.user || null,
+        kind: 'downloads.attendance.reauth_failed',
+        target: { type: 'report', id: 'attendance' },
+        summary: `Re-auth failed for attendance download: ${reauth.error}`,
+        metadata: { error: reauth.error, format: v.format, from: v.from, to: v.to },
+        req,
+      });
+    } catch {}
+    if (reauth.retryAfterSec) res.setHeader('Retry-After', reauth.retryAfterSec);
+    return res.status(reauth.status).json({ error: reauth.error, message: reauth.message, retryAfter: reauth.retryAfterSec });
+  }
+
   const out = await renderDownload(payload);
 
   try {
@@ -137,7 +156,7 @@ async function handler(req, res) {
       kind: 'downloads.attendance.export',
       target: { type: 'report', id: 'attendance', label: out.filename },
       summary: `Downloaded attendance report (${v.format.toUpperCase()})`,
-      metadata: { format: v.format, from: v.from, to: v.to, filters, rows: rows.length, truncated },
+      metadata: { format: v.format, from: v.from, to: v.to, filters, rows: rows.length, truncated, reauthAuthTime: reauth.authTime },
       req,
     });
   } catch {}
@@ -148,4 +167,4 @@ async function handler(req, res) {
   return res.status(200).send(Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf));
 }
 
-export default withApi(handler, { methods: ['POST'], permission: 'downloads.download_operational' });
+export default withApi(handler, { methods: ['POST'], permission: 'downloads.download_operational', rateLimit: 30 });
