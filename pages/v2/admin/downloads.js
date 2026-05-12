@@ -456,7 +456,8 @@ export default function DownloadsPage() {
     <AdminLayout title="Downloads" subtitle="Reports, audits & compliance exports">
       <Head><title>Downloads · Admin</title></Head>
 
-      <div className="space-y-8">
+      <div className="h-full overflow-y-auto">
+        <div className="space-y-8 pb-8 pr-1">
         <div className="bg-gradient-to-br from-teal-900/40 via-slate-900/50 to-indigo-900/40 border border-slate-700/50 rounded-xl p-5">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-xl bg-teal-500/15 text-teal-300 flex items-center justify-center">
@@ -511,6 +512,7 @@ export default function DownloadsPage() {
             ))}
           </div>
         </section>
+        </div>
       </div>
     </AdminLayout>
   );
