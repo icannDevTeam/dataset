@@ -550,8 +550,8 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
         <Field label="Pickup window (WIB)"
           hint={
             ((draft.windowOpen ?? t.windowOpen) && (draft.windowClose ?? t.windowClose))
-              ? 'Auto open/close on schedule'
-              : 'Always open (no schedule)'
+              ? 'Auto open/close on schedule · managed in Pickup Settings'
+              : 'Always open · set a schedule in Pickup Settings'
           }
           hintTone={
             ((draft.windowOpen ?? t.windowOpen) && (draft.windowClose ?? t.windowClose))
@@ -561,18 +561,28 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
           <div className="flex items-center gap-1.5">
             <input
               type="time"
-              value={draft.windowOpen ?? t.windowOpen ?? ''}
-              onChange={(e) => onDraft({ windowOpen: e.target.value || null })}
-              className="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-700 rounded text-slate-200 text-xs focus:border-brand-500 focus:outline-none"
+              value={t.windowOpen ?? ''}
+              readOnly
+              tabIndex={-1}
+              title="Edit in Pickup Settings → Pickup gate control"
+              className="flex-1 px-2 py-1.5 bg-slate-950/60 border border-slate-800 rounded text-slate-300 text-xs cursor-not-allowed select-text"
             />
             <span className="text-slate-600 text-xs">→</span>
             <input
               type="time"
-              value={draft.windowClose ?? t.windowClose ?? ''}
-              onChange={(e) => onDraft({ windowClose: e.target.value || null })}
-              className="flex-1 px-2 py-1.5 bg-slate-900 border border-slate-700 rounded text-slate-200 text-xs focus:border-brand-500 focus:outline-none"
+              value={t.windowClose ?? ''}
+              readOnly
+              tabIndex={-1}
+              title="Edit in Pickup Settings → Pickup gate control"
+              className="flex-1 px-2 py-1.5 bg-slate-950/60 border border-slate-800 rounded text-slate-300 text-xs cursor-not-allowed select-text"
             />
           </div>
+          <a
+            href="/v2/pickup-admin?view=settings"
+            className="inline-flex items-center gap-1 mt-1.5 text-[11px] text-brand-300 hover:text-brand-200"
+          >
+            <i className="ph ph-pencil-simple"></i> Edit in Pickup Settings
+          </a>
         </Field>
 
         {/* Save / discard */}

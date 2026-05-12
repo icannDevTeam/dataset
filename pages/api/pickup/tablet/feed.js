@@ -168,15 +168,16 @@ export default async function handler(req, res) {
           .limit(200).get()
       )
     );
-    const allDocs = perTerm.flatMap((s) => s.docs).filter((d) => {
-      const ms = d.data().recordedAt?.toMillis?.() || 0;
-      return ms > cutoffMs;
-    });
-    allDocs.sort((a, b) => {
-      const ta = a.data().recordedAt?.toMillis?.() || 0;
-      const tb = b.data().recordedAt?.toMillis?.() || 0;
-      return tb - ta;
-    });
+    const recordedMs = (d) => {
+      const v = d.data().recordedAt;
+      if (!v) return 0;
+      if (typeof v.toMillis === 'function') return v.toMillis();
+      if (typeof v === 'string') { const t = Date.parse(v); return Number.isNaN(t) ? 0 : t; }
+      if (v instanceof Date) return v.getTime();
+      return 0;
+    };
+    const allDocs = perTerm.flatMap((s) => s.docs).filter((d) => recordedMs(d) > cutoffMs);
+    allDocs.sort((a, b) => recordedMs(b) - recordedMs(a));
     const snap = { docs: allDocs.slice(0, 80) };
 
     const maxActive = Math.max(1, Math.min(4, parseInt(req.query.max, 10) || 2));
@@ -189,9 +190,14 @@ export default async function handler(req, res) {
       const ymd = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
       return ymd - 7 * 3600 * 1000;
     })();
+    // Decisions that are written for audit but never shown on the iPad.
+    // Keeps the screen quiet for: parents at the wrong gate, randoms with
+    // out-of-system Hikvision enrolments, and out-of-window scans.
+    const SILENT_ON_IPAD = new Set(['outside_window', 'unknown_chaperone', 'wrong_terminal']);
     for (const doc of snap.docs) {
       const data = doc.data();
       const status = data.status || 'pending';
+      if (SILENT_ON_IPAD.has(data.decision)) continue;
       if (status === 'pending' && active.length < 50) {
         active.push(doc);
       } else if (status === 'held') {
