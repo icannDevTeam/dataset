@@ -705,4 +705,4 @@ async function handler(req, res) {
   }
 }
 
-export default withApi(handler, { methods: ['POST'], permission: 'reports.export' });
+export default withApi(handler, { methods: ['POST'], permission: 'reports.export', reauth: true });

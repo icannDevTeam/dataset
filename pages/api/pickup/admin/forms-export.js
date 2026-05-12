@@ -112,4 +112,9 @@ async function handler(req, res) {
   }
 }
 
+// Note: this endpoint *fetches* records for the admin Onboarding Forms
+// table preview as well — it cannot require reauth, otherwise the table
+// would block on a password prompt every page load. The actual CSV/PDF
+// download paths (`/api/pickup/admin/export`, `/api/pickup/admin/onboarding-export`,
+// and the client-side CSV builders) all require reauth via /api/audit/log-export.
 export default withApi(handler, { permission: 'pickup_admin.view' });

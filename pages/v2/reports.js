@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import PickupReportExportOverlay from '../../components/v2/reports/PickupReportExportOverlay';
 import OnboardingExportOverlay from '../../components/v2/reports/OnboardingExportOverlay';
+import { useReauthGate } from '../../components/v2/ReauthGate';
 
 function getWIBDate(offset = 0) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -46,6 +47,29 @@ function downloadCSV(filename, rows) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Server-side audit log of a client-only download/print action.
+ * The endpoint requires reauth, so passing the token here also re-validates
+ * that the user proved their password within the last 5 minutes.
+ */
+async function logAuditExport(token, payload) {
+  if (!token) return false;
+  try {
+    const res = await fetch('/api/audit/log-export', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Reauth-Token': token,
+      },
+      body: JSON.stringify(payload),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 function exportPickupCSV(data, fromDate, toDate) {
@@ -158,6 +182,11 @@ function exportPickupCSV(data, fromDate, toDate) {
 export default function ReportsPage() {
   // Module toggle: 'attendance' | 'pickup'
   const [module, setModule] = useState('attendance');
+
+  // Step-up password gate — every download/print/export below funnels
+  // through requireReauth() so the action is password-confirmed and
+  // server-audited before it runs.
+  const { requireReauth, reauthModal } = useReauthGate();
 
   const [fromDate, setFromDate] = useState(getWIBDate(-6));
   const [toDate, setToDate] = useState(getWIBDate());
@@ -279,8 +308,17 @@ export default function ReportsPage() {
   };
 
   // CSV export — full breakdown with metadata, daily, terminals, and class summary
-  const exportCSV = useCallback(() => {
+  const exportCSV = useCallback(async () => {
     if (!data) return;
+    const token = await requireReauth({ action: 'Export attendance report (CSV)' });
+    if (!token) return;
+    await logAuditExport(token, {
+      action: 'attendance.export.csv',
+      label: `Attendance CSV ${fromDate} → ${toDate}`,
+      scope: 'attendance',
+      recordCount: data?.studentRecords?.length || 0,
+      filters: { class: filterClass || null, grade: filterGrade || null, source: filterSource || null, from: fromDate, to: toDate },
+    });
     const generated = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
     const rows = [];
     rows.push(['BINUS Facial Attendance — Detailed Report']);
@@ -326,9 +364,21 @@ export default function ReportsPage() {
       data.sourceSummary.forEach((s) => rows.push([s.source, s.totalScans, s.uniqueStudents, s.present ?? 0, s.late ?? 0, `${s.presentRate ?? 0}%`]));
     }
     downloadCSV(`attendance-report-${fromDate}-to-${toDate}.csv`, rows);
-  }, [data, fromDate, toDate, filterClass, filterGrade, filterSource]);
+  }, [data, fromDate, toDate, filterClass, filterGrade, filterSource, requireReauth]);
 
-  const handlePrint = () => window.print();
+  const handlePrint = useCallback(async () => {
+    if (!data) return;
+    const token = await requireReauth({ action: 'Print attendance report' });
+    if (!token) return;
+    await logAuditExport(token, {
+      action: 'attendance.print',
+      label: `Attendance print ${fromDate} → ${toDate}`,
+      scope: 'attendance',
+      recordCount: data?.studentRecords?.length || 0,
+      filters: { class: filterClass || null, grade: filterGrade || null, source: filterSource || null, from: fromDate, to: toDate },
+    });
+    window.print();
+  }, [data, fromDate, toDate, filterClass, filterGrade, filterSource, requireReauth]);
 
   const rateColor = (rate) => {
     if (rate >= 90) return 'text-emerald-400';
@@ -459,7 +509,11 @@ export default function ReportsPage() {
             {module === 'pickup' && (
               <>
                 <button
-                  onClick={() => setExportOpen(true)}
+                  onClick={async () => {
+                    const token = await requireReauth({ action: 'Open pickup export options' });
+                    if (!token) return;
+                    setExportOpen(true);
+                  }}
                   disabled={!pickupData}
                   className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold border border-brand-400 disabled:opacity-50 shadow-[0_0_20px_rgba(6,182,212,0.3)]"
                 >
@@ -467,7 +521,18 @@ export default function ReportsPage() {
                   Export report…
                 </button>
                 <button
-                  onClick={() => exportPickupCSV(pickupData, fromDate, toDate)}
+                  onClick={async () => {
+                    if (!pickupData) return;
+                    const token = await requireReauth({ action: 'Quick pickup CSV download' });
+                    if (!token) return;
+                    await logAuditExport(token, {
+                      action: 'pickup.export.quick-csv',
+                      label: `Pickup quick CSV ${fromDate} → ${toDate}`,
+                      scope: 'pickup',
+                      filters: { from: fromDate, to: toDate },
+                    });
+                    exportPickupCSV(pickupData, fromDate, toDate);
+                  }}
                   disabled={!pickupData}
                   title="Quick CSV — single-shot, no parameters"
                   className="flex items-center gap-2 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50"
@@ -1465,6 +1530,7 @@ export default function ReportsPage() {
         defaultTo={toDate}
       />
 
+      {reauthModal}
     </V2Layout>
   );
 }
@@ -1964,6 +2030,7 @@ function PickupAnalyticsView({ data, loading, error, fromDate, toDate, setFromDa
 // Onboarding Forms — filterable export of pickup_onboarding submissions.
 // ═════════════════════════════════════════════════════════════════════════════
 function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
+  const { requireReauth, reauthModal } = useReauthGate();
   const [status, setStatus] = useState('all');
   const [grade, setGrade] = useState('');
   const [homeroom, setHomeroom] = useState('');
@@ -2022,8 +2089,20 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
     return t;
   }, [filtered]);
 
-  const exportCSV = () => {
+  const exportCSV = async () => {
     if (!filtered.length) return;
+    const token = await requireReauth({ action: 'Export onboarding forms (CSV)' });
+    if (!token) return;
+    const scopeLabel0 = scope === 'school' ? 'whole-school'
+      : scope === 'grade' ? `grade-${grade || 'any'}`
+      : 'individual';
+    await logAuditExport(token, {
+      action: 'onboarding.export.csv',
+      label: `Onboarding forms CSV (${scopeLabel0})`,
+      scope: 'onboarding',
+      recordCount: filtered.length,
+      filters: { scope: scopeLabel0, status, from: fromDate, to: toDate },
+    });
     const rows = [[
       'Form Number', 'Form ID', 'Status', 'Submitted', 'Reviewed', 'Reviewer',
       'Guardian Name', 'Guardian Email', 'Guardian Phone',
@@ -2052,7 +2131,18 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
     downloadCSV(`onboarding-forms_${scopeLabel}_${fromDate}_to_${toDate}.csv`, rows);
   };
 
-  const handlePrint = () => window.print();
+  const handlePrint = async () => {
+    const token = await requireReauth({ action: 'Print onboarding forms report' });
+    if (!token) return;
+    await logAuditExport(token, {
+      action: 'onboarding.print',
+      label: 'Onboarding forms print',
+      scope: 'onboarding',
+      recordCount: filtered.length,
+      filters: { status, from: fromDate, to: toDate },
+    });
+    window.print();
+  };
 
   const FilterPill = ({ value, label, current, onClick }) => (
     <button onClick={onClick}
@@ -2138,7 +2228,12 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50">
             <i className="ph ph-arrows-clockwise mr-1"></i>{loading ? 'Loading…' : 'Apply filters'}
           </button>
-          <button onClick={() => setExportOpen(true)} disabled={!filtered.length}
+          <button onClick={async () => {
+              const token = await requireReauth({ action: 'Open onboarding export options' });
+              if (!token) return;
+              setExportOpen(true);
+            }}
+            disabled={!filtered.length}
             className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg text-sm font-semibold disabled:opacity-50 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
             <i className="ph ph-export mr-1"></i>Export report…
           </button>
@@ -2257,6 +2352,7 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
         defaultHomeroom={scope === 'individual' ? homeroom : ''}
         defaultStudentId={scope === 'individual' ? studentId : ''}
       />
+      {reauthModal}
     </div>
   );
 }

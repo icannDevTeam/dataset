@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { reauthHeaders } from '../../../lib/reauth-cache';
 
 /**
  * components/v2/reports/OnboardingExportOverlay.js
@@ -70,7 +71,7 @@ export default function OnboardingExportOverlay({
       const res = await fetch('/api/pickup/admin/onboarding-export', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: reauthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           format: fmt,
           from: from || undefined,
