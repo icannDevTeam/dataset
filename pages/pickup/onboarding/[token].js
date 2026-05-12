@@ -929,10 +929,10 @@ export default function PickupOnboardingPage() {
               </h2>
               <div style={{ marginTop: 12, color: BRAND.textMuted, fontSize: 14, lineHeight: 1.65 }}>
                 <p style={{ margin: '0 0 10px' }}>
-                  This pickup-authorization form can be <strong>submitted only once</strong>{' '}
-                  per student. After submission you cannot edit it through this link.
+                  This pickup-authorization form can be submitted for <strong>multiple students</strong>.
+                  After submission you cannot edit it through this link.
                 </p>
-                <p style={{ margin: '0 0 10px' }}>
+                <p style={{ margin: 0 }}>
                   For any changes — adding or removing a chaperone, replacing a photo,
                   or correcting details — please visit the{' '}
                   <strong style={{ color: BRAND.navy }}>ACOP office on the 3rd floor</strong>{' '}
@@ -941,9 +941,6 @@ export default function PickupOnboardingPage() {
                     style={{ color: BRAND.navy, fontWeight: 700, textDecoration: 'underline' }}>
                     inquiries.simprug@binus.edu
                   </a>.
-                </p>
-                <p style={{ margin: 0 }}>
-                  Face photos are optional — if you skip them, ACOP staff can capture them when you visit the office.
                 </p>
               </div>
               <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>

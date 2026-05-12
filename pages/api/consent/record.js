@@ -14,6 +14,7 @@ import admin from 'firebase-admin';
 
 const tenancy = require('../../../lib/tenancy');
 const { verifyConsentToken } = require('../../../lib/consent-token');
+const { validate } = require('../../../lib/validation');
 
 function clientIp(req) {
   return (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
@@ -23,12 +24,21 @@ function clientIp(req) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const { token, guardianName, guardianRelation = 'guardian', guardianEmail, signature } = req.body || {};
-  const claims = verifyConsentToken(token || '');
+
+  const v = validate(req.body, {
+    token:             { type: 'string', required: true, min: 10, max: 1024 },
+    guardianName:      { type: 'string', required: true, min: 1,  max: 120 },
+    guardianRelation:  { type: 'string', required: false, max: 40, default: 'guardian',
+                         enum: ['guardian', 'parent', 'mother', 'father', 'grandparent', 'sibling', 'driver', 'other'] },
+    guardianEmail:     { type: 'email',  required: true },
+    signature:         { type: 'string', required: true, min: 1,  max: 120 },
+  });
+  if (!v.ok) return res.status(400).json({ error: 'invalid_input', details: v.errors });
+
+  const { token, guardianName, guardianRelation, guardianEmail, signature } = v.data;
+
+  const claims = verifyConsentToken(token);
   if (!claims) return res.status(401).json({ error: 'invalid or expired token' });
-  if (!guardianName || !guardianEmail || !signature) {
-    return res.status(400).json({ error: 'guardianName, guardianEmail, signature required' });
-  }
   if (signature.trim().toLowerCase() !== guardianName.trim().toLowerCase()) {
     return res.status(400).json({ error: 'typed signature must match guardian name' });
   }
@@ -47,12 +57,12 @@ export default async function handler(req, res) {
       studentId: sid,
       tenantId: tid,
       guardianName: guardianName.trim(),
-      guardianEmail: guardianEmail.trim().toLowerCase(),
+      guardianEmail,
       guardianRelation,
       policyVersionId,
       consentedAt: now,
       ipAddress: clientIp(req),
-      userAgent: req.headers['user-agent'] || null,
+      userAgent: (req.headers['user-agent'] || '').slice(0, 240) || null,
       signatureMethod: 'click',
       signatureRef: signature.trim(),
       expiresAt: null,
