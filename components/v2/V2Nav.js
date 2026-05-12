@@ -4,7 +4,7 @@ import { useRouter } from 'next/router';
 const NAV_ITEMS = [
   { href: '/v2', label: 'Dashboard Overview' },
   { href: '/v2/analytics', label: 'Analytics' },
-  { href: '/v2/settings', label: 'Settings' },
+  // 'Settings' removed — folded into Admin Console.
 ];
 
 export default function V2Nav({ clock }) {

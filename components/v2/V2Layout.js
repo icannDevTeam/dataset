@@ -51,7 +51,9 @@ const NAV_SECTIONS = [
 
 // Bottom standalone items (always visible, not in collapsible sections)
 const BOTTOM_NAV = [
-  { href: '/v2/settings', icon: 'ph-gear-six', label: 'Settings' },
+  // 'Settings' was hidden from the sidebar — its surface is now folded
+  // into the Admin Console (/v2/admin/rbac). The page itself still exists
+  // so deep links keep working, just removed from the chrome.
   { href: '/v2/admin/downloads', icon: 'ph-download-simple', label: 'Downloads', permissionKey: 'downloads' },
   { href: '/v2/admin/rbac', icon: 'ph-shield-checkered', label: 'Admin Console', adminOnly: true, badge: 'ADMIN' },
 ];

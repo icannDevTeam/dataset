@@ -312,6 +312,11 @@ async function buildPdf({ records, audit, sections, meta, filters, includePhotos
   const { Document, Page, Text, View, Image, StyleSheet, renderToBuffer } = reactPdf;
   const e = React.createElement;
 
+  // Brand letterhead logo (data URI). Safe to call once per export — file
+  // is read from /public via report-branding.js and cached.
+  let logoUri = null;
+  try { logoUri = logoDataUri(); } catch (_) { logoUri = null; }
+
   if (includePhotos && sections.records) await attachChaperoneFaces(records);
 
   const s = StyleSheet.create({
