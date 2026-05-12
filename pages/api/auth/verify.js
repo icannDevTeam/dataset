@@ -106,7 +106,12 @@ async function handler(req, res) {
 
     const userRole = userData.role || 'viewer';
     const permissions = resolvePermissions(userRole, userData.permissions || {});
-    return res.status(200).json({ authorized: true, role: userRole, permissions });
+    return res.status(200).json({
+      authorized: true,
+      role: userRole,
+      permissions,
+      mustChangePassword: !!userData.mustChangePassword,
+    });
   } catch (err) {
     console.error('[AUTH VERIFY]', err.message);
     if (err.code === 'auth/id-token-expired') {

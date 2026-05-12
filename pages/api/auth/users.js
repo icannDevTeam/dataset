@@ -14,6 +14,9 @@ import admin from 'firebase-admin';
 const { sanitizeClassScopes, isTeacherEmail } = require('../../../lib/teacher-auth');
 const { logAudit } = require('../../../lib/audit-log');
 const { invalidateUser } = require('../../../lib/api-auth');
+const { generateOtp } = require('../../../lib/otp');
+const { sendEmail } = require('../../../lib/email');
+const { renderInviteEmail } = require('../../../lib/email-templates');
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
 const TEACHER_EMAIL_DOMAIN = (process.env.TEACHER_EMAIL_DOMAIN || 'binus.edu').toLowerCase();
@@ -140,6 +143,9 @@ async function handler(req, res) {
           classScopes: Array.isArray(d.classScopes) ? d.classScopes : [],
           disabled: d.disabled || false,
           superAdmin: d.superAdmin || (SUPER_ADMIN && doc.id === SUPER_ADMIN) || false,
+          mustChangePassword: !!d.mustChangePassword,
+          lastOtpIssuedAt: d.lastOtpIssuedAt?.toDate?.()?.toISOString() || null,
+          lastOtpIssuedBy: d.lastOtpIssuedBy || null,
         };
       });
       return res.status(200).json({ users });
@@ -150,12 +156,18 @@ async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const { email, role, name, password, classScopes } = req.body;
+    const { email, role, name, password, classScopes, sendInviteEmail } = req.body;
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ error: 'Valid email is required.' });
     }
-    if (!password || typeof password !== 'string' || password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    // Default behavior: email-invite mode unless caller explicitly opts out
+    // by passing sendInviteEmail:false (used by manual-password creation).
+    const wantsInvite = sendInviteEmail !== false && !password;
+
+    if (!wantsInvite) {
+      if (!password || typeof password !== 'string' || password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+      }
     }
 
     const cleanEmail = email.toLowerCase().trim();
@@ -188,19 +200,62 @@ async function handler(req, res) {
         return res.status(409).json({ error: 'This email is already authorized.' });
       }
 
-      // Create Firebase Auth user
+      // Mint a one-time password if we're in invite mode.
+      const finalPassword = wantsInvite ? generateOtp(12) : password;
+
+      // Create or update Firebase Auth user. Track whether we created it
+      // so we can roll back cleanly if the invite email fails.
       let authUser;
+      let createdAuthUser = false;
       try {
         authUser = await admin.auth().getUserByEmail(cleanEmail);
+        if (wantsInvite) {
+          // Existing auth account but no Firestore entry — reset its password
+          // to the new OTP so the invite email is actionable.
+          await admin.auth().updateUser(authUser.uid, { password: finalPassword });
+        }
       } catch (err) {
         if (err.code === 'auth/user-not-found') {
           authUser = await admin.auth().createUser({
             email: cleanEmail,
-            password: password,
+            password: finalPassword,
             displayName: name || cleanEmail.split('@')[0],
           });
+          createdAuthUser = true;
         } else {
           throw err;
+        }
+      }
+
+      // Send the invite email FIRST. If the send fails, roll back so we
+      // don't leave a brand-new account whose password no one knows.
+      if (wantsInvite) {
+        const loginUrl = process.env.INVITE_LOGIN_URL
+          || (req.headers?.origin ? `${req.headers.origin}/login` : 'https://binus-simprug-pickup.vercel.app/login');
+        const tpl = renderInviteEmail({
+          name: name || cleanEmail.split('@')[0],
+          email: cleanEmail,
+          otp: finalPassword,
+          loginUrl,
+          role: assignedRole,
+          invitedBy: caller.name || caller.email,
+        });
+        const sendResult = await sendEmail({
+          to: cleanEmail,
+          subject: tpl.subject,
+          html: tpl.html,
+          text: tpl.text,
+        });
+        if (!sendResult.ok) {
+          // Roll back: only delete the auth user if WE created it just now.
+          if (createdAuthUser) {
+            try { await admin.auth().deleteUser(authUser.uid); } catch {}
+          }
+          console.error('[USERS POST] invite email failed:', sendResult.error);
+          return res.status(502).json({
+            error: 'invite_email_failed',
+            message: `Could not deliver invite email: ${sendResult.error}. Account not created.`,
+          });
         }
       }
 
@@ -213,16 +268,29 @@ async function handler(req, res) {
         addedAt: admin.firestore.FieldValue.serverTimestamp(),
         photoURL: null,
         disabled: false,
+        // Force a password change on first login when admin used the
+        // email-invite path. Manual-password mode trusts the admin.
+        mustChangePassword: !!wantsInvite,
+        lastOtpIssuedAt: wantsInvite ? admin.firestore.FieldValue.serverTimestamp() : null,
+        lastOtpIssuedBy: wantsInvite ? caller.email : null,
       });
 
       await logAudit(db, {
         actor: caller, req,
         kind: 'user.invite',
         target: { type: 'user', id: cleanEmail, label: name || cleanEmail },
-        after: { role: assignedRole, classScopes: assignedRole === 'teacher' ? cleanClassScopes : [] },
-        summary: `Invited ${cleanEmail} as ${assignedRole}`,
+        after: { role: assignedRole, classScopes: assignedRole === 'teacher' ? cleanClassScopes : [], invited: !!wantsInvite },
+        summary: wantsInvite
+          ? `Invited ${cleanEmail} as ${assignedRole} (OTP emailed)`
+          : `Invited ${cleanEmail} as ${assignedRole} (manual password)`,
       });
-      return res.status(201).json({ ok: true, email: cleanEmail, role: assignedRole, classScopes: assignedRole === 'teacher' ? cleanClassScopes : [] });
+      return res.status(201).json({
+        ok: true,
+        email: cleanEmail,
+        role: assignedRole,
+        classScopes: assignedRole === 'teacher' ? cleanClassScopes : [],
+        invited: !!wantsInvite,
+      });
     } catch (err) {
       console.error('[USERS POST]', err.message);
       return res.status(500).json({ error: 'Failed to add user' });

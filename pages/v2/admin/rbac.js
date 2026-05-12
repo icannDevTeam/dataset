@@ -30,6 +30,7 @@ import {
   diffFromDefaults,
 } from '../../../lib/permissions';
 import rbac from '../../../lib/rbac';
+import { useReauthGate } from '../../../components/v2/ReauthGate';
 
 const { ACTIONS } = rbac;
 
@@ -109,6 +110,7 @@ function actionLabel(featureKey, action) {
 export default function AdminRbacPage() {
   const { user, role: myRole } = useAuth();
   const isAdmin = ['owner', 'admin'].includes(myRole);
+  const { requireReauth, reauthModal } = useReauthGate();
 
   // Users + auth
   const [users, setUsers] = useState([]);
@@ -129,7 +131,7 @@ export default function AdminRbacPage() {
   const [toast, setToast] = useState(null);
 
   // Invite form
-  const [inv, setInv] = useState({ email: '', name: '', password: '', role: 'viewer', classScopes: '' });
+  const [inv, setInv] = useState({ email: '', name: '', password: '', role: 'viewer', classScopes: '', sendInviteEmail: true });
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
 
@@ -200,8 +202,12 @@ export default function AdminRbacPage() {
 
   async function handleInvite(e) {
     e.preventDefault();
-    if (!inv.email.trim() || !inv.password || inv.password.length < 6) {
-      setInviteError('Email + password (min 6 chars) required.');
+    if (!inv.email.trim()) {
+      setInviteError('Email is required.');
+      return;
+    }
+    if (!inv.sendInviteEmail && (!inv.password || inv.password.length < 6)) {
+      setInviteError('Password (min 6 chars) required when not emailing an invite.');
       return;
     }
     setInviteLoading(true);
@@ -209,24 +215,26 @@ export default function AdminRbacPage() {
     const classScopes = inv.classScopes.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
     try {
       const headers = await getAuthHeaders();
+      const body = {
+        email: inv.email.trim(),
+        name: inv.name.trim(),
+        role: inv.role,
+        classScopes,
+        sendInviteEmail: !!inv.sendInviteEmail,
+      };
+      if (!inv.sendInviteEmail) body.password = inv.password;
       const res = await fetch('/api/auth/users', {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          email: inv.email.trim(),
-          name: inv.name.trim(),
-          password: inv.password,
-          role: inv.role,
-          classScopes,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (res.ok) {
         setShowInvite(false);
-        setInv({ email: '', name: '', password: '', role: 'viewer', classScopes: '' });
+        setInv({ email: '', name: '', password: '', role: 'viewer', classScopes: '', sendInviteEmail: true });
         fetchUsers();
-        showToast('User added.');
-      } else setInviteError(data.error || 'Failed to add user.');
+        showToast(data.invited ? 'User added — invite emailed.' : 'User added.');
+      } else setInviteError(data.error || data.message || 'Failed to add user.');
     } catch { setInviteError('Network error.'); }
     setInviteLoading(false);
   }
@@ -245,6 +253,36 @@ export default function AdminRbacPage() {
       const res = await fetch('/api/auth/users', { method: 'PATCH', headers, body: JSON.stringify({ email, action }) });
       if (res.ok) { setActionConfirm(null); fetchUsers(); showToast(`Action: ${action}`); }
     } catch {}
+  }
+
+  // Re-issue OTP: rotate password + email a fresh one. Requires step-up
+  // reauth from the admin (same gate as report exports). Endpoint reads
+  // X-Reauth-Token from the request.
+  async function handleReissueOtp(targetEmail) {
+    const reauth = await requireReauth({
+      action: `Re-send invite email to ${targetEmail}`,
+      reason: 'Re-issuing a temporary password rotates the user\u2019s current login credentials.',
+    });
+    if (!reauth) return;
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/auth/users/${encodeURIComponent(targetEmail)}/reissue-otp`, {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'X-Reauth-Token': reauth,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast('New temporary password emailed.');
+        fetchUsers();
+      } else {
+        showToast(data.message || data.error || 'Failed to re-send invite.', 'danger');
+      }
+    } catch {
+      showToast('Network error while re-sending invite.', 'danger');
+    }
   }
 
   function openPermEditor(u) {
@@ -497,6 +535,7 @@ export default function AdminRbacPage() {
               onAction={handleUserAction}
               onDelete={handleDelete}
               onEditPerms={() => openPermEditor(selectedUser)}
+              onReissueOtp={handleReissueOtp}
             />
           )}
         </section>
@@ -514,11 +553,24 @@ export default function AdminRbacPage() {
                 onChange={e => setInv(i => ({ ...i, email: e.target.value }))}
                 className="modal-input" placeholder="user@binus.edu" />
             </Field>
-            <Field label="Password (min 6)">
-              <input type="password" required minLength={6} value={inv.password}
-                onChange={e => setInv(i => ({ ...i, password: e.target.value }))}
-                className="modal-input" />
-            </Field>
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-slate-800/40 border border-slate-700">
+              <input id="send-invite" type="checkbox" checked={!!inv.sendInviteEmail}
+                onChange={e => setInv(i => ({ ...i, sendInviteEmail: e.target.checked }))}
+                className="mt-1" />
+              <label htmlFor="send-invite" className="text-xs text-slate-300 leading-snug cursor-pointer">
+                <strong>Email a one-time password to the user</strong>
+                <div className="text-slate-500 mt-0.5">
+                  Recommended. They’ll be required to set a new password on first login. Uncheck to set a password manually below.
+                </div>
+              </label>
+            </div>
+            {!inv.sendInviteEmail && (
+              <Field label="Password (min 6)">
+                <input type="password" required minLength={6} value={inv.password}
+                  onChange={e => setInv(i => ({ ...i, password: e.target.value }))}
+                  className="modal-input" />
+              </Field>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Display name">
                 <input type="text" value={inv.name}
@@ -646,13 +698,14 @@ export default function AdminRbacPage() {
           box-shadow: 0 0 0 1px rgb(34, 211, 238);
         }
       `}</style>
+      {reauthModal}
     </AdminLayout>
   );
 }
 
 // ── Detail panel ───────────────────────────────────────────────────────────
 
-function UserDetailPanel({ user, myEmail, isAdmin, actionConfirm, setActionConfirm, deleteConfirm, setDeleteConfirm, onAction, onDelete, onEditPerms }) {
+function UserDetailPanel({ user, myEmail, isAdmin, actionConfirm, setActionConfirm, deleteConfirm, setDeleteConfirm, onAction, onDelete, onEditPerms, onReissueOtp }) {
   const isMe = user.email === myEmail;
   const canManage = isAdmin && !isMe && !user.superAdmin;
 
@@ -694,6 +747,11 @@ function UserDetailPanel({ user, myEmail, isAdmin, actionConfirm, setActionConfi
             )}
             {user.disabled && (
               <span className="px-2 py-0.5 rounded-full text-[10px] uppercase font-bold bg-red-500/10 text-red-400 border border-red-500/20">Suspended</span>
+            )}
+            {user.mustChangePassword && (
+              <span title="User has not yet changed their temporary password" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] uppercase font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                <i className="ph ph-hourglass-medium text-xs" /> Pending first login
+              </span>
             )}
           </div>
           <div className="text-xs text-slate-400 mt-1 truncate">{user.email}</div>
@@ -751,6 +809,14 @@ function UserDetailPanel({ user, myEmail, isAdmin, actionConfirm, setActionConfi
             <button onClick={() => setActionConfirm({ email: user.email, action: 'reset-password' })}
               className="action-btn action-btn-indigo">
               <i className="ph ph-key" /> Reset password
+            </button>
+          )}
+
+          {/* Re-issue OTP & email */}
+          {onReissueOtp && (
+            <button onClick={() => onReissueOtp(user.email)}
+              className="action-btn action-btn-indigo">
+              <i className="ph ph-envelope-simple" /> Email new OTP
             </button>
           )}
 

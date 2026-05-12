@@ -60,7 +60,7 @@ const BOTTOM_NAV = [
 
 export default function V2Layout({ children }) {
   const router = useRouter();
-  const { user, role, permissions, signOut } = useAuth();
+  const { user, role, permissions, signOut, mustChangePassword } = useAuth();
   const { theme, toggle: toggleTheme } = useTheme();
   const [clock, setClock] = useState('');
   const [collapsed, setCollapsed] = useState(false);
@@ -70,6 +70,16 @@ export default function V2Layout({ children }) {
   const [badges, setBadges] = useState({}); // badgeKey -> count
 
   const filteredNav = useMemo(() => filterNavForRole(NAV_SECTIONS, permissions), [permissions]);
+
+  // Forced first-login password change. If the user's Firestore doc has
+  // mustChangePassword=true, redirect them out of every dashboard route
+  // until they set a new password.
+  useEffect(() => {
+    if (!user) return;
+    if (!mustChangePassword) return;
+    if (router.pathname === '/v2/change-password') return;
+    router.replace('/v2/change-password');
+  }, [user, mustChangePassword, router.pathname, router]);
 
   // Poll pickup pending count every 15s
   useEffect(() => {
