@@ -40,6 +40,9 @@ function publicTerminal(id, data) {
     ip: data.ip || null,
     deviceName: data.deviceName || data.name || null,
     gradeLabel: data.gradeLabel || null,
+    gradeScopes: Array.isArray(data.gradeScopes)
+      ? data.gradeScopes.map(String).map((s) => s.trim()).filter(Boolean)
+      : [],
     gateLabel: data.gateLabel || null,
     releaseGroupId: data.releaseGroupId || null,
     gateOverride: data.gateOverride || null,    // 'open' | 'closed' | null
@@ -79,6 +82,9 @@ async function handler(req, res) {
         ip: req.body?.ip ? String(req.body.ip).trim() : (existing.data()?.ip || null),
         deviceName: req.body?.deviceName ? String(req.body.deviceName).trim() : (existing.data()?.deviceName || name),
         gradeLabel: req.body?.gradeLabel != null ? String(req.body.gradeLabel).trim() || null : (existing.data()?.gradeLabel || null),
+        gradeScopes: Array.isArray(req.body?.gradeScopes)
+          ? req.body.gradeScopes.map(String).map((s) => s.trim()).filter(Boolean)
+          : (existing.data()?.gradeScopes || []),
         gateLabel: req.body?.gateLabel != null ? String(req.body.gateLabel).trim() || null : (existing.data()?.gateLabel || null),
         releaseGroupId: req.body?.releaseGroupId != null
           ? (req.body.releaseGroupId ? String(req.body.releaseGroupId) : null)
@@ -113,6 +119,14 @@ async function handler(req, res) {
       if (req.body?.ip !== undefined) patch.ip = String(req.body.ip).trim() || null;
       if (req.body?.deviceName !== undefined) patch.deviceName = String(req.body.deviceName).trim() || null;
       if (req.body?.gradeLabel !== undefined) patch.gradeLabel = String(req.body.gradeLabel).trim() || null;
+      if (req.body?.gradeScopes !== undefined) {
+        if (req.body.gradeScopes !== null && !Array.isArray(req.body.gradeScopes)) {
+          return res.status(400).json({ error: 'gradeScopes must be an array of grade strings' });
+        }
+        patch.gradeScopes = Array.isArray(req.body.gradeScopes)
+          ? req.body.gradeScopes.map(String).map((s) => s.trim()).filter(Boolean)
+          : [];
+      }
       if (req.body?.gateLabel !== undefined) patch.gateLabel = String(req.body.gateLabel).trim() || null;
       if (req.body?.releaseGroupId !== undefined) {
         patch.releaseGroupId = req.body.releaseGroupId ? String(req.body.releaseGroupId) : null;

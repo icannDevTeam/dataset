@@ -83,12 +83,16 @@ export default function EnrollmentRunOverlay({ queue, onClose, onDone }) {
         const summary = (j.summary || [])[0] || {};
         const deviceResults = Array.isArray(summary.devices) ? summary.devices : [];
         const byIp = new Map(deviceResults.map((d) => [d.ip, d]));
+        // When the API returns no per-device entries (e.g. no face photo,
+        // grade scope mismatch, no devices configured), fall back to the
+        // top-level error so the operator sees the actual reason.
+        const fallbackErr = summary.error || 'no result returned';
 
         setRuns((prev) => prev.map((r) => {
           if (r.id !== item.id) return r;
           const updatedDevices = r.devices.map((d) => {
             const dr = byIp.get(d.ip);
-            if (!dr) return { ...d, status: 'failed', error: 'no result returned' };
+            if (!dr) return { ...d, status: 'failed', error: fallbackErr };
             return { ...d, status: dr.ok ? 'success' : 'failed', error: dr.ok ? null : (dr.error || 'unknown error') };
           });
           const oks = updatedDevices.filter((d) => d.status === 'success').length;

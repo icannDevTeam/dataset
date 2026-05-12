@@ -507,24 +507,29 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
           <i className="ph ph-pencil-simple mr-1"></i>Configuration
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Grade label" hint="e.g. PYP G3-G5">
-            <input
-              value={draft.gradeLabel ?? t.gradeLabel ?? ''}
-              onChange={(e) => onDraft({ gradeLabel: e.target.value })}
-              placeholder="—"
-              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded text-slate-200 text-xs focus:border-brand-500 focus:outline-none"
-            />
-          </Field>
-          <Field label="Gate label" hint="e.g. PYP Lobby">
-            <input
-              value={draft.gateLabel ?? t.gateLabel ?? ''}
-              onChange={(e) => onDraft({ gateLabel: e.target.value })}
-              placeholder="—"
-              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded text-slate-200 text-xs focus:border-brand-500 focus:outline-none"
-            />
-          </Field>
-        </div>
+        <Field
+          label="Grades served"
+          hint={(() => {
+            const sc = draft.gradeScopes ?? t.gradeScopes ?? [];
+            if (!sc || sc.length === 0) return 'All grades (shared gate)';
+            return `Routes chaperones for grade${sc.length > 1 ? 's' : ''} ${sc.join(', ')} here`;
+          })()}
+          hintTone={((draft.gradeScopes ?? t.gradeScopes ?? []).length === 0) ? 'amber' : 'emerald'}
+        >
+          <GradeScopeChips
+            value={draft.gradeScopes ?? t.gradeScopes ?? []}
+            onChange={(next) => onDraft({ gradeScopes: next })}
+          />
+        </Field>
+
+        <Field label="Gate label" hint="Display name only — e.g. PYP Lobby">
+          <input
+            value={draft.gateLabel ?? t.gateLabel ?? ''}
+            onChange={(e) => onDraft({ gateLabel: e.target.value })}
+            placeholder="—"
+            className="w-full px-2 py-1.5 bg-slate-900 border border-slate-700 rounded text-slate-200 text-xs focus:border-brand-500 focus:outline-none"
+          />
+        </Field>
 
         <Field label="Release group" hint={!effectiveGroup ? 'Unbound — won\'t serve scheduled releases' : null} hintTone={!effectiveGroup ? 'amber' : null}>
           <select
@@ -609,6 +614,53 @@ function Field({ label, hint, hintTone, children }) {
       <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1">{label}</label>
       {children}
       {hint && <div className={`text-[10px] mt-0.5 ${hintColor}`}>{hint}</div>}
+    </div>
+  );
+}
+
+// ── Grade scope multi-select chips ────────────────────────────────────
+// Canonical grades 1–8. Empty selection = shared gate (all grades).
+const GRADE_OPTIONS = ['1', '2', '3', '4', '5', '6', '7', '8'];
+function GradeScopeChips({ value, onChange }) {
+  const selected = new Set((value || []).map(String));
+  const toggle = (g) => {
+    const next = new Set(selected);
+    if (next.has(g)) next.delete(g); else next.add(g);
+    onChange(GRADE_OPTIONS.filter((x) => next.has(x)));
+  };
+  const all = selected.size === 0;
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      <button
+        type="button"
+        onClick={() => onChange([])}
+        title="Shared gate — every grade enrols here"
+        className={`px-2 py-1 rounded text-[11px] font-semibold border transition ${
+          all
+            ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+            : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800'
+        }`}
+      >
+        All
+      </button>
+      <span className="text-slate-700 text-xs">·</span>
+      {GRADE_OPTIONS.map((g) => {
+        const on = selected.has(g);
+        return (
+          <button
+            key={g}
+            type="button"
+            onClick={() => toggle(g)}
+            className={`w-7 h-7 rounded text-[11px] font-bold border transition ${
+              on
+                ? 'bg-brand-500 border-brand-400 text-white shadow-sm shadow-brand-500/30'
+                : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+            }`}
+          >
+            {g}
+          </button>
+        );
+      })}
     </div>
   );
 }
