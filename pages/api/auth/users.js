@@ -211,8 +211,12 @@ async function handler(req, res) {
         authUser = await admin.auth().getUserByEmail(cleanEmail);
         if (wantsInvite) {
           // Existing auth account but no Firestore entry — reset its password
-          // to the new OTP so the invite email is actionable.
-          await admin.auth().updateUser(authUser.uid, { password: finalPassword });
+          // to the new OTP so the invite email is actionable. Also re-enable
+          // the account in case it was previously disabled by a DELETE.
+          await admin.auth().updateUser(authUser.uid, {
+            password: finalPassword,
+            disabled: false,
+          });
         }
       } catch (err) {
         if (err.code === 'auth/user-not-found') {
