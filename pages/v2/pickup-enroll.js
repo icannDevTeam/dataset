@@ -373,20 +373,31 @@ export default function PickupEnrollPage() {
                   className="flex items-center gap-3 group flex-1 min-w-0 text-left"
                 >
                   <i className={`ph ph-caret-down text-slate-400 transition-transform ${isCollapsed ? '-rotate-90' : ''}`}></i>
-                  <div className="w-10 h-10 rounded-lg bg-brand-500/20 border border-brand-500/40 flex items-center justify-center text-brand-200 font-bold text-sm flex-shrink-0">
-                    {group.homeroom.replace(/^—\s*/, '?')}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-lg font-bold text-white">
-                      Class {group.homeroom}
-                      <span className="ml-2 text-xs font-normal text-slate-400">Grade {group.grade}</span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-3 flex-wrap">
-                      <span><i className="ph ph-users mr-1"></i>{group.chaperones.length} chaperone{group.chaperones.length !== 1 ? 's' : ''}</span>
-                      {doneCount > 0 && <span className="text-emerald-400"><i className="ph ph-check-circle mr-1"></i>{doneCount} enrolled</span>}
-                      {pendingCount > 0 && <span className="text-amber-400"><i className="ph ph-clock mr-1"></i>{pendingCount} pending</span>}
-                    </div>
-                  </div>
+                  {(() => {
+                    const isUnassigned = /UNASSIGNED/i.test(group.homeroom);
+                    const badge = isUnassigned ? '?' : group.homeroom;
+                    const label = isUnassigned ? 'Unassigned' : group.homeroom;
+                    return (
+                      <>
+                        <div className="w-10 h-10 rounded-lg bg-brand-500/20 border border-brand-500/40 flex items-center justify-center text-brand-200 font-bold text-sm flex-shrink-0 overflow-hidden">
+                          <span className="truncate px-1">{badge}</span>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-lg font-bold text-white truncate">
+                            Class {label}
+                            {!isUnassigned && (
+                              <span className="ml-2 text-xs font-normal text-slate-400">Grade {group.grade}</span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-3 flex-wrap">
+                            <span><i className="ph ph-users mr-1"></i>{group.chaperones.length} chaperone{group.chaperones.length !== 1 ? 's' : ''}</span>
+                            {doneCount > 0 && <span className="text-emerald-400"><i className="ph ph-check-circle mr-1"></i>{doneCount} enrolled</span>}
+                            {pendingCount > 0 && <span className="text-amber-400"><i className="ph ph-clock mr-1"></i>{pendingCount} pending</span>}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </button>
                 <div className="flex items-center gap-3 flex-shrink-0">
                   {/* Class-level terminal picker (far right of class card) */}
