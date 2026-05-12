@@ -134,6 +134,159 @@ function previewKv(k, v) {
   );
 }
 
+// ─── Receipt builder ────────────────────────────────────────────────
+// A self-contained HTML doc the parent can save to phone/computer
+// or open later for reference (works fully offline once saved).
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function buildReceiptHtml({
+  formNumber, submittedAt,
+  guardianName, guardianEmail, guardianPhone,
+  students, chaperones, signature,
+}) {
+  const E = escapeHtml;
+  const when = submittedAt
+    ? new Date(submittedAt).toLocaleString('en-GB', {
+        day: '2-digit', month: 'long', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      })
+    : '';
+  const studentRows = (students || []).map((s) => `
+    <tr>
+      <td>${E(s.name || '—')}</td>
+      <td>${E(s.id || '—')}</td>
+      <td>${E(s.grade || '')}${s.homeroom ? ' / ' + E(s.homeroom) : ''}</td>
+    </tr>`).join('');
+  const chapRows = (chaperones || []).map((c, i) => {
+    const auth = (c.authorizedStudentIds || [])
+      .map((sid) => ((students || []).find((s) => s.id === sid) || {}).name || sid)
+      .join(', ');
+    return `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${E(c.name || '—')}</td>
+        <td>${E(c.relation || '')}</td>
+        <td>${E(c.phone || '')}</td>
+        <td>${E(auth)}</td>
+        <td>${(c.facePaths || []).length} photo(s)</td>
+      </tr>`;
+  }).join('');
+
+  return `<!doctype html><html><head><meta charset="utf-8">
+<title>Pickup Authorization · ${E(formNumber || '')}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:#0F172A; max-width:780px; margin:24px auto; padding:0 20px; }
+  header { border-bottom:3px solid #003D7A; padding-bottom:12px; margin-bottom:18px; }
+  h1 { color:#003D7A; margin:0; font-size:22px; }
+  .sub { color:#64748B; font-size:12.5px; margin-top:4px; }
+  .form-num { display:inline-block; margin:14px 0 22px; padding:12px 18px;
+              border:2px solid #003D7A; border-radius:10px; }
+  .form-num small { display:block; font-size:11px; color:#64748B; letter-spacing:1px;
+                    text-transform:uppercase; font-weight:700; }
+  .form-num strong { display:block; font-size:22px; color:#003D7A; letter-spacing:1px;
+                     font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:4px; }
+  h2 { font-size:13px; color:#64748B; text-transform:uppercase; letter-spacing:1px;
+       margin:20px 0 8px; border-bottom:1px solid #E2E8F0; padding-bottom:4px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid #E2E8F0; vertical-align:top; }
+  th { color:#64748B; font-size:11px; text-transform:uppercase; letter-spacing:0.6px; background:#F8FAFC; }
+  .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; }
+  .kv .b { background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:8px 10px; }
+  .kv small { display:block; font-size:10.5px; color:#64748B; text-transform:uppercase;
+              letter-spacing:0.6px; font-weight:700; }
+  .kv span { display:block; font-size:13px; font-weight:600; margin-top:2px; word-break:break-word; }
+  .sig { font-family:"Brush Script MT","Lucida Handwriting",cursive; font-size:22px;
+         color:#003D7A; padding:12px 14px; background:#F8FAFC; border:1px solid #E2E8F0;
+         border-radius:8px; }
+  footer { margin-top:24px; padding-top:14px; border-top:1px dashed #CBD5E1;
+           color:#64748B; font-size:11.5px; }
+  @media print { body { margin:0; } button { display:none; } }
+</style></head><body>
+<header>
+  <h1>BINUS School Simprug · Pickup Authorization</h1>
+  <div class="sub">Receipt of submitted pickup-authorization form</div>
+</header>
+
+<div class="form-num">
+  <small>Form Number</small>
+  <strong>${E(formNumber || '—')}</strong>
+</div>
+<div class="sub">Submitted ${E(when)}</div>
+
+<h2>Parent / Guardian</h2>
+<div class="kv">
+  <div class="b"><small>Name</small><span>${E(guardianName || '—')}</span></div>
+  <div class="b"><small>Email</small><span>${E(guardianEmail || '—')}</span></div>
+  <div class="b"><small>Phone</small><span>${E(guardianPhone || '—')}</span></div>
+</div>
+
+<h2>Students (${(students || []).length})</h2>
+<table>
+  <thead><tr><th>Name</th><th>Binusian ID</th><th>Grade / Homeroom</th></tr></thead>
+  <tbody>${studentRows || '<tr><td colspan="3">—</td></tr>'}</tbody>
+</table>
+
+<h2>Authorized pickup people (${(chaperones || []).length})</h2>
+<table>
+  <thead><tr><th>#</th><th>Name</th><th>Relation</th><th>Phone</th><th>Authorized for</th><th>Photos</th></tr></thead>
+  <tbody>${chapRows || '<tr><td colspan="6">—</td></tr>'}</tbody>
+</table>
+
+<h2>Consent signature</h2>
+<div class="sig">${E(signature || '—')}</div>
+
+<footer>
+  Keep this receipt for your records. For any changes — adding or removing a chaperone,
+  replacing a photo, or correcting details — please visit the ACOP office on the 3rd floor
+  or email <strong>inquiries.simprug@binus.edu</strong>.
+</footer>
+</body></html>`;
+}
+
+function downloadReceipt(payload) {
+  try {
+    const html = buildReceiptHtml(payload);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeNum = String(payload.formNumber || 'pickup-form').replace(/[^A-Za-z0-9_-]/g, '_');
+    a.href = url;
+    a.download = `BINUS-Pickup-${safeNum}.html`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, 500);
+  } catch (e) {
+    alert('Could not save the receipt: ' + e.message);
+  }
+}
+
+function printReceipt(payload) {
+  try {
+    const html = buildReceiptHtml(payload);
+    const w = window.open('', '_blank', 'noopener,width=820,height=900');
+    if (!w) {
+      alert('Please allow pop-ups to print or save as PDF.');
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    // Give the new window a beat to render before triggering print.
+    setTimeout(() => { try { w.focus(); w.print(); } catch {} }, 250);
+  } catch (e) {
+    alert('Could not open print view: ' + e.message);
+  }
+}
+
 const sectionHeading = (n, title, subtitle) => (
   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
     <div style={{
@@ -1370,6 +1523,45 @@ export default function PickupOnboardingPage() {
                   </strong>
                 </p>
               )}
+
+              {/* Save / share the receipt — purely client-side so it works
+                  even if the parent has weak signal at the gate later. */}
+              <div style={{
+                marginTop: 18, paddingTop: 16, borderTop: '1px dashed #86EFAC',
+                display: 'flex', flexWrap: 'wrap', gap: 10,
+              }}>
+                <button type="button"
+                  style={btn({ padding: '10px 18px', fontSize: 13.5, background: BRAND.navy })}
+                  onClick={() => downloadReceipt({
+                    formNumber: done.formNumber,
+                    submittedAt: done.at,
+                    guardianName, guardianEmail, guardianPhone,
+                    students, chaperones, signature,
+                  })}>
+                  💾 Save receipt to device
+                </button>
+                <button type="button"
+                  style={btnSecondary({ padding: '10px 18px', fontSize: 13.5 })}
+                  onClick={() => printReceipt({
+                    formNumber: done.formNumber,
+                    submittedAt: done.at,
+                    guardianName, guardianEmail, guardianPhone,
+                    students, chaperones, signature,
+                  })}>
+                  🖨 Print / save as PDF
+                </button>
+                {done.formNumber && navigator.clipboard && (
+                  <button type="button"
+                    style={btnGhost({ padding: '10px 18px', fontSize: 13.5 })}
+                    onClick={() => {
+                      try {
+                        navigator.clipboard.writeText(done.formNumber);
+                      } catch {}
+                    }}>
+                    📋 Copy form number
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
