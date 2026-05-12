@@ -64,6 +64,7 @@ export default function TerminalsPage() {
   const [toast, setToast] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
   const [renaming, setRenaming] = useState(null); // terminal object or null
+  const [showLockedWindow, setShowLockedWindow] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -295,6 +296,7 @@ export default function TerminalsPage() {
               onGate={(v) => setGate(t.id, v)}
               onToggleEnabled={() => toggleEnabled(t)}
               onRename={() => setRenaming(t)}
+              onLockedWindow={() => setShowLockedWindow(true)}
             />
           ))}
         </div>
@@ -335,6 +337,48 @@ export default function TerminalsPage() {
           reload();
         }}
       />
+
+      {/* Locked-pickup-window popup */}
+      {showLockedWindow && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4"
+          onClick={() => setShowLockedWindow(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden"
+          >
+            <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-800 bg-amber-500/5">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                <i className="ph ph-lock-simple-fill text-xl text-amber-300"></i>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-white">Pickup window is locked</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Manual entries are protected to prevent dismissal-time errors.</p>
+              </div>
+            </div>
+            <div className="px-5 py-4 space-y-3 text-sm text-slate-300">
+              <p>
+                The open and close times for each terminal are set centrally in
+                <span className="text-white font-semibold"> Pickup Settings</span> and
+                cannot be changed from this page.
+              </p>
+              <div className="rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2.5 text-xs text-slate-300">
+                <i className="ph ph-phone-call text-amber-300 mr-1"></i>
+                Please contact <span className="text-white font-semibold">ACOP</span> for this feature to be activated or modified.
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-800 bg-slate-950/40 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setShowLockedWindow(false)}
+                className="text-xs px-3 py-1.5 rounded-md bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </V2Layout>
   );
 }
@@ -365,7 +409,7 @@ function StatCard({ label, value, icon, tone, active, onClick }) {
 }
 
 // ── Terminal card ─────────────────────────────────────────────────────
-function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave, onGate, onToggleEnabled, onRename }) {
+function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave, onGate, onToggleEnabled, onRename, onLockedWindow }) {
   const dirty = Object.keys(draft).length > 0;
   const disabled = t.enabled === false;
   const lastSeen = relativeTime(t.lastSeenAt);
@@ -547,42 +591,44 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
           )}
         </Field>
 
-        <Field label="Pickup window (WIB)"
+        <Field label={<span className="flex items-center gap-1">Pickup window (WIB) <i className="ph ph-lock-simple text-[10px] text-slate-500" title="Locked — managed by ACOP"></i></span>}
           hint={
             ((draft.windowOpen ?? t.windowOpen) && (draft.windowClose ?? t.windowClose))
-              ? 'Auto open/close on schedule · managed in Pickup Settings'
-              : 'Always open · set a schedule in Pickup Settings'
+              ? 'Locked · managed in Pickup Settings by ACOP'
+              : 'Always open · contact ACOP to enable a schedule'
           }
           hintTone={
             ((draft.windowOpen ?? t.windowOpen) && (draft.windowClose ?? t.windowClose))
               ? 'emerald' : 'slate'
           }
         >
-          <div className="flex items-center gap-1.5">
-            <input
-              type="time"
-              value={t.windowOpen ?? ''}
-              readOnly
-              tabIndex={-1}
-              title="Edit in Pickup Settings → Pickup gate control"
-              className="flex-1 px-2 py-1.5 bg-slate-950/60 border border-slate-800 rounded text-slate-300 text-xs cursor-not-allowed select-text"
-            />
-            <span className="text-slate-600 text-xs">→</span>
-            <input
-              type="time"
-              value={t.windowClose ?? ''}
-              readOnly
-              tabIndex={-1}
-              title="Edit in Pickup Settings → Pickup gate control"
-              className="flex-1 px-2 py-1.5 bg-slate-950/60 border border-slate-800 rounded text-slate-300 text-xs cursor-not-allowed select-text"
-            />
-          </div>
-          <a
-            href="/v2/pickup-admin?view=settings"
-            className="inline-flex items-center gap-1 mt-1.5 text-[11px] text-brand-300 hover:text-brand-200"
+          {/* Click-trap wrapper — any interaction triggers the lock popup. */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={onLockedWindow}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLockedWindow?.(); } }}
+            title="Locked — contact ACOP to change pickup window"
+            className="relative cursor-not-allowed group"
           >
-            <i className="ph ph-pencil-simple"></i> Edit in Pickup Settings
-          </a>
+            <div className="flex items-center gap-1.5 pointer-events-none">
+              <div className="flex-1 px-2 py-1.5 bg-slate-950/60 border border-slate-800 rounded text-slate-300 text-xs select-none">
+                {t.windowOpen || <span className="text-slate-600">--:--</span>}
+              </div>
+              <span className="text-slate-600 text-xs">→</span>
+              <div className="flex-1 px-2 py-1.5 bg-slate-950/60 border border-slate-800 rounded text-slate-300 text-xs select-none">
+                {t.windowClose || <span className="text-slate-600">--:--</span>}
+              </div>
+              <i className="ph ph-lock-simple text-slate-500 text-sm ml-1"></i>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onLockedWindow}
+            className="inline-flex items-center gap-1 mt-1.5 text-[11px] text-slate-400 hover:text-slate-300"
+          >
+            <i className="ph ph-info"></i> Why is this locked?
+          </button>
         </Field>
 
         {/* Save / discard */}
