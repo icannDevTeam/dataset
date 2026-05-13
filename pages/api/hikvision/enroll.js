@@ -152,7 +152,7 @@ function serveFaceFile(filePath, port) {
 }
 
 import { withMetrics } from '../../../lib/metrics';
-import { withAuth } from '../../../lib/auth-middleware';
+import { withApi } from '../../../lib/api-auth';
 
 async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -288,4 +288,4 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(withMetrics(handler));
+export default withApi(withMetrics(handler), { permission: 'hikvision.edit' });

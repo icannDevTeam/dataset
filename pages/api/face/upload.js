@@ -69,7 +69,7 @@ function parseMultipart(req) {
 }
 
 import { withMetrics } from '../../../lib/metrics';
-import { withAuth } from '../../../lib/auth-middleware';
+import { withApi } from '../../../lib/api-auth';
 
 async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -100,9 +100,8 @@ async function handler(req, res) {
     // Build the display label for attendance (e.g. "Albert Arthur 3B")
     const displayLabel = `${studentName} ${className}`;
 
-    console.log(`Student: ${studentName}, ID: ${studentId}, Class: ${className}, Photo: ${photoNumber}/${totalPhotos}`);
-    console.log(`Display Label: ${displayLabel}`);
-    console.log(`Image file:`, imageFile ? `${imageFile.originalFilename} (${imageFile.size} bytes)` : 'MISSING');
+    // F-011 fix: do not log PII (student name/class) in production logs.
+    console.log(`Upload: studentId=${studentId} photo=${photoNumber}/${totalPhotos} size=${imageFile ? imageFile.size : 0}`);
 
     if (!studentId || !studentName || !className || !imageFile) {
       console.error('Missing required fields:', { studentId, studentName, className, hasImage: !!imageFile });
@@ -133,18 +132,29 @@ async function handler(req, res) {
       });
     }
 
-    // Sanitize path components to prevent directory traversal
-    const safeName = (s) => {
-      let clean = String(s).replace(/[^a-zA-Z0-9 _.-]/g, '');  // strip dangerous chars
-      clean = clean.replace(/\.{2,}/g, '.');  // collapse ".." sequences to single dot
-      clean = clean.replace(/^[.\s]+/, '');    // strip leading dots/spaces
-      clean = clean.replace(/[.\s]+$/, '');    // strip trailing dots/spaces
-      clean = clean.substring(0, 100);
-      return clean || 'unknown';               // never return empty string
+    // SECURITY (F-004 fix, 2026-05-13): strict allow-list regex.
+    // Previous strip-list approach allowed inputs like "..admin" to collapse
+    // to ".admin" and slip through (stale traversal artefacts found in the
+    // bucket: `....admin/......etcpasswd/`). Now we ALLOW only the safe
+    // character set; anything else is rejected outright (no silent rewrite).
+    const SAFE_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,99}$/;
+    const safeName = (s, label) => {
+      const v = String(s || '').trim();
+      if (!SAFE_RE.test(v)) {
+        const err = new Error(`invalid ${label}: must match ${SAFE_RE} (got "${v.slice(0,40)}")`);
+        err.statusCode = 400;
+        throw err;
+      }
+      return v;
     };
-    const safeStudentName = safeName(studentName);
-    const safeClassName = safeName(className);
-    const safeStudentId = safeName(studentId);
+    let safeStudentName, safeClassName, safeStudentId;
+    try {
+      safeStudentName = safeName(studentName, 'studentName');
+      safeClassName   = safeName(className,   'className');
+      safeStudentId   = safeName(studentId,   'studentId');
+    } catch (e) {
+      return res.status(400).json({ error: 'invalid_input', details: e.message });
+    }
 
     console.log(`Processing photo ${photoNumber}/${totalPhotos} for ${displayLabel}`);
 
@@ -277,4 +287,4 @@ async function handler(req, res) {
   }
 }
 
-export default withAuth(withMetrics(handler));
+export default withApi(withMetrics(handler), { permission: 'enrollment.edit' });

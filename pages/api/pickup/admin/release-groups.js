@@ -248,8 +248,19 @@ async function handler(req, res) {
   }
 }
 
-export default withApi(handler, {
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  // GET = view; mutations require manage_groups.
-  anyPermission: ['pickup_admin.view', 'pickup_admin.manage_groups'],
-});
+// SECURITY (F-005 fix, 2026-05-13): per-method permission split.
+// GET = view; every state-changing method requires manage_groups.
+// Previously used `anyPermission: ['view', 'manage_groups']` for ALL methods,
+// which let view-only roles unpair iPads / delete groups (DoS the gate).
+function methodPermission(req) {
+  if (req.method === 'GET') return 'pickup_admin.view';
+  return 'pickup_admin.manage_groups';
+}
+
+export default function release_groups_route(req, res) {
+  const wrapped = withApi(handler, {
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    permission: methodPermission(req),
+  });
+  return wrapped(req, res);
+}

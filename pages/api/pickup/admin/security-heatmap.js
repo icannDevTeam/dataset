@@ -10,7 +10,7 @@
  * Used by /v2/security heatmap (#17).
  */
 import admin from 'firebase-admin';
-import { withAuth } from '../../../../lib/auth-middleware';
+import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
 
@@ -102,4 +102,4 @@ async function handler(req, res) {
 
 function pad(n) { return n < 10 ? `0${n}` : `${n}`; }
 
-export default withAuth(handler, { methods: ['GET'] });
+export default withApi(handler, { methods: ['GET'], permission: 'pickup_admin.view' });

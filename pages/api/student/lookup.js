@@ -100,8 +100,9 @@ async function handler(req, res) {
 
     // Step 3: Parse response
     const result = studentResponse.data;
-    
-    console.log('Raw API response:', JSON.stringify(result, null, 2));
+
+    // F-011 fix: do not log full upstream response (contains PII).
+    console.log('BINUS lookup ok:', { resultCode: result?.resultCode });
     
     if (result?.resultCode !== 200) {
       console.error('API returned non-200 result:', result);
