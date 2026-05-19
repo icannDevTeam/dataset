@@ -312,14 +312,32 @@ async function handler(req, res) {
       // afterwards via /v2/pickup-enroll like any other chaperone.
       if (rec.status === 'approved') {
         try {
-          // Pull student metadata so we can derive grades/homerooms the same
-          // way approve.js does.
+          // Primary source for homeroom/grade is the onboarding record
+          // itself - the parent selected those at form time. Firestore is
+          // only a secondary enrichment and must not overwrite parent
+          // input (otherwise chaperones get bucketed under '— Unassigned').
           const studentMetaById = {};
+          (rec.students || []).forEach((s) => {
+            if (!s || !s.id) return;
+            studentMetaById[String(s.id)] = {
+              name: s.name || null,
+              homeroom: s.homeroom || null,
+              grade: s.grade || null,
+            };
+          });
           await Promise.all(authorizedStudentIds.map(async (sid) => {
             const s = await db.doc(`${tenancy.studentsPath(tid)}/${sid}`).get();
-            if (s.exists) { studentMetaById[sid] = s.data() || {}; return; }
-            const legacy = await db.doc(`students/${sid}`).get();
-            if (legacy.exists) studentMetaById[sid] = legacy.data() || {};
+            const fsData = s.exists ? (s.data() || {}) : null;
+            const legacy = fsData ? null : await db.doc(`students/${sid}`).get();
+            const data = fsData || (legacy && legacy.exists ? (legacy.data() || {}) : null);
+            if (!data) return;
+            const cur = studentMetaById[sid] || {};
+            studentMetaById[sid] = {
+              ...data,
+              homeroom: cur.homeroom || data.homeroom || null,
+              grade: cur.grade || data.grade || null,
+              name: cur.name || data.name || null,
+            };
           }));
 
           const studentClassesSet = new Set();

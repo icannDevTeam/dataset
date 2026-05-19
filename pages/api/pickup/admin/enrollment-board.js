@@ -133,6 +133,44 @@ async function handler(req, res) {
     const studentMeta = Object.fromEntries(studentEntries);
     const faceUrlByPath = new Map(signedEntries);
 
+    // Backfill: any chaperone with empty studentClasses/Grades AND a known
+    // approvedFromOnboarding record has the homeroom info on the parent's
+    // original form. Fetch those records once and patch studentMeta in
+    // memory so existing chaperones (allocated before the approve.js fix)
+    // group correctly on the Enroll board instead of bucketing under
+    // '— Unassigned'.
+    const onboardingIdsToFetch = new Set();
+    for (const c of chaperones) {
+      const hasClasses = Array.isArray(c.studentClasses) && c.studentClasses.length > 0;
+      if (hasClasses) continue;
+      const recId = c.approvedFromOnboarding;
+      if (!recId) continue;
+      // Only fetch if at least one authorized student is missing a homeroom.
+      const needsLookup = (c.authorizedStudentIds || []).some(
+        (sid) => !(studentMeta[sid] && studentMeta[sid].homeroom)
+      );
+      if (needsLookup) onboardingIdsToFetch.add(recId);
+    }
+    if (onboardingIdsToFetch.size > 0) {
+      await Promise.all([...onboardingIdsToFetch].map(async (recId) => {
+        try {
+          const snap = await db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recId}`).get();
+          if (!snap.exists) return;
+          const recStudents = (snap.data() || {}).students || [];
+          recStudents.forEach((s) => {
+            if (!s || !s.id) return;
+            const cur = studentMeta[s.id] || {};
+            studentMeta[s.id] = {
+              ...cur,
+              name: cur.name || s.name || null,
+              homeroom: cur.homeroom || s.homeroom || null,
+              grade: cur.grade || s.grade || null,
+            };
+          });
+        } catch {}
+      }));
+    }
+
     // Group by homeroom
     const groupsMap = new Map(); // homeroom -> { homeroom, grade, chaperones[] }
 

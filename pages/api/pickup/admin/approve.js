@@ -107,12 +107,35 @@ async function handler(req, res) {
       (c.authorizedStudentIds || []).forEach((sid) => sid && allAuthorizedSids.add(sid));
     }
     const studentMetaById = {};
+    // Primary source: the homeroom the parent actually selected on the form.
+    // Firestore enrichment (below) only fills in missing fields - it must
+    // NEVER overwrite a homeroom the parent already provided, otherwise
+    // chaperones end up under '— Unassigned' on the Enroll board when the
+    // student isn't mirrored to Firestore yet.
+    (rec.students || []).forEach((s) => {
+      if (!s || !s.id) return;
+      studentMetaById[String(s.id)] = {
+        name: s.name || null,
+        homeroom: s.homeroom || null,
+        grade: s.grade || null,
+      };
+    });
     await Promise.all([...allAuthorizedSids].map(async (sid) => {
       try {
         const s = await db.doc(`${tenancy.studentsPath(tid)}/${sid}`).get();
-        if (s.exists) { studentMetaById[sid] = s.data() || {}; return; }
-        const legacy = await db.doc(`students/${sid}`).get();
-        if (legacy.exists) studentMetaById[sid] = legacy.data() || {};
+        const fsData = s.exists ? (s.data() || {}) : null;
+        const legacy = fsData ? null : await db.doc(`students/${sid}`).get();
+        const data = fsData || (legacy && legacy.exists ? (legacy.data() || {}) : null);
+        if (!data) return;
+        const cur = studentMetaById[sid] || {};
+        studentMetaById[sid] = {
+          ...data,
+          // Form-supplied homeroom wins over Firestore - parent is the
+          // source of truth for which class their child is in today.
+          homeroom: cur.homeroom || data.homeroom || null,
+          grade: cur.grade || data.grade || null,
+          name: cur.name || data.name || null,
+        };
       } catch {}
     }));
 
