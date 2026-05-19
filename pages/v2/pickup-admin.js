@@ -422,10 +422,14 @@ export default function PickupAdminPage() {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message || j.error || 'edit failed');
+      const targetLabel = payload.target === 'chaperone' ? 'Chaperone'
+        : payload.target === 'record' ? 'Chaperone'
+        : 'Student';
       const verb = payload.action === 'delete' ? 'removed'
         : payload.action === 'delete-face' ? 'photo removed'
+        : payload.action === 'add-chaperone' ? 'added'
         : 'updated';
-      pushToast('success', `${payload.target === 'chaperone' ? 'Chaperone' : 'Student'} ${verb}.`);
+      pushToast('success', `${targetLabel} ${verb}.`);
       reload();
       return true;
     } catch (e) {
@@ -1722,6 +1726,17 @@ function RecordDetail(props) {
             );
           })}
         </div>
+        {(rec.status === 'pending' || rec.status === 'approved') && !!onOnboardingEdit && (
+          <AddChaperonePanel
+            recordId={rec.id}
+            recordStatus={rec.status}
+            enrichedStudents={enrichedStudents}
+            existingCount={rec.chaperones?.length || 0}
+            onSubmit={(chaperone) => onOnboardingEdit({
+              recordId: rec.id, target: 'record', action: 'add-chaperone', chaperone,
+            })}
+          />
+        )}
       </div>
 
       {/* Consent panel */}
@@ -2097,6 +2112,136 @@ function EnrollPill({ summary }) {
   return <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
     <i className="ph ph-warning mr-0.5"></i>{ok}/{total} enrolled
   </span>;
+}
+
+// Admin affordance: append a brand-new chaperone to an onboarding record
+// (e.g. parent asked the school to add a replacement after the form was
+// already submitted/approved). Pending records just stash the new entry
+// alongside the others; approved records also allocate a chaperoneId
+// immediately so the new adult is a first-class citizen on /v2/pickup-enroll.
+function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingCount, onSubmit }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: '', relation: 'parent', phone: '', email: '',
+    idNumber: '', authorizedStudentIds: [],
+  });
+  const reset = () => setForm({
+    name: '', relation: 'parent', phone: '', email: '',
+    idNumber: '', authorizedStudentIds: [],
+  });
+  const toggle = (sid) => setForm((f) => ({
+    ...f,
+    authorizedStudentIds: f.authorizedStudentIds.includes(sid)
+      ? f.authorizedStudentIds.filter((x) => x !== sid)
+      : [...f.authorizedStudentIds, sid],
+  }));
+  const valid =
+    form.name.trim().length >= 2 &&
+    form.phone.trim().length >= 4 &&
+    form.authorizedStudentIds.length > 0;
+  const atCap = existingCount >= 5;
+  const isApproved = recordStatus === 'approved';
+
+  const submit = async () => {
+    if (!valid || saving) return;
+    setSaving(true);
+    const ok = await onSubmit({
+      name: form.name.trim(),
+      relation: form.relation,
+      phone: form.phone.trim(),
+      email: form.email.trim() || null,
+      idNumber: form.idNumber.trim() || null,
+      authorizedStudentIds: form.authorizedStudentIds,
+    });
+    setSaving(false);
+    if (ok) { reset(); setOpen(false); }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        disabled={atCap}
+        title={atCap ? 'Maximum 5 chaperones per record. Remove one first.' : 'Admin: add a new chaperone (e.g. parent-requested replacement)'}
+        className="mt-3 w-full text-[11px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md border border-dashed border-slate-700 text-slate-300 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        <i className="ph ph-user-plus"></i>
+        {atCap ? 'Maximum chaperones reached (5)' : 'Add new chaperone'}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-brand-500/30 bg-brand-500/5 p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wider text-brand-200 font-semibold">
+          <i className="ph ph-user-plus mr-1"></i>New chaperone (admin)
+        </div>
+        <div className="text-[10px] text-slate-500">
+          {isApproved
+            ? 'Will be allocated immediately. Upload photos on /v2/pickup-enroll.'
+            : 'Photos can be added after saving.'}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <div className="text-[10px] text-slate-500 mb-0.5">Name *</div>
+          <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+        </label>
+        <label className="block">
+          <div className="text-[10px] text-slate-500 mb-0.5">Relation *</div>
+          <select value={form.relation} onChange={(e) => setForm((f) => ({ ...f, relation: e.target.value }))}
+            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white">
+            {Object.entries(REL_LABEL).map(([k, v]) => (<option key={k} value={k}>{v}</option>))}
+          </select>
+        </label>
+        <label className="block">
+          <div className="text-[10px] text-slate-500 mb-0.5">Phone *</div>
+          <input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+        </label>
+        <label className="block">
+          <div className="text-[10px] text-slate-500 mb-0.5">Email</div>
+          <input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+        </label>
+        <label className="block col-span-2">
+          <div className="text-[10px] text-slate-500 mb-0.5">ID Number</div>
+          <input value={form.idNumber} onChange={(e) => setForm((f) => ({ ...f, idNumber: e.target.value }))}
+            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+        </label>
+      </div>
+      {enrichedStudents.length > 0 && (
+        <div>
+          <div className="text-[10px] text-slate-500 mb-1">Authorized to pick up *</div>
+          <div className="flex flex-wrap gap-1.5">
+            {enrichedStudents.map((s) => {
+              const on = form.authorizedStudentIds.includes(s.id);
+              return (
+                <button key={s.id} type="button" onClick={() => toggle(s.id)}
+                  className={`text-[11px] px-2 py-0.5 rounded-full border ${on
+                    ? 'bg-brand-500/20 border-brand-500/40 text-brand-200'
+                    : 'bg-slate-800/40 border-slate-700 text-slate-400'}`}>
+                  <i className={`ph ${on ? 'ph-check-circle' : 'ph-circle'} mr-1`}></i>{s.name || s.id}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      <div className="flex justify-end gap-2 pt-1">
+        <button onClick={() => { reset(); setOpen(false); }}
+          className="text-[11px] px-2 py-1 rounded bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">Cancel</button>
+        <button onClick={submit} disabled={!valid || saving}
+          className="text-[11px] px-3 py-1 rounded bg-brand-500 text-white hover:bg-brand-400 disabled:opacity-50">
+          {saving ? 'Adding…' : 'Add chaperone'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, onUpload, onUploadPendingFace, canEdit, onEdit, onDelete, onDeleteFace }) {

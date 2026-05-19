@@ -10,6 +10,7 @@
  *  { recordId, target:'chaperone', tempId, action:'delete' }
  *  { recordId, target:'chaperone', tempId, action:'delete-face', facePath }
  *  { recordId, target:'chaperone', tempId, action:'add-face', imageBase64 }
+ *  { recordId, target:'record',                action:'add-chaperone', chaperone:{name,phone,email,idNumber,relation,authorizedStudentIds} }
  *  { recordId, target:'student',   id,     action:'update', patch:{name,homeroom} }
  *  { recordId, target:'student',   id,     action:'delete' }
  *
@@ -29,6 +30,38 @@ const ALLOWED_STUDENT_FIELDS = new Set(['name', 'homeroom']);
 const MAX_FACES_PER_CHAP = 2;
 const MAX_FACE_BYTES = 800 * 1024;
 const FACE_MIME = { jpeg: 'jpg', jpg: 'jpg', png: 'png', webp: 'webp' };
+const MAX_CHAPERONES_PER_RECORD = 5;
+const ALLOWED_RELATIONS = new Set([
+  'mother', 'father', 'parent', 'guardian', 'driver', 'nanny',
+  'grandparent', 'sibling', 'emergency', 'other',
+]);
+const FIRST_CHAPERONE_NO = 9000000000;
+
+function gradeFromHomeroom(hr) {
+  if (!hr) return null;
+  const m = String(hr).match(/^(\d{1,2})/);
+  return m ? m[1] : null;
+}
+
+// Mirror of approve.js / bulk-action.js. Atomically reserve the next
+// chaperone employeeNo so admin-added chaperones slot into the same
+// 9XXXXXXXXX namespace as parent-submitted ones.
+async function allocateEmployeeNo(db, tid) {
+  const ref = db.doc(tenancy.idAllocationsDoc('chaperone-counter', tid));
+  const next = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const cur = snap.exists ? (snap.data() || {}).last : FIRST_CHAPERONE_NO;
+    const nxt = Math.max(cur || 0, FIRST_CHAPERONE_NO) + 1;
+    tx.set(ref, {
+      last: nxt,
+      prefix: tenancy.CHAPERONE_EMPLOYEENO_PREFIX,
+      tenantId: tid,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+    return nxt;
+  });
+  return String(next);
+}
 
 function parseFaceImage(b64) {
   if (typeof b64 !== 'string' || !b64.length) return null;
@@ -62,15 +95,16 @@ async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   const {
-    recordId, target, tempId, id, action, patch, facePath, imageBase64, tenant,
+    recordId, target, tempId, id, action, patch, facePath, imageBase64,
+    chaperone, tenant,
   } = req.body || {};
   const tid = tenant ? String(tenant) : tenancy.getTenantId();
 
   if (!recordId) return res.status(400).json({ error: 'recordId required' });
-  if (!['chaperone', 'student'].includes(target)) {
-    return res.status(400).json({ error: 'target must be chaperone|student' });
+  if (!['chaperone', 'student', 'record'].includes(target)) {
+    return res.status(400).json({ error: 'target must be chaperone|student|record' });
   }
-  if (!['update', 'delete', 'delete-face', 'add-face'].includes(action)) {
+  if (!['update', 'delete', 'delete-face', 'add-face', 'add-chaperone'].includes(action)) {
     return res.status(400).json({ error: 'invalid action' });
   }
 
@@ -83,10 +117,17 @@ async function handler(req, res) {
     const rec = snap.data();
 
     if (rec.status !== 'pending') {
-      return res.status(409).json({
-        error: 'record_not_editable',
-        message: `Cannot edit a ${rec.status} record. Re-enroll or revoke instead.`,
-      });
+      // The only post-approval mutation we allow is admin appending a
+      // brand-new chaperone (e.g. parent asked the school to add a
+      // replacement). Everything else stays locked to preserve the audit
+      // trail and force admins through re-enroll / revoke flows.
+      const isAddChaperone = target === 'record' && action === 'add-chaperone';
+      if (!isAddChaperone) {
+        return res.status(409).json({
+          error: 'record_not_editable',
+          message: `Cannot edit a ${rec.status} record. Re-enroll or revoke instead.`,
+        });
+      }
     }
 
     let beforeSnap = null;
@@ -196,6 +237,164 @@ async function handler(req, res) {
         chaperones: list,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+    }
+
+    if (target === 'record') {
+      if (action !== 'add-chaperone') {
+        return res.status(400).json({ error: 'unsupported action for record target' });
+      }
+
+      const existing = Array.isArray(rec.chaperones) ? rec.chaperones : [];
+      if (existing.length >= MAX_CHAPERONES_PER_RECORD) {
+        return res.status(409).json({
+          error: 'max_chaperones',
+          message: `This form already has the maximum ${MAX_CHAPERONES_PER_RECORD} chaperones. Delete one first.`,
+        });
+      }
+
+      const src = chaperone && typeof chaperone === 'object' ? chaperone : {};
+      const name = String(src.name || '').trim();
+      const phone = String(src.phone || '').trim();
+      const relation = ALLOWED_RELATIONS.has(String(src.relation || '').toLowerCase())
+        ? String(src.relation).toLowerCase()
+        : 'other';
+      const email = src.email ? String(src.email).trim().toLowerCase().slice(0, 128) : null;
+      const idNumber = src.idNumber ? String(src.idNumber).trim().slice(0, 32) : null;
+
+      if (!name || name.length < 2 || name.length > 80) {
+        return res.status(400).json({ error: 'invalid_name', message: 'Name must be 2–80 characters.' });
+      }
+      if (!phone || phone.length > 24) {
+        return res.status(400).json({ error: 'invalid_phone', message: 'Phone is required (max 24 chars).' });
+      }
+
+      const validStudentIds = new Set((rec.students || []).map((s) => String(s.id)));
+      const authorizedStudentIds = Array.isArray(src.authorizedStudentIds)
+        ? src.authorizedStudentIds.map(String).filter((sid) => validStudentIds.has(sid))
+        : [];
+      if (authorizedStudentIds.length === 0) {
+        return res.status(400).json({
+          error: 'no_students',
+          message: 'Pick at least one student this chaperone is authorized to collect.',
+        });
+      }
+
+      // Stable, unique tempId so subsequent /add-face uploads land in the
+      // same Storage folder convention used by the parent form.
+      const newTempId = `admin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const newChap = {
+        tempId: newTempId,
+        name,
+        relation,
+        phone,
+        idNumber,
+        email,
+        authorizedStudentIds,
+        facePaths: [],            // admin uploads photos next via add-face
+        addedByAdmin: true,
+        addedByAdminAt: new Date().toISOString(),
+        addedByAdminEmail: req.headers['x-admin-user'] || null,
+      };
+      auditTargetLabel = name;
+      beforeSnap = null;
+      afterSnap = newChap;
+      summary = `Added chaperone ${name} to onboarding ${recordId}`;
+      auditKind = 'onboarding.chaperone_add';
+
+      const updates = {
+        chaperones: [...existing, newChap],
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      // If the parent record is already approved, allocate a chaperoneId
+      // immediately so this new adult is a first-class citizen alongside
+      // the originally-approved chaperones. Photos + device push happen
+      // afterwards via /v2/pickup-enroll like any other chaperone.
+      if (rec.status === 'approved') {
+        try {
+          // Pull student metadata so we can derive grades/homerooms the same
+          // way approve.js does.
+          const studentMetaById = {};
+          await Promise.all(authorizedStudentIds.map(async (sid) => {
+            const s = await db.doc(`${tenancy.studentsPath(tid)}/${sid}`).get();
+            if (s.exists) { studentMetaById[sid] = s.data() || {}; return; }
+            const legacy = await db.doc(`students/${sid}`).get();
+            if (legacy.exists) studentMetaById[sid] = legacy.data() || {};
+          }));
+
+          const studentClassesSet = new Set();
+          const studentGradesSet = new Set();
+          for (const sid of authorizedStudentIds) {
+            const s = studentMetaById[sid];
+            if (!s) continue;
+            if (s.homeroom) studentClassesSet.add(String(s.homeroom));
+            const g = s.grade ? String(s.grade) : gradeFromHomeroom(s.homeroom);
+            if (g) studentGradesSet.add(g);
+          }
+
+          const employeeNo = await allocateEmployeeNo(db, tid);
+          const chaperoneId = `chap-${employeeNo}`;
+          const nowIso = new Date().toISOString();
+
+          const chapDoc = {
+            chaperoneId,
+            employeeNo,
+            tenantId: tid,
+            name,
+            relation,
+            phone,
+            email: email || null,
+            idNumber: idNumber || null,
+            guardianName: rec.guardian?.name || null,
+            guardianEmail: rec.guardian?.email || null,
+            guardianPhone: rec.guardian?.phone || null,
+            authorizedStudentIds,
+            studentClasses: [...studentClassesSet],
+            studentGrades: [...studentGradesSet],
+            facePaths: [],
+            status: 'approved_pending_faces',
+            deviceEnrolled: false,
+            deviceEnrollErrors: null,
+            approvedAt: nowIso,
+            approvedFromOnboarding: recordId,
+            reEnrollDueAt: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+            suspendedAt: null,
+            addedByAdmin: true,
+            addedByAdminEmail: req.headers['x-admin-user'] || null,
+          };
+          await db.doc(`${tenancy.chaperonesPath(tid)}/${chaperoneId}`).set(chapDoc, { merge: false });
+
+          // Denormalize onto authorized student docs (best effort).
+          await Promise.all(authorizedStudentIds.map(async (sid) => {
+            const sref = db.doc(`${tenancy.studentsPath(tid)}/${sid}`);
+            const ssnap = await sref.get();
+            if (!ssnap.exists) return;
+            const existingDenorm = ssnap.data().authorizedChaperones || [];
+            if (existingDenorm.some((e) => e.chaperoneId === chaperoneId)) return;
+            await sref.set({
+              authorizedChaperones: [
+                ...existingDenorm,
+                { chaperoneId, employeeNo, name, relation },
+              ],
+            }, { merge: true });
+          }));
+
+          const allocated = Array.isArray(rec.allocatedChaperones) ? rec.allocatedChaperones : [];
+          updates.allocatedChaperones = [
+            ...allocated,
+            { chaperoneId, employeeNo, facesCopied: 0 },
+          ];
+          afterSnap = { ...newChap, chaperoneId, employeeNo };
+        } catch (e) {
+          console.error('[onboarding-edit] post-approval allocation failed', e.message);
+          return res.status(500).json({
+            error: 'allocation_failed',
+            message: `Could not allocate chaperoneId: ${e.message}`,
+          });
+        }
+      }
+
+      await ref.update(updates);
     }
 
     if (target === 'student') {
