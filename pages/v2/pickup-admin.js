@@ -1663,6 +1663,19 @@ function RecordDetail(props) {
 
   return (
     <div className="px-5 py-5 space-y-5">
+      {/* Admin: add a brand-new chaperone to this form (pinned at top) */}
+      {(rec.status === 'pending' || rec.status === 'approved') && !!onOnboardingEdit && (
+        <AddChaperonePanel
+          recordId={rec.id}
+          recordStatus={rec.status}
+          enrichedStudents={enrichedStudents}
+          existingCount={rec.chaperones?.length || 0}
+          onSubmit={(chaperone) => onOnboardingEdit({
+            recordId: rec.id, target: 'record', action: 'add-chaperone', chaperone,
+          })}
+        />
+      )}
+
       {/* Submission metadata grid */}
       <div className="grid grid-cols-2 gap-3 text-xs">
         <MetaCell label="Submitted" value={fmtTime(rec.submittedAt)} />
@@ -1726,17 +1739,6 @@ function RecordDetail(props) {
             );
           })}
         </div>
-        {(rec.status === 'pending' || rec.status === 'approved') && !!onOnboardingEdit && (
-          <AddChaperonePanel
-            recordId={rec.id}
-            recordStatus={rec.status}
-            enrichedStudents={enrichedStudents}
-            existingCount={rec.chaperones?.length || 0}
-            onSubmit={(chaperone) => onOnboardingEdit({
-              recordId: rec.id, target: 'record', action: 'add-chaperone', chaperone,
-            })}
-          />
-        )}
       </div>
 
       {/* Consent panel */}
@@ -2160,16 +2162,29 @@ function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingC
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        disabled={atCap}
-        title={atCap ? 'Maximum 5 chaperones per record. Remove one first.' : 'Admin: add a new chaperone (e.g. parent-requested replacement)'}
-        className="mt-3 w-full text-[11px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md border border-dashed border-slate-700 text-slate-300 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        <i className="ph ph-user-plus"></i>
-        {atCap ? 'Maximum chaperones reached (5)' : 'Add new chaperone'}
-      </button>
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-2.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <i className="ph ph-user-plus text-brand-300 text-lg"></i>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-white">Add chaperone</div>
+            <div className="text-[10px] text-slate-400 truncate">
+              {atCap
+                ? 'Maximum 5 chaperones reached — remove one first.'
+                : isApproved
+                  ? 'Allocates immediately. Upload photos on Pickup Enroll.'
+                  : 'Append a brand-new chaperone to this submission.'}
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          disabled={atCap}
+          className="flex-shrink-0 text-xs font-semibold inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-brand-500 text-white hover:bg-brand-400 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <i className="ph ph-plus"></i>Add
+        </button>
+      </div>
     );
   }
 
