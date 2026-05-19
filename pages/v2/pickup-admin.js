@@ -104,6 +104,9 @@ export default function PickupAdminPage() {
   const [err, setErr] = useState(null);
   const [working, setWorking] = useState({});       // recordId -> 'approve'|'reject'|'reenroll'
   const [selectedId, setSelectedId] = useState(null); // recordId currently open in detail drawer
+  // When set, the detail drawer opens with the AddChaperonePanel pre-expanded
+  // so the admin lands directly on the new-chaperone form.
+  const [autoAddChaperone, setAutoAddChaperone] = useState(false);
   const [rejectingId, setRejectingId] = useState(null);  // inline reject form
   const [rejectReason, setRejectReason] = useState('');
   const [lightbox, setLightbox] = useState(null);
@@ -954,10 +957,11 @@ export default function PickupAdminPage() {
                   selected={!!selected[rec.id]}
                   onToggleSelect={() => setSelected((s) => ({ ...s, [rec.id]: !s[rec.id] }))}
                   isActive={selectedId === rec.id}
-                  onOpen={() => setSelectedId(rec.id)}
+                  onOpen={() => { setAutoAddChaperone(false); setSelectedId(rec.id); }}
                   onApprove={() => approve(rec)}
                   onStartReject={() => { setRejectingId(rec.id); setRejectReason(''); setSelectedId(rec.id); }}
                   onPrint={() => setPrintRec(rec)}
+                  onAddChaperone={() => { setAutoAddChaperone(true); setSelectedId(rec.id); }}
                   busy={working[rec.id]}
                   showSelect={tab === 'pending'}
                 />
@@ -986,7 +990,7 @@ export default function PickupAdminPage() {
           open={view === 'onboarding' && !!selectedRecord}
           rec={selectedRecord}
           thumbnails={thumbnails}
-          onClose={() => { setSelectedId(null); setRejectingId(null); }}
+          onClose={() => { setSelectedId(null); setRejectingId(null); setAutoAddChaperone(false); }}
           onApprove={selectedRecord ? () => approve(selectedRecord) : undefined}
           onStartReject={selectedRecord ? () => { setRejectingId(selectedRecord.id); setRejectReason(''); } : undefined}
           onCancelReject={() => { setRejectingId(null); setRejectReason(''); }}
@@ -998,6 +1002,8 @@ export default function PickupAdminPage() {
           onUploadChaperonePhoto={uploadChaperonePhoto}
           onUploadPendingChaperoneFace={uploadPendingChaperoneFace}
           onOnboardingEdit={submitOnboardingEdit}
+          autoOpenAddChaperone={autoAddChaperone}
+          onAddChaperoneHandled={() => setAutoAddChaperone(false)}
           busy={selectedRecord ? working[selectedRecord.id] : null}
           rejecting={selectedRecord ? rejectingId === selectedRecord.id : false}
           rejectReason={rejectReason}
@@ -1539,7 +1545,7 @@ function StatusPill({ status }) {
 function RecordCard(props) {
   const {
     rec, selected, onToggleSelect, isActive, onOpen,
-    onApprove, onPrint, busy, showSelect,
+    onApprove, onPrint, onAddChaperone, busy, showSelect,
   } = props;
 
   const enrollSummary = useMemo(() => {
@@ -1630,6 +1636,19 @@ function RecordCard(props) {
           >
             <i className="ph ph-printer"></i>
           </button>
+          {onAddChaperone && (rec.status === 'pending' || rec.status === 'approved') && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onAddChaperone(); }}
+              disabled={(rec.chaperones?.length || 0) >= 5}
+              title={(rec.chaperones?.length || 0) >= 5
+                ? 'Maximum 5 chaperones reached'
+                : 'Add a new chaperone to this form'}
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-brand-500/15 border border-brand-500/40 text-brand-200 hover:bg-brand-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Add chaperone"
+            >
+              <i className="ph ph-user-plus mr-1"></i>Add chaperone
+            </button>
+          )}
           {rec.status === 'pending' && (
             <button
               onClick={(e) => { e.stopPropagation(); onApprove(); }}
@@ -1653,6 +1672,7 @@ function RecordDetail(props) {
     rec, thumbnails,
     onPhoto, onUploadStudentPhoto, onUploadChaperonePhoto,
     onUploadPendingChaperoneFace, onOnboardingEdit,
+    autoOpenAddChaperone, onAddChaperoneHandled,
   } = props;
   if (!rec) return null;
 
@@ -1670,6 +1690,8 @@ function RecordDetail(props) {
           recordStatus={rec.status}
           enrichedStudents={enrichedStudents}
           existingCount={rec.chaperones?.length || 0}
+          autoOpen={!!autoOpenAddChaperone}
+          onAutoOpenConsumed={onAddChaperoneHandled}
           onSubmit={(chaperone) => onOnboardingEdit({
             recordId: rec.id, target: 'record', action: 'add-chaperone', chaperone,
           })}
@@ -2121,8 +2143,14 @@ function EnrollPill({ summary }) {
 // already submitted/approved). Pending records just stash the new entry
 // alongside the others; approved records also allocate a chaperoneId
 // immediately so the new adult is a first-class citizen on /v2/pickup-enroll.
-function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingCount, onSubmit }) {
+function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingCount, onSubmit, autoOpen, onAutoOpenConsumed }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (autoOpen && !open) {
+      setOpen(true);
+      if (onAutoOpenConsumed) onAutoOpenConsumed();
+    }
+  }, [autoOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: '', relation: 'parent', phone: '', email: '',
