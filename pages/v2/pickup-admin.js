@@ -25,6 +25,7 @@ const TABS = [
   { key: 'pending',  label: 'Pending',  badge: true },
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
+  { key: 'archived', label: 'Archived' },
 ];
 
 const REL_LABEL = {
@@ -99,7 +100,7 @@ function ToastHost({ toasts, onDismiss }) {
 export default function PickupAdminPage() {
   const [tab, setTab] = useState('pending');
   const [records, setRecords] = useState([]);
-  const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
+  const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0, archived: 0 });
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [working, setWorking] = useState({});       // recordId -> 'approve'|'reject'|'reenroll'
@@ -273,14 +274,21 @@ export default function PickupAdminPage() {
   const reload = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      // Always fetch all three tabs in parallel so the stat strip is accurate
-      const [pendingL, approvedL, rejectedL] = await Promise.all([
+      // Always fetch all four tabs in parallel so the stat strip is accurate
+      const [pendingL, approvedL, rejectedL, archivedL] = await Promise.all([
         fetchList('pending').catch(() => []),
         fetchList('approved').catch(() => []),
         fetchList('rejected').catch(() => []),
+        fetchList('archived').catch(() => []),
       ]);
-      setCounts({ pending: pendingL.length, approved: approvedL.length, rejected: rejectedL.length });
-      setRecords(tab === 'pending' ? pendingL : tab === 'approved' ? approvedL : rejectedL);
+      setCounts({
+        pending: pendingL.length,
+        approved: approvedL.length,
+        rejected: rejectedL.length,
+        archived: archivedL.length,
+      });
+      const byTab = { pending: pendingL, approved: approvedL, rejected: rejectedL, archived: archivedL };
+      setRecords(byTab[tab] || []);
     } catch (e) { setErr(e.message); }
     finally { setLoading(false); }
   }, [tab, fetchList]);
@@ -652,6 +660,87 @@ export default function PickupAdminPage() {
     finally { setBulkBusy(false); }
   }
 
+  // Archive = soft hide. Keeps all data; admin can restore from Archived tab.
+  async function bulkArchive() {
+    if (selectedIds.length === 0) return;
+    if (!confirm(`Archive ${selectedIds.length} submission(s)?\n\n` +
+      `They will move to the Archived tab and can be restored anytime. ` +
+      `Approved chaperones already pushed to terminals stay enrolled.`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await fetch('/api/pickup/admin/bulk-action', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'archive', recordIds: selectedIds }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || j.message || 'bulk archive failed');
+      const okN = (j.results || []).filter((x) => x.ok).length;
+      const failN = (j.results || []).filter((x) => !x.ok).length;
+      pushToast(failN > 0 ? 'warn' : 'success',
+        `${okN} archived, ${failN} failed.`, 'Bulk archive complete');
+      setSelected({});
+      await reload();
+    } catch (e) { pushToast('error', e.message, 'Bulk archive failed'); }
+    finally { setBulkBusy(false); }
+  }
+
+  async function bulkUnarchive() {
+    if (selectedIds.length === 0) return;
+    if (!confirm(`Restore ${selectedIds.length} submission(s) to their previous status?`)) return;
+    setBulkBusy(true);
+    try {
+      const r = await fetch('/api/pickup/admin/bulk-action', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'unarchive', recordIds: selectedIds }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || j.message || 'bulk restore failed');
+      const okN = (j.results || []).filter((x) => x.ok).length;
+      const failN = (j.results || []).filter((x) => !x.ok).length;
+      pushToast(failN > 0 ? 'warn' : 'success',
+        `${okN} restored, ${failN} failed.`, 'Bulk restore complete');
+      setSelected({});
+      await reload();
+    } catch (e) { pushToast('error', e.message, 'Bulk restore failed'); }
+    finally { setBulkBusy(false); }
+  }
+
+  // Hard delete — only allowed from Archived tab as a safety gate.
+  // Requires the user to type DELETE to confirm.
+  async function bulkDelete() {
+    if (selectedIds.length === 0) return;
+    const typed = prompt(
+      `PERMANENTLY DELETE ${selectedIds.length} submission(s)?\n\n` +
+      `This cannot be undone. Staged photos will be wiped.\n` +
+      `Already-allocated chaperones on Hikvision terminals are NOT removed — ` +
+      `manage those from the chaperone admin page if needed.\n\n` +
+      `Type DELETE (uppercase) to confirm:`
+    );
+    if (typed !== 'DELETE') {
+      if (typed != null) pushToast('warn', 'Deletion cancelled (must type DELETE).');
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const r = await fetch('/api/pickup/admin/bulk-action', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', recordIds: selectedIds }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || j.message || 'bulk delete failed');
+      const okN = (j.results || []).filter((x) => x.ok).length;
+      const failN = (j.results || []).filter((x) => !x.ok).length;
+      pushToast(failN > 0 ? 'warn' : 'success',
+        `${okN} deleted, ${failN} failed.`, 'Bulk delete complete');
+      setSelected({});
+      await reload();
+    } catch (e) { pushToast('error', e.message, 'Bulk delete failed'); }
+    finally { setBulkBusy(false); }
+  }
+
   // ─── Stats ──────────────────────────────────────────────────────────────
   const enrollmentHealth = useMemo(() => {
     // For approved tab, derive totals
@@ -901,36 +990,62 @@ export default function PickupAdminPage() {
             </div>
           </div>
 
-          {/* Bulk action bar (only on pending tab when items selected) */}
-          {tab === 'pending' && (
-            <div className="flex items-center gap-3 mb-4 px-4 py-2.5 rounded-lg bg-white/5 border border-slate-800">
-              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                <input type="checkbox" checked={allSelected} ref={(el) => { if (el) el.indeterminate = someSelected; }}
-                  onChange={toggleAll}
-                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500/40" />
-                <span className="font-medium">
-                  {allSelected ? 'Deselect all' : someSelected ? `${selectedIds.length} selected` : 'Select all'}
-                </span>
-                <span className="text-slate-500">({visibleRecords.length} visible)</span>
-              </label>
-              <div className="flex-1"></div>
-              {selectedIds.length > 0 && (
-                <>
-                  <button onClick={bulkReject} disabled={bulkBusy}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 disabled:opacity-50">
-                    {bulkBusy ? 'Working…' : <><i className="ph ph-x mr-1"></i>Reject {selectedIds.length}</>}
+          {/* Bulk action bar — visible on all tabs; buttons are contextual */}
+          <div className="flex items-center gap-3 mb-4 px-4 py-2.5 rounded-lg bg-white/5 border border-slate-800">
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+              <input type="checkbox" checked={allSelected} ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                onChange={toggleAll}
+                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500/40" />
+              <span className="font-medium">
+                {allSelected ? 'Deselect all' : someSelected ? `${selectedIds.length} selected` : 'Select all'}
+              </span>
+              <span className="text-slate-500">({visibleRecords.length} visible)</span>
+            </label>
+            <div className="flex-1"></div>
+            {selectedIds.length > 0 && (
+              <>
+                {/* Pending-tab actions */}
+                {tab === 'pending' && (
+                  <>
+                    <button onClick={bulkReject} disabled={bulkBusy}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 disabled:opacity-50">
+                      {bulkBusy ? 'Working…' : <><i className="ph ph-x mr-1"></i>Reject {selectedIds.length}</>}
+                    </button>
+                    <button onClick={bulkApprove} disabled={bulkBusy || bulkApproveBlocked}
+                      title={bulkApproveBlocked
+                        ? `${blockedSelectedIds.length} selected submission(s) are missing student photos.`
+                        : 'Approve and allocate chaperone IDs for all selected submissions'}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">
+                      {bulkBusy ? 'Approving…' : <><i className="ph ph-check mr-1"></i>Approve {selectedIds.length}</>}
+                    </button>
+                  </>
+                )}
+                {/* Archive — available on pending / approved / rejected */}
+                {tab !== 'archived' && (
+                  <button onClick={bulkArchive} disabled={bulkBusy}
+                    title="Move selected submissions to the Archived tab (can be restored)"
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-500/15 border border-slate-500/40 text-slate-200 hover:bg-slate-500/25 disabled:opacity-50">
+                    {bulkBusy ? 'Working…' : <><i className="ph ph-archive mr-1"></i>Archive {selectedIds.length}</>}
                   </button>
-                  <button onClick={bulkApprove} disabled={bulkBusy || bulkApproveBlocked}
-                    title={bulkApproveBlocked
-                      ? `${blockedSelectedIds.length} selected submission(s) are missing student photos.`
-                      : 'Approve and allocate chaperone IDs for all selected submissions'}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">
-                    {bulkBusy ? 'Approving…' : <><i className="ph ph-check mr-1"></i>Approve {selectedIds.length}</>}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+                )}
+                {/* Archived-tab actions: restore + permanent delete */}
+                {tab === 'archived' && (
+                  <>
+                    <button onClick={bulkUnarchive} disabled={bulkBusy}
+                      title="Restore selected submissions to their previous status"
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-200 hover:bg-sky-500/25 disabled:opacity-50">
+                      {bulkBusy ? 'Working…' : <><i className="ph ph-arrow-counter-clockwise mr-1"></i>Restore {selectedIds.length}</>}
+                    </button>
+                    <button onClick={bulkDelete} disabled={bulkBusy}
+                      title="Permanently delete the selected submissions (irreversible)"
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-500/15 border border-red-500/50 text-red-200 hover:bg-red-500/25 disabled:opacity-50">
+                      {bulkBusy ? 'Working…' : <><i className="ph ph-trash mr-1"></i>Delete {selectedIds.length}</>}
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
 
           {err && (
             <div className="mb-4 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-sm">
@@ -963,7 +1078,7 @@ export default function PickupAdminPage() {
                   onPrint={() => setPrintRec(rec)}
                   onAddChaperone={() => { setAutoAddChaperone(true); setSelectedId(rec.id); }}
                   busy={working[rec.id]}
-                  showSelect={tab === 'pending'}
+                  showSelect={true}
                 />
               ))}
             </div>

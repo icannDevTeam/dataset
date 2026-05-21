@@ -41,7 +41,7 @@ async function handler(req, res) {
   const status = String(req.query.status || 'pending');
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
   const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
-  if (!['pending', 'approved', 'rejected'].includes(status)) {
+  if (!['pending', 'approved', 'rejected', 'archived'].includes(status)) {
     return res.status(400).json({ error: 'invalid status' });
   }
   try {

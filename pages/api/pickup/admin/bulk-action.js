@@ -1,20 +1,27 @@
 /**
  * POST /api/pickup/admin/bulk-action
  *
- * Approve or reject many pending onboarding records in a single call.
- * Wraps the per-record approve/reject logic and returns per-record results.
+ * Approve, reject, archive, unarchive, or permanently delete many
+ * onboarding records in a single call. Wraps the per-record helpers and
+ * returns per-record results.
  *
  * Body:
- *   { action: 'approve' | 'reject', recordIds: string[],
- *     reason?: string,        // required when action === 'reject'
+ *   { action: 'approve' | 'reject' | 'archive' | 'unarchive' | 'delete',
+ *     recordIds: string[],
+ *     reason?: string,          // required when action === 'reject'
  *     approvalNotes?: string,
  *     tenant?: string }
  *
  * Response:
- *   { ok, action, results: [{ recordId, ok, error?, allocated?, enrollment? }] }
+ *   { ok, action, results: [{ recordId, ok, error?, ... }] }
  *
- * On approve we re-use the same allocation + enrollment helper used by the
- * single-record endpoint so behaviour is identical.
+ * Single-record approve/reject behaviour is identical to the dedicated
+ * endpoints. Archive flips status='archived' (preserving previousStatus
+ * so it can be restored). Delete removes the onboarding record document
+ * AND any chaperone face Storage objects staged under
+ * chaperone_faces_pending/* that belong to it. Approved records keep
+ * their allocated chaperones/{id} docs untouched (admins must use the
+ * chaperone management UI to remove those separately).
  */
 import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
@@ -177,18 +184,105 @@ async function rejectOne(db, tid, recordId, reason, reviewer) {
   } catch (e) { console.error('[bulk-reject] lock update', e.message); }
 }
 
+// ── Archive: soft-flip status — keeps all data, hides from default views.
+async function archiveOne(db, tid, recordId, reviewer) {
+  const recRef = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
+  const recSnap = await recRef.get();
+  if (!recSnap.exists) throw new Error('record not found');
+  const rec = recSnap.data();
+  if (rec.status === 'archived') throw new Error('already archived');
+  await recRef.set({
+    status: 'archived',
+    previousStatus: rec.status,
+    archivedAt: new Date().toISOString(),
+    archivedBy: reviewer,
+  }, { merge: true });
+}
+
+async function unarchiveOne(db, tid, recordId, reviewer) {
+  const recRef = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
+  const recSnap = await recRef.get();
+  if (!recSnap.exists) throw new Error('record not found');
+  const rec = recSnap.data();
+  if (rec.status !== 'archived') throw new Error(`status=${rec.status}, not archived`);
+  const restored = rec.previousStatus || 'pending';
+  await recRef.set({
+    status: restored,
+    previousStatus: admin.firestore.FieldValue.delete(),
+    archivedAt: admin.firestore.FieldValue.delete(),
+    archivedBy: admin.firestore.FieldValue.delete(),
+    unarchivedAt: new Date().toISOString(),
+    unarchivedBy: reviewer,
+  }, { merge: true });
+  return { restoredTo: restored };
+}
+
+// ── Hard delete: removes the onboarding doc + best-effort cleans up
+// staged chaperone face photos (chaperone_faces_pending/<tempId>/...).
+// Does NOT touch chaperones/{id} or chaperone_faces/{id}/* for approved
+// records — those are managed via the chaperone admin UI to avoid
+// silently invalidating already-pushed Hikvision enrolments.
+async function deleteOne(db, bucket, tid, recordId, reviewer) {
+  const recRef = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
+  const recSnap = await recRef.get();
+  if (!recSnap.exists) throw new Error('record not found');
+  const rec = recSnap.data();
+
+  // Clean up staged photos only — these are scoped to the submission and
+  // safe to delete even for approved records (final faces live elsewhere).
+  let stagedDeleted = 0;
+  for (const c of (rec.chaperones || [])) {
+    for (const p of (c.facePaths || [])) {
+      if (typeof p !== 'string') continue;
+      if (!p.includes('chaperone_faces_pending/')) continue;
+      try {
+        await bucket.file(p).delete();
+        stagedDeleted += 1;
+      } catch (e) {
+        if (!/no such object/i.test(e?.message || '')) {
+          console.warn('[bulk-delete] storage cleanup failed', p, e.message);
+        }
+      }
+    }
+  }
+
+  // Release per-student locks so the family can submit again if needed.
+  try {
+    await Promise.all((rec.students || []).map((s) => {
+      if (!s || !s.id) return null;
+      return db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${s.id}`).delete().catch(() => null);
+    }));
+  } catch (e) { console.error('[bulk-delete] lock cleanup', e.message); }
+
+  await recRef.delete();
+  return {
+    stagedDeleted,
+    hadAllocatedChaperones: Array.isArray(rec.allocatedChaperones)
+      && rec.allocatedChaperones.length > 0,
+  };
+}
+
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const { action, recordIds, reason, approvalNotes, tenant } = req.body || {};
-  if (!['approve', 'reject'].includes(action)) return res.status(400).json({ error: 'action must be approve|reject' });
+  const ALLOWED = ['approve', 'reject', 'archive', 'unarchive', 'delete'];
+  if (!ALLOWED.includes(action)) return res.status(400).json({ error: `action must be one of ${ALLOWED.join('|')}` });
   if (!Array.isArray(recordIds) || recordIds.length === 0) return res.status(400).json({ error: 'recordIds required' });
   if (recordIds.length > 100) return res.status(400).json({ error: 'max 100 records per call' });
   if (action === 'reject' && (!reason || reason.trim().length < 4)) {
     return res.status(400).json({ error: 'reason required (min 4 chars) for reject' });
   }
 
-  // Per-action RBAC: bulk_approve vs bulk_reject are separate grants.
-  const need = action === 'approve' ? 'pickup_admin.bulk_approve' : 'pickup_admin.bulk_reject';
+  // Per-action RBAC. archive/unarchive share one grant; delete needs the
+  // destructive permission.
+  const NEED = {
+    approve:    'pickup_admin.bulk_approve',
+    reject:     'pickup_admin.bulk_reject',
+    archive:    'pickup_admin.archive_submission',
+    unarchive:  'pickup_admin.archive_submission',
+    delete:     'pickup_admin.delete_submission',
+  };
+  const need = NEED[action];
   if (!req.user.superAdmin && !can(req.user.permissions, need)) {
     return res.status(403).json({ error: 'forbidden', need: [need] });
   }
@@ -207,9 +301,18 @@ async function handler(req, res) {
         if (action === 'approve') {
           const out = await approveOne(db, bucket, tid, id, approvalNotes, reviewer);
           results.push({ recordId: id, ok: true, ...out });
-        } else {
+        } else if (action === 'reject') {
           await rejectOne(db, tid, id, reason, reviewer);
           results.push({ recordId: id, ok: true });
+        } else if (action === 'archive') {
+          await archiveOne(db, tid, id, reviewer);
+          results.push({ recordId: id, ok: true });
+        } else if (action === 'unarchive') {
+          const out = await unarchiveOne(db, tid, id, reviewer);
+          results.push({ recordId: id, ok: true, ...out });
+        } else if (action === 'delete') {
+          const out = await deleteOne(db, bucket, tid, id, reviewer);
+          results.push({ recordId: id, ok: true, ...out });
         }
       } catch (e) {
         results.push({ recordId: id, ok: false, error: e.message });
