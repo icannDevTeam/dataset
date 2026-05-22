@@ -24,6 +24,18 @@ const IDENTITY_KEY = 'pickup.tablet.identity';
 const BINUS_MAROON = '#8B1538';
 const BINUS_GOLD = '#FCBF11';
 
+// BINUS spirit values — rotated on the standby hero so the iPad doubles as
+// a brand ambassador when the gate is idle. Each value pairs an icon glyph
+// with a one-line meaning.
+const BINUS_SPIRIT_VALUES = [
+  { icon: '🤝', title: 'Caring',     line: 'Every child safely home, every day.' },
+  { icon: '⭐', title: 'Excellence', line: 'A standard upheld at every gate.' },
+  { icon: '🌱', title: 'Innovation', line: 'Faces verified in milliseconds.' },
+  { icon: '🛡️', title: 'Trust',      line: 'Authorised guardians only.' },
+  { icon: '🤍', title: 'Respect',    line: 'Dignity in every greeting.' },
+  { icon: '🌏', title: 'Community',  line: 'BINUS School Simprug · One Family.' },
+];
+
 function fmtTime(iso) {
   if (!iso) return '--';
   try {
@@ -228,6 +240,7 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
       display: 'flex', flexDirection: 'column', gap: 14,
       transition: 'transform 180ms cubic-bezier(0.4, 0, 0.2, 1), opacity 180ms ease',
       transformOrigin: 'center top',
+      animation: exiting ? undefined : 'pickupCardIn 360ms cubic-bezier(0.22, 1, 0.36, 1)',
       ...exitStyle,
     }}>
       <div style={{
@@ -546,10 +559,20 @@ function HeldRow({ ev, onAction, busy, exiting }) {
 
 function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
   const [now, setNow] = useState(() => new Date());
+  const [valueIdx, setValueIdx] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
+  // Rotate BINUS spirit values every 5s on standby.
+  useEffect(() => {
+    const t = setInterval(
+      () => setValueIdx((i) => (i + 1) % BINUS_SPIRIT_VALUES.length),
+      5000,
+    );
+    return () => clearInterval(t);
+  }, []);
+  const spirit = BINUS_SPIRIT_VALUES[valueIdx];
 
   const wibTime = (() => {
     const wib = new Date(now.getTime() + (now.getTimezoneOffset() + 7 * 60) * 60 * 1000);
@@ -662,6 +685,35 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
             </div>
           </div>
 
+          {/* BINUS Spirit Values — rotating strip */}
+          <div
+            key={valueIdx}
+            style={{
+              width: '100%',
+              padding: '14px 18px',
+              borderRadius: 16,
+              background: 'linear-gradient(135deg, rgba(252,191,17,0.10), rgba(139,21,56,0.18))',
+              border: '1px solid rgba(252,191,17,0.25)',
+              display: 'flex', alignItems: 'center', gap: 14,
+              animation: 'pgValueIn 700ms cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+          >
+            <div style={{
+              fontSize: 32, lineHeight: 1,
+              filter: `drop-shadow(0 0 12px ${BINUS_GOLD}88)`,
+            }}>{spirit.icon}</div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{
+                fontSize: 10, fontWeight: 800, letterSpacing: 2,
+                color: BINUS_GOLD, textTransform: 'uppercase',
+              }}>BINUS Spirit · {spirit.title}</div>
+              <div style={{
+                fontSize: 15, fontWeight: 700, color: '#f1f5f9',
+                marginTop: 2, lineHeight: 1.25,
+              }}>{spirit.line}</div>
+            </div>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, width: '100%' }}>
             <Stat label="TERMINALS" value={terminals} accent={BINUS_GOLD} />
             <Stat label="RELEASED TODAY" value={todayReleased ?? 0} accent="#22c55e" />
@@ -689,6 +741,10 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
         @keyframes pgFloatB {
           0%,100% { transform: translate(0,0); }
           50%     { transform: translate(-40px,-30px); }
+        }
+        @keyframes pgValueIn {
+          0%   { opacity: 0; transform: translateY(10px) scale(0.97); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
     </div>
@@ -995,12 +1051,25 @@ export default function TeacherTabletPage() {
             from { opacity: 0; transform: translateY(-12px) scale(0.96); }
             to   { opacity: 1; transform: translateY(0) scale(1); }
           }
+          @keyframes pickupCardIn {
+            0%   { opacity: 0; transform: translateY(-22px) scale(0.94); }
+            60%  { opacity: 1; transform: translateY(4px)   scale(1.015); }
+            100% { opacity: 1; transform: translateY(0)     scale(1); }
+          }
+          @keyframes pickupHeaderShimmer {
+            0%   { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+          }
           button:active { filter: brightness(0.95); }
         `}</style>
         <div style={{
           background: BINUS_MAROON, padding: '14px 22px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           borderBottom: `3px solid ${BINUS_GOLD}`,
+          backgroundImage: `linear-gradient(90deg, ${BINUS_MAROON} 0%, #a01a44 50%, ${BINUS_MAROON} 100%), linear-gradient(90deg, transparent, rgba(252,191,17,0.18), transparent)`,
+          backgroundSize: '100% 100%, 200% 100%',
+          backgroundRepeat: 'no-repeat, no-repeat',
+          animation: 'pickupHeaderShimmer 7s linear infinite',
         }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 800, color: BINUS_GOLD, letterSpacing: 2 }}>BINUS · PICKUP SYSTEM</div>
