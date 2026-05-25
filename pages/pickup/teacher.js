@@ -813,6 +813,31 @@ export default function TeacherTabletPage() {
     };
   }, []);
 
+  // Keep the 17" Android pickup panel awake. Re-acquires on tab visibility
+  // change (Android Chrome silently releases the lock on background).
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.wakeLock?.request) return;
+    let sentinel = null;
+    let cancelled = false;
+    const acquire = async () => {
+      try {
+        sentinel = await navigator.wakeLock.request('screen');
+        sentinel.addEventListener?.('release', () => { sentinel = null; });
+      } catch {}
+    };
+    acquire();
+    const onVis = () => {
+      if (cancelled) return;
+      if (document.visibilityState === 'visible' && !sentinel) acquire();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVis);
+      try { sentinel?.release(); } catch {}
+    };
+  }, []);
+
   // whoami: validate token, get release group + terminals.
   // Persistence policy: clear local pairing ONLY on a hard 401 (admin
   // unpaired the device from the dashboard). Network errors / 5xx leave
@@ -907,9 +932,33 @@ export default function TeacherTabletPage() {
         return;
       }
       es.addEventListener('hello', () => { if (!cancelled) setSseLive(true); });
-      es.addEventListener('pickup_event', () => {
+      es.addEventListener('pickup_event', (msg) => {
         if (cancelled) return;
-        // Live nudge — pollFeed() handles the shape/merge.
+        // Splice the full payload directly into local state for instant
+        // render (sub-second from Hikvision scan). pollFeed() still runs
+        // as a safety net to reconcile status flips (release/dismiss).
+        try {
+          const ev = JSON.parse(msg.data);
+          if (ev && ev.id) {
+            setFeed((prev) => {
+              const dupe = (prev.active || []).some((x) => x.id === ev.id)
+                || (prev.held || []).some((x) => x.id === ev.id);
+              if (dupe) return prev;
+              const status = ev.status || 'pending';
+              if (status === 'pending') {
+                return { ...prev, active: [ev, ...(prev.active || [])].slice(0, 4) };
+              }
+              if (status === 'held') {
+                return { ...prev, held: [ev, ...(prev.held || [])] };
+              }
+              return prev;
+            });
+            if (ev.scannedAt || ev.recordedAt) setLastEventAt(ev.scannedAt || ev.recordedAt);
+          }
+        } catch {
+          // Bad payload — fall through to polling reconcile.
+        }
+        // Safety reconcile in case status/ordering needs a server refresh.
         pollFeed();
       });
       es.onerror = () => {

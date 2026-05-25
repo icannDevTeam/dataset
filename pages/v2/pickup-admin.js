@@ -19,7 +19,6 @@ import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/router';
 import V2Layout from '../../components/v2/V2Layout';
-import KioskManager from '../../components/v2/KioskManager';
 
 const TABS = [
   { key: 'pending',  label: 'Pending',  badge: true },
@@ -126,7 +125,7 @@ export default function PickupAdminPage() {
   useEffect(() => {
     if (!router.isReady) return;
     const v = String(router.query.view || '').toLowerCase();
-    setView(v === 'kiosks' ? 'kiosks' : v === 'settings' ? 'settings' : v === 'invites' ? 'invites' : 'onboarding');
+    setView(v === 'settings' ? 'settings' : v === 'invites' ? 'invites' : 'onboarding');
   }, [router.isReady, router.query.view]);
 
   // ─── Pickup settings state ──────────────────────────────────────────────
@@ -242,11 +241,6 @@ export default function PickupAdminPage() {
       setKioskBusy((b) => ({ ...b, [profileId]: false }));
     }
   }
-
-  // KioskManager toast adapter
-  const kioskToast = useCallback((kind, msg) => {
-    pushToast(kind === 'ok' ? 'success' : kind, msg);
-  }, []);
 
   function pushToast(kind, message, title = null, ttl = 5000) {
     const id = ++_toastSeq;
@@ -775,9 +769,7 @@ export default function PickupAdminPage() {
                 Pickup System Admin
               </h1>
               <p className="text-sm text-slate-400 mt-1">
-                {view === 'kiosks'
-                  ? 'Manage TV kiosk profiles — one per screen, filtered by gate and grade.'
-                  : view === 'invites'
+                {view === 'invites'
                   ? 'Generate and manage open-ended onboarding links to share with parents.'
                   : 'Review parent-submitted authorizations. Approve to allocate a chaperone ID and push the face to all pickup terminals.'}
               </p>
@@ -792,9 +784,7 @@ export default function PickupAdminPage() {
             )}
           </div>
 
-          {view === 'kiosks' ? (
-            <KioskManager showToast={kioskToast} />
-          ) : view === 'invites' ? (
+          {view === 'invites' ? (
             <InviteLinksManager pushToast={pushToast} />
           ) : view === 'settings' ? (
             <div className="max-w-4xl">
@@ -843,12 +833,6 @@ export default function PickupAdminPage() {
                           Configure each gate profile schedule here. Security override still works on top, but default gate behavior follows these times.
                         </p>
                       </div>
-                      <button
-                        onClick={() => router.push('/v2/pickup-admin?view=kiosks')}
-                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-300 hover:bg-white/10"
-                      >
-                        Open TV Kiosks editor
-                      </button>
                     </div>
 
                     {kiosksLoading ? (
@@ -1220,10 +1204,6 @@ function LiveGateTile() {
               {flagged} flagged
             </span>
           )}
-          <a href="/pickup/tv" target="_blank" rel="noreferrer"
-            className="text-[11px] text-brand-300 hover:text-brand-200 font-medium">
-            <i className="ph ph-television-simple mr-1"></i>Open TV →
-          </a>
         </div>
       </div>
 

@@ -16,7 +16,7 @@ const PUBLIC_PATHS = ['/login', '/p'];
 // Prefixes that don't require auth (whole subtrees)
 // /pickup/teacher uses its own device-token auth (not Firebase session),
 // so it must be public at the middleware layer.
-const PUBLIC_PREFIXES = ['/consent/', '/pickup/onboarding/', '/pickup/tv', '/pickup/gate', '/pickup/teacher', '/p/'];
+const PUBLIC_PREFIXES = ['/consent/', '/pickup/onboarding/', '/pickup/gate', '/pickup/teacher', '/p/'];
 
 // Prefixes to skip (static assets, API routes, Next.js internals)
 const SKIP_PREFIXES = [

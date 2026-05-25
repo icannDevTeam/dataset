@@ -12,7 +12,6 @@ const PUBLIC_PAGES = ['/login'];
 // Keep these in sync with middleware.js PUBLIC_PREFIXES.
 const PUBLIC_PATHNAME_PREFIXES = [
   '/pickup/onboarding/',
-  '/pickup/tv',
   '/pickup/gate',
   '/pickup/teacher',
   '/consent/',
