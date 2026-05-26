@@ -72,8 +72,22 @@ async function handler(req, res) {
     if (req.method === 'PATCH' || req.method === 'PUT') {
       const id = req.query.id ? String(req.query.id) : null;
       if (!id) return res.status(400).json({ error: 'id required' });
-      const inv = await invites.updateInvite(db, tid, id, req.body || {});
+      const patch = { ...(req.body || {}) };
+      // Pass the live request host through so any token re-sign that
+      // happens during an "extend" lands on the correct base URL.
+      if (!patch.preferredBaseUrl) {
+        patch.preferredBaseUrl = invites.baseUrlFromRequest(req);
+      }
+      const inv = await invites.updateInvite(db, tid, id, patch);
       if (!inv) return res.status(404).json({ error: 'not_found' });
+      // Re-issue a QR if the URL was rotated (extension re-signs the token).
+      if (req.query.qr === '1' && inv.url) {
+        try {
+          inv.qrDataUrl = await QRCode.toDataURL(inv.url, { width: 512, margin: 1 });
+        } catch (qrErr) {
+          console.warn('[invite-links] QR regenerate failed:', qrErr.message);
+        }
+      }
       return res.status(200).json({ ok: true, invite: inv });
     }
 

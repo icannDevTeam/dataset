@@ -3127,6 +3127,9 @@ function InviteLinksManager({ pushToast }) {
   const [showArchived, setShowArchived] = useState(false);
   const [sendInvite, setSendInvite] = useState(null);   // {invite, qr}
   const [showSettings, setShowSettings] = useState(false);
+  const [editInvite, setEditInvite] = useState(null);   // invite being edited
+  const [editBusy, setEditBusy] = useState(false);
+  const [editResult, setEditResult] = useState(null);   // {invite, urlChanged}
 
   const reload = useCallback(async () => {
     try {
@@ -3177,6 +3180,44 @@ function InviteLinksManager({ pushToast }) {
     } catch (e) {
       pushToast('error', e.message, 'Update failed');
       return null;
+    }
+  }
+
+  /**
+   * Edit-modal save handler. Distinct from the inline patchInvite so we
+   * can request a fresh QR (the URL may rotate if the admin extends
+   * the expiration) and present the result back to the admin without
+   * dismissing the modal silently.
+   */
+  async function saveEdit(patch) {
+    if (!editInvite) return;
+    setEditBusy(true);
+    try {
+      const r = await fetch(
+        `/api/pickup/admin/invite-links?id=${encodeURIComponent(editInvite.id)}&qr=1`,
+        {
+          method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        },
+      );
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      const urlChanged = j.invite.url !== editInvite.url;
+      await reload();
+      setEditInvite(null);
+      setEditResult({ invite: j.invite, urlChanged });
+      pushToast(
+        'success',
+        urlChanged
+          ? 'Updated. URL was rotated — re-share with parents.'
+          : 'Invite link updated.',
+        'Saved',
+      );
+    } catch (e) {
+      pushToast('error', e.message, 'Update failed');
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -3343,6 +3384,7 @@ function InviteLinksManager({ pushToast }) {
               onArchive={() => patchInvite(inv.id, { archived: !inv.archived })}
               onDelete={() => setConfirmDelete(inv)}
               onRename={(name) => patchInvite(inv.id, { name })}
+              onEdit={() => setEditInvite(inv)}
             />
           ))}
         </div>
@@ -3353,6 +3395,25 @@ function InviteLinksManager({ pushToast }) {
           busy={busy}
           onCancel={() => setShowCreate(false)}
           onSubmit={createInvite}
+        />
+      )}
+
+      {editInvite && (
+        <EditInviteModal
+          invite={editInvite}
+          busy={editBusy}
+          onCancel={() => setEditInvite(null)}
+          onSubmit={saveEdit}
+        />
+      )}
+
+      {editResult && (
+        <InvitePreviewModal
+          invite={editResult.invite}
+          qr={editResult.invite.qrDataUrl || null}
+          urlChanged={editResult.urlChanged}
+          onClose={() => setEditResult(null)}
+          onCopy={copyText}
         />
       )}
 
@@ -3445,7 +3506,7 @@ function InviteLinksManager({ pushToast }) {
   );
 }
 
-function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle, onRevoke, onArchive, onDelete, onRename }) {
+function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle, onRevoke, onArchive, onDelete, onRename, onEdit }) {
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(invite.name);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3589,6 +3650,13 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle,
 
         {/* Lifecycle cluster — stays grouped on wrap */}
         <div className="flex flex-wrap items-center gap-2">
+          {onEdit && !invite.revoked && !invite.archived && (
+            <button onClick={onEdit}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-300 hover:bg-sky-500/20"
+              title="Edit details, extend expiration, change submission window">
+              <i className="ph ph-pencil-simple mr-1"></i>Edit
+            </button>
+          )}
           {!invite.revoked && (
             <button
               onClick={() => onToggle(!invite.enabled)}
@@ -3828,7 +3896,219 @@ function CreateInviteModal({ busy, onCancel, onSubmit }) {
   );
 }
 
-function InvitePreviewModal({ invite, qr, onClose, onCopy }) {
+// Convert a millis-or-null timestamp into the `YYYY-MM-DDTHH:MM` shape
+// that <input type="datetime-local"> requires. Returns '' for null.
+function _toLocalInput(ms) {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function EditInviteModal({ invite, busy, onCancel, onSubmit }) {
+  const [name, setName] = useState(invite.name || '');
+  const [description, setDescription] = useState(invite.description || '');
+  const [maxUses, setMaxUses] = useState(invite.maxUses != null ? String(invite.maxUses) : '');
+  const [windowOpenAt, setWindowOpenAt] = useState(_toLocalInput(invite.windowOpenAt));
+  const [windowCloseAt, setWindowCloseAt] = useState(_toLocalInput(invite.windowCloseAt));
+  const [extendDays, setExtendDays] = useState('');         // "" = don't extend
+  const [customExpiresAt, setCustomExpiresAt] = useState(''); // overrides extendDays if set
+
+  const windowError = useMemo(() => {
+    if (!windowOpenAt || !windowCloseAt) return null;
+    return new Date(windowCloseAt).getTime() <= new Date(windowOpenAt).getTime()
+      ? 'Close time must be after open time.'
+      : null;
+  }, [windowOpenAt, windowCloseAt]);
+
+  const expiresMs = invite.expiresAt || null;
+  const expiresLabel = expiresMs
+    ? new Date(expiresMs).toLocaleString('en-GB', { weekday:'short', day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+    : 'Never';
+  const willRotateUrl = Boolean(extendDays || customExpiresAt);
+
+  const canSubmit = name.trim().length >= 2 && !busy && !windowError;
+
+  function submit() {
+    // Build a patch with only the keys the admin actually changed.
+    const patch = {};
+    if (name.trim() !== (invite.name || '')) patch.name = name.trim();
+    if (description.trim() !== (invite.description || '')) {
+      patch.description = description.trim();
+    }
+    const curMax = invite.maxUses != null ? String(invite.maxUses) : '';
+    if (maxUses !== curMax) {
+      patch.maxUses = maxUses === '' ? null : Number(maxUses);
+    }
+    const curOpen = _toLocalInput(invite.windowOpenAt);
+    const curClose = _toLocalInput(invite.windowCloseAt);
+    if (windowOpenAt !== curOpen) {
+      patch.windowOpenAt = windowOpenAt ? new Date(windowOpenAt).toISOString() : null;
+    }
+    if (windowCloseAt !== curClose) {
+      patch.windowCloseAt = windowCloseAt ? new Date(windowCloseAt).toISOString() : null;
+    }
+    if (customExpiresAt) {
+      patch.expiresAt = new Date(customExpiresAt).toISOString();
+    } else if (extendDays) {
+      patch.extendDays = Number(extendDays);
+    }
+    onSubmit(patch);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+         onClick={onCancel}>
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl my-8"
+           onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-10 h-10 rounded-full bg-sky-500/20 flex items-center justify-center">
+            <i className="ph ph-pencil-simple text-sky-300 text-xl"></i>
+          </div>
+          <div>
+            <h3 className="text-white font-semibold">Edit invite link</h3>
+            <p className="text-xs text-slate-400 font-mono">{invite.id}</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Name *</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Description</label>
+            <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={280}
+              placeholder="Notes for your team"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Max submissions</label>
+            <input type="number" min="1" value={maxUses}
+              onChange={(e) => setMaxUses(e.target.value)}
+              placeholder="Unlimited"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500" />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Already used <strong className="text-slate-300">{invite.useCount}</strong>.
+              Leave blank for unlimited.
+            </p>
+          </div>
+
+          {/* Expiration ---------------------------------------------- */}
+          <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                <i className="ph ph-clock-clockwise text-slate-400"></i>
+                Extend expiration
+              </label>
+              <span className="text-[11px] text-slate-400">Currently expires: <strong className="text-slate-200">{expiresLabel}</strong></span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { label: '+7 days', days: 7 },
+                { label: '+30 days', days: 30 },
+                { label: '+90 days', days: 90 },
+                { label: '+180 days', days: 180 },
+                { label: '+1 year', days: 365 },
+              ].map((p) => (
+                <button key={p.days} type="button"
+                  onClick={() => { setExtendDays(String(p.days)); setCustomExpiresAt(''); }}
+                  className={`px-2.5 py-1 text-[11px] rounded-md border ${
+                    String(extendDays) === String(p.days) && !customExpiresAt
+                      ? 'bg-sky-500/20 border-sky-500/40 text-sky-200'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
+                  }`}>
+                  {p.label}
+                </button>
+              ))}
+              {(extendDays || customExpiresAt) && (
+                <button type="button"
+                  onClick={() => { setExtendDays(''); setCustomExpiresAt(''); }}
+                  className="px-2.5 py-1 text-[11px] rounded-md bg-slate-800 border border-slate-700 text-slate-400 hover:text-white">
+                  <i className="ph ph-x mr-1"></i>Don&apos;t change
+                </button>
+              )}
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">…or pick an exact new expiry</label>
+              <input type="datetime-local" value={customExpiresAt}
+                min={_toLocalInput(Date.now() + 60_000)}
+                onChange={(e) => { setCustomExpiresAt(e.target.value); setExtendDays(''); }}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
+                           [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-sky-500/40
+                           cursor-pointer hover:border-slate-600" />
+            </div>
+            {willRotateUrl && (
+              <div className="rounded-md bg-amber-500/10 border border-amber-500/30 px-2.5 py-2 text-[11px] text-amber-200 leading-relaxed flex gap-2">
+                <i className="ph ph-warning mt-0.5"></i>
+                <span>
+                  Extending expiration <strong>rotates the URL</strong> — the signed token
+                  has to be re-issued. Old links keep working until their original expiry.
+                  Re-share the new URL with parents after saving.
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Submission window --------------------------------------- */}
+          <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                <i className="ph ph-calendar-blank text-slate-400"></i>
+                Submission window <span className="text-slate-500 font-normal">(optional)</span>
+              </label>
+              <button type="button"
+                onClick={() => { setWindowOpenAt(''); setWindowCloseAt(''); }}
+                className="text-[11px] text-slate-400 hover:text-white">Clear</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                  <i className="ph ph-arrow-up-right mr-1 text-emerald-400"></i>Opens
+                </label>
+                <input type="datetime-local" value={windowOpenAt}
+                  onChange={(e) => setWindowOpenAt(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
+                             [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/40
+                             cursor-pointer hover:border-slate-600" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                  <i className="ph ph-clock-countdown mr-1 text-amber-400"></i>Closes
+                </label>
+                <input type="datetime-local" value={windowCloseAt}
+                  min={windowOpenAt || undefined}
+                  onChange={(e) => setWindowCloseAt(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
+                             [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/40
+                             cursor-pointer hover:border-slate-600" />
+              </div>
+            </div>
+            {windowError && (
+              <p className="text-[11px] text-rose-300"><i className="ph ph-warning mr-1"></i>{windowError}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 mt-6">
+          <button onClick={onCancel} disabled={busy}
+            className="px-4 py-2 text-sm rounded-lg bg-slate-700 hover:bg-slate-600 text-white disabled:opacity-50">
+            Cancel
+          </button>
+          <button onClick={submit} disabled={!canSubmit}
+            className="px-4 py-2 text-sm font-semibold rounded-lg bg-gradient-to-r from-sky-500 to-emerald-500 hover:from-sky-400 hover:to-emerald-400 text-white disabled:opacity-40 disabled:cursor-not-allowed">
+            {busy ? <><i className="ph ph-spinner-gap animate-spin mr-1"></i>Saving…</> : <><i className="ph ph-check mr-1.5"></i>Save changes</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InvitePreviewModal({ invite, qr, onClose, onCopy, urlChanged }) {
   return (
     <div className="fixed inset-0 z-[1000] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
          onClick={onClose}>
@@ -3841,13 +4121,25 @@ function InvitePreviewModal({ invite, qr, onClose, onCopy }) {
             </div>
             <div>
               <h3 className="text-white font-semibold leading-tight">{invite.name}</h3>
-              <p className="text-xs text-slate-400">Ready to share with parents</p>
+              <p className="text-xs text-slate-400">
+                {urlChanged ? 'URL was rotated — re-share with parents' : 'Ready to share with parents'}
+              </p>
             </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white text-xl"><i className="ph ph-x"></i></button>
         </div>
 
         <div className="p-6 space-y-5">
+          {urlChanged && (
+            <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-xs text-amber-200 leading-relaxed flex gap-2">
+              <i className="ph ph-warning mt-0.5"></i>
+              <span>
+                Because you extended the expiration, a new signed URL was issued.
+                Please re-share the link / QR below. Old URLs will keep working
+                until their original expiry date.
+              </span>
+            </div>
+          )}
           {/* Big copyable URL */}
           <div>
             <div className="text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Invite URL</div>
