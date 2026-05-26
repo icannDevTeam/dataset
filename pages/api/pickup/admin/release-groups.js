@@ -18,8 +18,91 @@ import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 const tab = require('../../../../lib/tablet-devices');
+const { isValidHHMM } = require('../../../../lib/terminal-gate');
 
 const PAIRING_TTL_MS = 10 * 60 * 1000;
+const MAX_TERMINALS_PER_GROUP = 2;   // 2 face terminals per grade gate.
+
+// Validate + normalise the list of one-off pickup-window overrides.
+// Shape: [{ date:'YYYY-MM-DD', open:'HH:MM'|null, close:'HH:MM'|null,
+//           closedAllDay:bool, note?:string }]
+function normaliseOverrides(raw) {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) throw new Error('pickupOverrides must be an array');
+  const seen = new Set();
+  const out = [];
+  for (const r of raw) {
+    if (!r || typeof r !== 'object') continue;
+    const date = String(r.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`override date must be YYYY-MM-DD (got "${date}")`);
+    if (seen.has(date)) throw new Error(`duplicate override for ${date}`);
+    seen.add(date);
+    const closedAllDay = !!r.closedAllDay;
+    let open = r.open ? String(r.open).trim() : null;
+    let close = r.close ? String(r.close).trim() : null;
+    if (!closedAllDay) {
+      if (open && !isValidHHMM(open))   throw new Error(`override ${date}: open must be HH:MM`);
+      if (close && !isValidHHMM(close)) throw new Error(`override ${date}: close must be HH:MM`);
+      if (!open || !close) throw new Error(`override ${date}: open + close required (or mark closedAllDay)`);
+    } else {
+      open = null; close = null;
+    }
+    const note = r.note ? String(r.note).slice(0, 160) : null;
+    out.push({ date, open, close, closedAllDay, note });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Reject if any of `ids` is already in another group's terminalIds, or if
+// the terminal's gradeLabel/gradeScopes don't match `gradeLabel` of the
+// group being edited. `selfId` is the current group's id (skip-conflict).
+async function validateTerminalAssignment(db, tid, colRef, ids, gradeLabel, selfId) {
+  if (!Array.isArray(ids)) return;
+  if (ids.length === 0)   throw Object.assign(new Error('at-least-one-terminal-required'), { code: 400 });
+  if (ids.length > MAX_TERMINALS_PER_GROUP) {
+    const e = new Error(`too-many-terminals: max ${MAX_TERMINALS_PER_GROUP} per release group`);
+    e.code = 400; throw e;
+  }
+
+  // 1. Exclusivity: scan all other groups for overlap.
+  const allGroups = await colRef.get();
+  const conflicts = [];
+  for (const d of allGroups.docs) {
+    if (d.id === selfId) continue;
+    const otherIds = Array.isArray(d.data().terminalIds) ? d.data().terminalIds : [];
+    for (const x of ids) {
+      if (otherIds.includes(x)) conflicts.push({ terminalId: x, groupId: d.id, groupName: d.data().name || d.id });
+    }
+  }
+  if (conflicts.length) {
+    const e = new Error('terminal_already_bound');
+    e.code = 409;
+    e.conflicts = conflicts;
+    throw e;
+  }
+
+  // 2. Grade-lock: each terminal must accept this group's grade.
+  const wantGrade = (gradeLabel || '').trim().toUpperCase();
+  if (wantGrade) {
+    const mismatches = [];
+    for (const x of ids) {
+      const tSnap = await db.doc(tenancy.terminalDoc(x, tid)).get();
+      if (!tSnap.exists) { mismatches.push({ terminalId: x, reason: 'missing' }); continue; }
+      const td = tSnap.data();
+      const tags = [td.gradeLabel, ...(Array.isArray(td.gradeScopes) ? td.gradeScopes : [])]
+        .filter(Boolean).map((s) => String(s).trim().toUpperCase());
+      if (tags.length && !tags.includes(wantGrade)) {
+        mismatches.push({ terminalId: x, name: td.name || x, terminalGrades: tags, reason: 'grade_mismatch' });
+      }
+    }
+    if (mismatches.length) {
+      const e = new Error('terminal_grade_mismatch');
+      e.code = 409;
+      e.mismatches = mismatches;
+      throw e;
+    }
+  }
+}
 
 function tsIso(ts) {
   if (!ts) return null;
@@ -36,6 +119,7 @@ function publicGroup(id, data) {
     name: data.name || id,
     gradeLabel: data.gradeLabel || null,
     terminalIds: Array.isArray(data.terminalIds) ? data.terminalIds : [],
+    pickupOverrides: Array.isArray(data.pickupOverrides) ? data.pickupOverrides : [],
     tabletDeviceId: data.tabletDeviceId || null,
     pairingCode: data.pairingCode || null,
     pairingExpiresAt: tsIso(data.pairingExpiresAt),
@@ -141,13 +225,26 @@ async function handler(req, res) {
       const name = String(req.body?.name || '').trim();
       if (!name) return res.status(400).json({ error: 'name required' });
       const terminalIds = Array.isArray(req.body?.terminalIds) ? req.body.terminalIds.map(String) : [];
-      if (terminalIds.length === 0) return res.status(400).json({ error: 'at-least-one-terminal-required', message: 'A release group must contain at least one terminal — otherwise it can never receive scan events.' });
       const gradeLabel = req.body?.gradeLabel ? String(req.body.gradeLabel).trim() : null;
+
+      try { await validateTerminalAssignment(db, tid, colRef, terminalIds, gradeLabel, null); }
+      catch (e) {
+        return res.status(e.code || 400).json({
+          error: e.message, conflicts: e.conflicts, mismatches: e.mismatches,
+        });
+      }
+
+      let pickupOverrides = [];
+      if (req.body?.pickupOverrides !== undefined) {
+        try { pickupOverrides = normaliseOverrides(req.body.pickupOverrides); }
+        catch (e) { return res.status(400).json({ error: 'invalid_overrides', message: e.message }); }
+      }
 
       const docRef = await colRef.add({
         name,
         gradeLabel,
         terminalIds,
+        pickupOverrides,
         tabletDeviceId: null,
         status: 'unbound',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -176,14 +273,26 @@ async function handler(req, res) {
 
       const patch = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
       if (req.body?.name !== undefined) patch.name = String(req.body.name).trim();
-      if (req.body?.gradeLabel !== undefined) {
-        patch.gradeLabel = req.body.gradeLabel ? String(req.body.gradeLabel).trim() : null;
-      }
+      const effectiveGrade = req.body?.gradeLabel !== undefined
+        ? (req.body.gradeLabel ? String(req.body.gradeLabel).trim() : null)
+        : (snap.data().gradeLabel || null);
+      if (req.body?.gradeLabel !== undefined) patch.gradeLabel = effectiveGrade;
+
       let oldTerminalIds = Array.isArray(snap.data().terminalIds) ? snap.data().terminalIds : [];
       let newTerminalIds = oldTerminalIds;
       if (req.body?.terminalIds !== undefined) {
         newTerminalIds = Array.isArray(req.body.terminalIds) ? req.body.terminalIds.map(String) : [];
+        try { await validateTerminalAssignment(db, tid, colRef, newTerminalIds, effectiveGrade, id); }
+        catch (e) {
+          return res.status(e.code || 400).json({
+            error: e.message, conflicts: e.conflicts, mismatches: e.mismatches,
+          });
+        }
         patch.terminalIds = newTerminalIds;
+      }
+      if (req.body?.pickupOverrides !== undefined) {
+        try { patch.pickupOverrides = normaliseOverrides(req.body.pickupOverrides); }
+        catch (e) { return res.status(400).json({ error: 'invalid_overrides', message: e.message }); }
       }
       await ref.set(patch, { merge: true });
 

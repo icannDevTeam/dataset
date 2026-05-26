@@ -23,7 +23,7 @@ import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
-const { terminalGateStatus, isValidHHMM } = require('../../../../lib/terminal-gate');
+const { terminalGateStatus, effectiveGateStatus, isValidHHMM } = require('../../../../lib/terminal-gate');
 
 async function handler(req, res) {
   try {
@@ -69,7 +69,13 @@ async function handler(req, res) {
 
       await ref.set(patch, { merge: true });
       const updated = (await ref.get()).data();
-      const eff = terminalGateStatus(updated);
+      // Pull the bound release group (if any) so overrides for today take effect.
+      let groupData = null;
+      if (updated.releaseGroupId) {
+        const g = await db.doc(tenancy.releaseGroupDoc(updated.releaseGroupId, tid)).get();
+        if (g.exists) groupData = g.data();
+      }
+      const eff = effectiveGateStatus(updated, groupData);
       return res.status(200).json({
         ok: true,
         terminalId: tidParam,
@@ -83,17 +89,22 @@ async function handler(req, res) {
     if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
 
     const snap = await termsRef.orderBy('name').get();
+    // Preload release groups once so per-terminal lookup is O(1).
+    const groupsSnap = await db.collection(tenancy.releaseGroupsPath(tid)).get();
+    const groupById = new Map();
+    groupsSnap.docs.forEach((g) => groupById.set(g.id, g.data()));
     const profiles = snap.docs.map((d) => {
       const t = d.data();
       if (t.enabled === false) return null;
-      const status = terminalGateStatus(t);
+      const groupData = t.releaseGroupId ? (groupById.get(t.releaseGroupId) || null) : null;
+      const status = effectiveGateStatus(t, groupData);
       return {
         id: d.id,
         name: t.name || d.id,
         gates: [t.gateLabel || t.name || d.id],
         override: status.manualOverride,
         scheduled: status.scheduled,
-        effective: { open: status.open, manualOverride: status.manualOverride, reason: status.reason },
+        effective: { open: status.open, manualOverride: status.manualOverride, reason: status.reason, override: status.override || null },
       };
     }).filter(Boolean);
 

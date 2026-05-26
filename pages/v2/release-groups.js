@@ -15,6 +15,27 @@ import Head from 'next/head';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 
+const MAX_TERMINALS_PER_GROUP = 2;
+
+// Filter terminals to those eligible for assignment to a release group:
+//  - unbound (releaseGroupId is null), OR currently bound to *this* group
+//  - grade-compatible: if the group has a gradeLabel, the terminal must
+//    either carry the same gradeLabel, list it in gradeScopes, or have no
+//    grade tagging at all (legacy / shared terminals).
+function eligibleTerminals(terminals, group) {
+  const gradeLabel = group?.gradeLabel ? String(group.gradeLabel).trim().toUpperCase() : null;
+  const selfId = group?.id || null;
+  return terminals.filter((t) => {
+    const ownedElsewhere = t.releaseGroupId && t.releaseGroupId !== selfId;
+    if (ownedElsewhere) return false;
+    if (!gradeLabel) return true;
+    const tags = [t.gradeLabel, ...(t.gradeScopes || [])]
+      .filter(Boolean).map((x) => String(x).trim().toUpperCase());
+    if (tags.length === 0) return true; // untagged terminals stay assignable
+    return tags.includes(gradeLabel);
+  });
+}
+
 function fmtTime(iso) {
   if (!iso) return null;
   try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
@@ -77,6 +98,9 @@ export default function ReleaseGroupsPage() {
   const create = async () => {
     if (!newGroup.name.trim()) { showToast('error', 'Group name is required.'); return; }
     if (!newGroup.terminalIds.length) { showToast('error', 'Pick at least one terminal.'); return; }
+    if (newGroup.terminalIds.length > MAX_TERMINALS_PER_GROUP) {
+      showToast('error', `Max ${MAX_TERMINALS_PER_GROUP} terminals per group.`); return;
+    }
     setCreating(true);
     try {
       const r = await fetch('/api/pickup/admin/release-groups', {
@@ -85,7 +109,15 @@ export default function ReleaseGroupsPage() {
         body: JSON.stringify(newGroup),
       });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error || 'failed');
+      if (!r.ok) {
+        if (j.error === 'terminal_already_bound' && j.conflicts?.length) {
+          throw new Error(`Already bound: ${j.conflicts.map((c) => c.groupName).join(', ')}`);
+        }
+        if (j.error === 'terminal_grade_mismatch' && j.mismatches?.length) {
+          throw new Error(`Grade mismatch: ${j.mismatches.map((m) => m.name || m.terminalId).join(', ')}`);
+        }
+        throw new Error(j.message || j.error || 'failed');
+      }
       setNewGroup({ name: '', gradeLabel: '', terminalIds: [] });
       setShowNew(false);
       showToast('success', 'Release group created.');
@@ -145,7 +177,34 @@ export default function ReleaseGroupsPage() {
         body: JSON.stringify({ terminalIds }),
       });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error || 'failed');
+      if (!r.ok) {
+        if (j.error === 'terminal_already_bound' && j.conflicts?.length) {
+          throw new Error(`Terminal already bound to: ${j.conflicts.map((c) => c.groupName).join(', ')}`);
+        }
+        if (j.error === 'terminal_grade_mismatch' && j.mismatches?.length) {
+          throw new Error(`Grade mismatch: ${j.mismatches.map((m) => `${m.name || m.terminalId} (${(m.terminalGrades||[]).join('/') || 'no grade'})`).join(', ')}`);
+        }
+        if (j.error?.startsWith('too-many-terminals')) {
+          throw new Error(`Max ${MAX_TERMINALS_PER_GROUP} terminals per group.`);
+        }
+        throw new Error(j.message || j.error || 'failed');
+      }
+      await reload();
+    } catch (e) { showToast('error', e.message); }
+    finally { setBusy((b) => ({ ...b, [id]: false })); }
+  };
+
+  const updateOverrides = async (id, pickupOverrides) => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const r = await fetch(`/api/pickup/admin/release-groups?id=${id}`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pickupOverrides }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message || j.error || 'failed');
+      showToast('success', 'Pickup overrides saved.');
       await reload();
     } catch (e) { showToast('error', e.message); }
     finally { setBusy((b) => ({ ...b, [id]: false })); }
@@ -246,39 +305,57 @@ export default function ReleaseGroupsPage() {
 
             <div>
               <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5">
-                Terminals (pick at least one)
+                Terminals (max {MAX_TERMINALS_PER_GROUP}, grade-locked)
               </label>
-              {terminals.length === 0 ? (
-                <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2.5 py-1.5">
-                  No terminals registered yet. Add one in <a href="/v2/terminals" className="underline">Terminals</a> first.
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {terminals.map((t) => {
-                    const checked = newGroup.terminalIds.includes(t.id);
-                    return (
-                      <label key={t.id}
-                        className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border cursor-pointer transition ${
-                          checked ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
-                                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'
-                        }`}>
-                        <input
-                          type="checkbox"
-                          className="rounded border-slate-700 bg-slate-950"
-                          checked={checked}
-                          onChange={(e) => {
-                            const ids = new Set(newGroup.terminalIds);
-                            if (e.target.checked) ids.add(t.id); else ids.delete(t.id);
-                            setNewGroup({ ...newGroup, terminalIds: Array.from(ids) });
-                          }}
-                        />
-                        <i className="ph ph-cpu opacity-70"></i>
-                        {t.name}
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
+              {(() => {
+                const eligible = eligibleTerminals(terminals, { gradeLabel: newGroup.gradeLabel, id: null });
+                if (eligible.length === 0) {
+                  return (
+                    <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2.5 py-1.5">
+                      {terminals.length === 0
+                        ? <>No terminals registered yet. Add one in <a href="/v2/terminals" className="underline">Terminals</a> first.</>
+                        : <>No terminals available for grade <strong>{newGroup.gradeLabel || '—'}</strong>. Either change the grade label, or tag a terminal with this grade in <a href="/v2/terminals" className="underline">Terminals</a>.</>}
+                    </div>
+                  );
+                }
+                const reachedCap = newGroup.terminalIds.length >= MAX_TERMINALS_PER_GROUP;
+                return (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {eligible.map((t) => {
+                        const checked = newGroup.terminalIds.includes(t.id);
+                        const disabled = !checked && reachedCap;
+                        return (
+                          <label key={t.id}
+                            className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition ${
+                              checked ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 cursor-pointer'
+                              : disabled ? 'bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed'
+                              : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600 cursor-pointer'
+                            }`}>
+                            <input
+                              type="checkbox"
+                              className="rounded border-slate-700 bg-slate-950"
+                              checked={checked}
+                              disabled={disabled}
+                              onChange={(e) => {
+                                const ids = new Set(newGroup.terminalIds);
+                                if (e.target.checked) ids.add(t.id); else ids.delete(t.id);
+                                setNewGroup({ ...newGroup, terminalIds: Array.from(ids) });
+                              }}
+                            />
+                            <i className="ph ph-cpu opacity-70"></i>
+                            {t.name}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-1">
+                      {newGroup.terminalIds.length}/{MAX_TERMINALS_PER_GROUP} selected
+                      {reachedCap && <span className="text-amber-400 ml-2">— cap reached</span>}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
             <div className="flex justify-end gap-2 pt-1">
@@ -421,36 +498,62 @@ export default function ReleaseGroupsPage() {
                         </div>
                       )
                     ) : (
-                      terminals.length === 0 ? (
-                        <div className="text-[11px] text-amber-300 bg-amber-500/5 border border-amber-500/30 rounded px-2 py-1.5">
-                          No terminals registered. Add one in Terminals.
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap gap-1.5">
-                          {terminals.map((t) => {
-                            const checked = ids.includes(t.id);
-                            return (
-                              <label key={t.id}
-                                className={`inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border cursor-pointer transition ${
-                                  checked ? 'bg-brand-500/15 border-brand-500/40 text-brand-100'
-                                          : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'
-                                }`}>
-                                <input type="checkbox"
-                                  className="rounded border-slate-700 bg-slate-950"
-                                  checked={checked}
-                                  onChange={(e) => {
-                                    const next = new Set(ids);
-                                    if (e.target.checked) next.add(t.id); else next.delete(t.id);
-                                    updateTerminals(g.id, Array.from(next));
-                                  }}
-                                />
-                                <i className="ph ph-cpu opacity-70"></i>{t.name}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )
+                      (() => {
+                        const eligible = eligibleTerminals(terminals, g);
+                        if (eligible.length === 0) {
+                          return (
+                            <div className="text-[11px] text-amber-300 bg-amber-500/5 border border-amber-500/30 rounded px-2 py-1.5">
+                              No eligible terminals for grade <strong>{g.gradeLabel || '—'}</strong>. Tag one in <a href="/v2/terminals" className="underline">Terminals</a>.
+                            </div>
+                          );
+                        }
+                        const reachedCap = ids.length >= MAX_TERMINALS_PER_GROUP;
+                        return (
+                          <>
+                            <div className="flex flex-wrap gap-1.5">
+                              {eligible.map((t) => {
+                                const checked = ids.includes(t.id);
+                                const disabled = !checked && reachedCap;
+                                return (
+                                  <label key={t.id}
+                                    className={`inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md border transition ${
+                                      checked ? 'bg-brand-500/15 border-brand-500/40 text-brand-100 cursor-pointer'
+                                      : disabled ? 'bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed'
+                                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600 cursor-pointer'
+                                    }`}>
+                                    <input type="checkbox"
+                                      className="rounded border-slate-700 bg-slate-950"
+                                      checked={checked}
+                                      disabled={disabled}
+                                      onChange={(e) => {
+                                        const next = new Set(ids);
+                                        if (e.target.checked) next.add(t.id); else next.delete(t.id);
+                                        updateTerminals(g.id, Array.from(next));
+                                      }}
+                                    />
+                                    <i className="ph ph-cpu opacity-70"></i>{t.name}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <div className="text-[10px] text-slate-500 mt-1">
+                              {ids.length}/{MAX_TERMINALS_PER_GROUP} selected
+                              {reachedCap && <span className="text-amber-400 ml-2">— cap reached</span>}
+                            </div>
+                          </>
+                        );
+                      })()
                     )}
+                  </div>
+
+                  {/* Pickup overrides (one-off date schedules) */}
+                  <div className="px-5 pb-3">
+                    <PickupOverridesEditor
+                      groupId={g.id}
+                      initial={g.pickupOverrides || []}
+                      busy={!!busy[g.id]}
+                      onSave={(list) => updateOverrides(g.id, list)}
+                    />
                   </div>
 
                   {/* Footer meta */}
@@ -512,6 +615,174 @@ function Field({ label, hint, required, children }) {
       </label>
       {children}
       {hint && <div className="text-[10px] text-slate-500 mt-0.5">{hint}</div>}
+    </div>
+  );
+}
+
+// One-off pickup-window overrides editor.
+// Each entry: { date:'YYYY-MM-DD', open:'HH:MM'|null, close:'HH:MM'|null,
+//               closedAllDay:bool, note?:string }
+// Uses native HTML5 date/time inputs — iOS renders a wheel, desktop a calendar.
+function PickupOverridesEditor({ groupId, initial, busy, onSave }) {
+  const [rows, setRows] = useState(() => Array.isArray(initial) ? initial.map((o) => ({ ...o })) : []);
+  const [open, setOpen] = useState(false);
+
+  // Keep local state in sync with reloads (groupId change = different card).
+  useEffect(() => {
+    setRows(Array.isArray(initial) ? initial.map((o) => ({ ...o })) : []);
+  }, [groupId, JSON.stringify(initial)]);
+
+  const today = useMemo(() => {
+    const d = new Date();
+    const w = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+    return `${w.getUTCFullYear()}-${String(w.getUTCMonth() + 1).padStart(2, '0')}-${String(w.getUTCDate()).padStart(2, '0')}`;
+  }, []);
+
+  const upcomingCount = rows.filter((r) => r.date >= today).length;
+  const dirty = JSON.stringify(rows) !== JSON.stringify(initial || []);
+
+  const addRow = () => {
+    setRows((prev) => [...prev, { date: today, open: '14:00', close: '16:00', closedAllDay: false, note: '' }]);
+    setOpen(true);
+  };
+  const patchRow = (i, patch) => setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  const delRow = (i) => setRows((prev) => prev.filter((_, idx) => idx !== i));
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 text-left"
+      >
+        <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5">
+          <i className="ph ph-calendar-blank"></i>
+          Pickup overrides
+          {upcomingCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-brand-500/15 border border-brand-500/40 text-brand-200 text-[10px]">
+              {upcomingCount} upcoming
+            </span>
+          )}
+        </span>
+        <span className="text-[10px] text-slate-500 flex items-center gap-1">
+          {dirty && <span className="text-amber-400">unsaved</span>}
+          <i className={`ph ${open ? 'ph-caret-up' : 'ph-caret-down'}`}></i>
+        </span>
+      </button>
+
+      {open && (
+        <div className="px-3 pb-3 space-y-2">
+          {rows.length === 0 ? (
+            <div className="text-[11px] text-slate-500 py-1.5">
+              No overrides. Add one for special days (early dismissal, half-day, holiday close).
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {rows.map((r, i) => {
+                const past = r.date < today;
+                return (
+                  <div key={i} className={`rounded-md border p-2 ${past ? 'border-slate-800 bg-slate-900/30 opacity-60' : 'border-slate-700 bg-slate-900/60'}`}>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div>
+                        <label className="block text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-0.5">Date</label>
+                        <input
+                          type="date"
+                          value={r.date || ''}
+                          min={past ? undefined : today}
+                          onChange={(e) => patchRow(i, { date: e.target.value })}
+                          className="px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-100 focus:border-brand-500 focus:outline-none"
+                        />
+                      </div>
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 px-2 py-1.5 rounded border border-slate-700 bg-slate-950/60 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="rounded border-slate-700 bg-slate-950"
+                          checked={!!r.closedAllDay}
+                          onChange={(e) => patchRow(i, {
+                            closedAllDay: e.target.checked,
+                            open: e.target.checked ? null : (r.open || '14:00'),
+                            close: e.target.checked ? null : (r.close || '16:00'),
+                          })}
+                        />
+                        Closed all day
+                      </label>
+                      {!r.closedAllDay && (
+                        <>
+                          <div>
+                            <label className="block text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-0.5">Open</label>
+                            <input
+                              type="time"
+                              value={r.open || ''}
+                              onChange={(e) => patchRow(i, { open: e.target.value })}
+                              className="px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-100 focus:border-brand-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-0.5">Close</label>
+                            <input
+                              type="time"
+                              value={r.close || ''}
+                              onChange={(e) => patchRow(i, { close: e.target.value })}
+                              className="px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-100 focus:border-brand-500 focus:outline-none"
+                            />
+                          </div>
+                        </>
+                      )}
+                      <div className="flex-1 min-w-[140px]">
+                        <label className="block text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-0.5">Note (optional)</label>
+                        <input
+                          type="text"
+                          value={r.note || ''}
+                          onChange={(e) => patchRow(i, { note: e.target.value })}
+                          placeholder="e.g. early dismissal"
+                          maxLength={160}
+                          className="w-full px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-100 focus:border-brand-500 focus:outline-none"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => delRow(i)}
+                        title="Remove"
+                        className="px-2 py-1.5 rounded border border-slate-700 bg-slate-900 text-slate-400 hover:text-rose-300 hover:border-rose-500/40"
+                      >
+                        <i className="ph ph-trash"></i>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex justify-between gap-2 pt-1">
+            <button
+              type="button"
+              onClick={addRow}
+              className="px-2.5 py-1 text-[11px] rounded bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700"
+            >
+              <i className="ph ph-plus mr-1"></i>Add override
+            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setRows(Array.isArray(initial) ? initial.map((o) => ({ ...o })) : [])}
+                disabled={!dirty || busy}
+                className="px-2.5 py-1 text-[11px] rounded bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 disabled:opacity-40"
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                onClick={() => onSave(rows)}
+                disabled={!dirty || busy}
+                className="px-3 py-1 text-[11px] rounded font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 border border-emerald-400 disabled:opacity-40"
+              >
+                {busy ? <><i className="ph ph-spinner-gap animate-spin mr-1"></i>Saving…</> : <><i className="ph ph-check mr-1"></i>Save overrides</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
