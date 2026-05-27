@@ -27,8 +27,8 @@ function toIso(v) {
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
 
-  const v = validateExportRequest(req.body || {});
-  if (!v.ok) return res.status(400).json({ error: v.error, message: v.message });
+  const v = validateExportRequest(req.body || {}, { maxDays: 365 });
+  if (v.error) return res.status(v.error.status).json(v.error.body);
   const { from, to, format: fmt } = v;
   const filters = req.body?.filters || {};
   const statusFilter = filters.status ? String(filters.status).toLowerCase() : null;
