@@ -23,7 +23,7 @@
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
-const { getRunner, runJob } = require('../../../../lib/download-runner');
+const { getRunner, runJob, writeReportRun } = require('../../../../lib/download-runner');
 const tenancy = require('../../../../lib/tenancy');
 const { logAudit } = require('../../../../lib/audit-log');
 const { verifyReauth } = require('../../../../lib/reauth');
@@ -115,6 +115,16 @@ async function handler(req, res) {
         error: String(err?.message || err),
         failedAt: admin.firestore.FieldValue.serverTimestamp(),
       }).catch(() => {});
+      // Mirror failure into reportRuns so it shows up in run history.
+      try {
+        await writeReportRun(db, {
+          tenantId: tid, actor, format: fmt, from: from || null, to: to || null,
+          filters: filters || {},
+        }, { cardId }, {
+          runId: jobRef.id, mode: 'async', status: 'failed',
+          errorMessage: String(err?.message || err),
+        });
+      } catch {}
       try {
         await logAudit(db, {
           tenantId: tid, actor, kind: `${auditKindBase}.job_failed`,

@@ -182,6 +182,27 @@ const TONES = {
   orange:  { ring: 'border-orange-500/30',  bg: 'bg-orange-500/10',  fg: 'text-orange-300',  btn: 'bg-orange-600 hover:bg-orange-500' },
 };
 
+// Flat lookup so the recently-run rail (which only knows cardId) can
+// render the human-facing card title without re-walking SECTIONS.
+const CARD_BY_ID = SECTIONS.flatMap((s) => s.cards).reduce((acc, c) => {
+  acc[c.id] = c; return acc;
+}, {});
+
+function relativeTime(ms) {
+  if (!ms) return '—';
+  const diff = Date.now() - ms;
+  if (diff < 0) return 'just now';
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60)   return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60)   return `${min}m ago`;
+  const hr  = Math.floor(min / 60);
+  if (hr  < 24)   return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30)   return `${day}d ago`;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
 function fmtPills({ value, onChange, disabled }) {
   return ['xlsx', 'pdf', 'csv'].map((f) => (
     <button
@@ -332,7 +353,7 @@ function PreviewModal({ data, tone, format, onClose, onConfirm }) {
   );
 }
 
-function DownloadCard({ card, highlighted, registerRef }) {
+function DownloadCard({ card, highlighted, registerRef, lastRun }) {
   const tone = TONES[card.tone] || TONES.teal;
   const cardRef = useRef(null);
   useEffect(() => {
@@ -444,6 +465,11 @@ function DownloadCard({ card, highlighted, registerRef }) {
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-semibold text-white">{card.title}</h3>
           <p className="text-xs text-slate-400 mt-0.5">{card.blurb}</p>
+          {lastRun && (
+            <p className="text-[10px] text-slate-500 mt-1">
+              Last run: {relativeTime(lastRun.createdAt)} · {Number(lastRun.rowCount || 0).toLocaleString()} rows
+            </p>
+          )}
         </div>
       </div>
 
@@ -590,6 +616,78 @@ const CROSS_LINKS = [
   { href: '/v2/admin/system-audit',     icon: 'ph-clipboard-text',      label: 'System Audit Console',  blurb: 'Browse the full mutation trail in real time.' },
 ];
 
+// "Recently run by you" horizontal rail. Fetches the caller's 5 most
+// recent reportRuns and renders compact re-download tiles. The rail is
+// always rendered (with an empty-state) so the page doesn't reflow when
+// data arrives.
+function RecentlyRunRail({ runs, loading }) {
+  return (
+    <section className="space-y-2">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+          Recently run by you
+        </h2>
+        {/* TODO(M2 follow-up): /v2/admin/downloads?tab=history doesn't
+            exist yet — wire the full history tab in a later milestone. */}
+        <Link
+          href="/v2/admin/downloads?tab=history"
+          className="text-[11px] text-slate-500 hover:text-slate-300"
+        >
+          View all →
+        </Link>
+      </div>
+      {loading ? (
+        <div className="text-[11px] text-slate-500 italic">Loading…</div>
+      ) : runs.length === 0 ? (
+        <div className="text-[11px] text-slate-500 italic border border-dashed border-slate-700/60 rounded-lg px-3 py-3">
+          You haven&apos;t run any reports yet. Generate one below — it&apos;ll show up here for quick re-download.
+        </div>
+      ) : (
+        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+          {runs.map((r) => {
+            const card = CARD_BY_ID[r.cardId];
+            const tone = TONES[card?.tone] || TONES.teal;
+            const title = card?.title || r.cardId;
+            const range = r.from && r.to ? `${r.from} → ${r.to}` : (r.mode === 'sync' ? 'Snapshot' : '—');
+            const canRedown = r.storageAvailable && r.status === 'completed';
+            return (
+              <div
+                key={r.id}
+                className={`shrink-0 w-[220px] bg-slate-900/60 border ${tone.ring} rounded-lg p-3 flex flex-col gap-1.5`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${tone.fg} truncate`}>
+                    {title}
+                  </span>
+                  <span className="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                    {String(r.format || '').toUpperCase()}
+                  </span>
+                </div>
+                <div className="text-[10px] text-slate-400 truncate" title={range}>{range}</div>
+                <div className="text-[10px] text-slate-500">
+                  {Number(r.rowCount || 0).toLocaleString()} rows · {relativeTime(r.createdAt)}
+                </div>
+                <button
+                  type="button"
+                  disabled={!canRedown}
+                  onClick={() => {
+                    if (!canRedown) return;
+                    window.location.href = `/api/downloads/runs/${r.id}/download`;
+                  }}
+                  className={`mt-1 px-2 py-1 text-[11px] font-medium rounded text-white flex items-center justify-center gap-1.5 ${tone.btn} disabled:opacity-40 disabled:cursor-not-allowed`}
+                  title={canRedown ? 'Re-download saved artifact' : 'No artifact saved for this run'}
+                >
+                  <i className="ph ph-download-simple" /> Re-download
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // Decide if the current user can see a given card. A card may declare:
 //   permission: 'download_x'             — single key, must match
 //   anyPermission: ['download_x', ...]   — ANY of these keys grants access
@@ -618,6 +716,49 @@ export default function DownloadsPage() {
   const router = useRouter();
   const cardRefs = useRef({});
   const [highlightedId, setHighlightedId] = useState(null);
+
+  // M2: "Recently run by you" — backs both the rail and the per-card
+  // "Last run: …" caption. Single fetch, grouped client-side so we don't
+  // pay 10× Firestore reads on mount.
+  const [runs, setRuns] = useState([]);
+  const [runsLoading, setRunsLoading] = useState(true);
+  const refreshRuns = useCallback(async () => {
+    try {
+      const res = await fetch('/api/downloads/runs/list?mineOnly=true&limit=50', {
+        credentials: 'include',
+      });
+      if (!res.ok) { setRuns([]); return; }
+      const data = await res.json();
+      setRuns(Array.isArray(data.runs) ? data.runs : []);
+    } catch {
+      setRuns([]);
+    } finally {
+      setRunsLoading(false);
+    }
+  }, []);
+  useEffect(() => { refreshRuns(); }, [refreshRuns]);
+
+  // Latest run per cardId (runs already arrive in createdAt-desc order).
+  const lastRunByCard = useMemo(() => {
+    const acc = {};
+    for (const r of runs) {
+      // Only count completed sync/async runs in the "last run" caption —
+      // previews and dry-runs aren't user-facing artifacts.
+      if (r.status !== 'completed') continue;
+      if (r.mode !== 'sync' && r.mode !== 'async') continue;
+      if (!acc[r.cardId]) acc[r.cardId] = r;
+    }
+    return acc;
+  }, [runs]);
+
+  // Top-5 for the rail. Show any completed run (sync OR async); skip the
+  // preview / dry-run noise.
+  const recentRuns = useMemo(
+    () => runs
+      .filter((r) => r.status === 'completed' && (r.mode === 'sync' || r.mode === 'async'))
+      .slice(0, 5),
+    [runs],
+  );
 
   const registerCardRef = useCallback((id, el) => {
     if (el) cardRefs.current[id] = el;
@@ -671,6 +812,8 @@ export default function DownloadsPage() {
           </div>
         </div>
 
+        <RecentlyRunRail runs={recentRuns} loading={runsLoading} />
+
         {visibleSections.map((section) => (
           <section key={section.heading} className="space-y-3">
             <div>
@@ -689,6 +832,7 @@ export default function DownloadsPage() {
                     card={c}
                     highlighted={highlightedId === c.id}
                     registerRef={registerCardRef}
+                    lastRun={lastRunByCard[c.id] || null}
                   />
                 ))}
               </div>
