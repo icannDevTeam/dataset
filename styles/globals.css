@@ -423,6 +423,171 @@ html:not(.dark) .aura-theme .bg-emerald-600 { background-color: #047857 !importa
 html:not(.dark) .aura-theme .bg-red-600     { background-color: #b91c1c !important; color: #ffffff !important; }
 html:not(.dark) .aura-theme .bg-amber-600   { background-color: #b45309 !important; color: #ffffff !important; }
 
+/* ──────────────────────────────────────────────────────────────────────
+   Light-mode pass 3 (added 2026-05-27)
+   Active filter chips, "soft" action buttons (bg-{color}-500/20 etc.)
+   and the very-pale text-{color}-100/200 utilities were not covered by
+   the previous passes — they collapsed to barely-visible washed-out
+   pills (e.g. the "Whole school" scope chip + "Quick CSV" button on
+   the Reports page). Strengthen the surface, darken the foreground.
+   ────────────────────────────────────────────────────────────────────── */
+
+/* --- Eyebrow / accent text that fell back to a too-light brand swatch --- */
+html:not(.dark) .aura-theme .text-brand-500 { color: #0e7490 !important; }
+html:not(.dark) .aura-theme .text-brand-100 { color: #155e75 !important; }
+
+/* --- Pale text utilities (-100 / -200) → darker tints for AA on white --- */
+html:not(.dark) .aura-theme .text-emerald-100,
+html:not(.dark) .aura-theme .text-emerald-200 { color: #065f46 !important; }
+html:not(.dark) .aura-theme .text-teal-100,
+html:not(.dark) .aura-theme .text-teal-200    { color: #115e59 !important; }
+html:not(.dark) .aura-theme .text-cyan-100,
+html:not(.dark) .aura-theme .text-cyan-200    { color: #155e75 !important; }
+html:not(.dark) .aura-theme .text-sky-100,
+html:not(.dark) .aura-theme .text-sky-200     { color: #075985 !important; }
+html:not(.dark) .aura-theme .text-blue-100,
+html:not(.dark) .aura-theme .text-blue-200    { color: #1e3a8a !important; }
+html:not(.dark) .aura-theme .text-indigo-100,
+html:not(.dark) .aura-theme .text-indigo-200  { color: #3730a3 !important; }
+html:not(.dark) .aura-theme .text-violet-100,
+html:not(.dark) .aura-theme .text-violet-200  { color: #5b21b6 !important; }
+html:not(.dark) .aura-theme .text-purple-100,
+html:not(.dark) .aura-theme .text-purple-200  { color: #6b21a8 !important; }
+html:not(.dark) .aura-theme .text-fuchsia-100,
+html:not(.dark) .aura-theme .text-fuchsia-200 { color: #86198f !important; }
+html:not(.dark) .aura-theme .text-pink-100,
+html:not(.dark) .aura-theme .text-pink-200    { color: #9d174d !important; }
+html:not(.dark) .aura-theme .text-rose-100,
+html:not(.dark) .aura-theme .text-rose-200    { color: #9f1239 !important; }
+html:not(.dark) .aura-theme .text-orange-100,
+html:not(.dark) .aura-theme .text-orange-200  { color: #9a3412 !important; }
+html:not(.dark) .aura-theme .text-amber-100,
+html:not(.dark) .aura-theme .text-amber-200   { color: #92400e !important; }
+html:not(.dark) .aura-theme .text-red-100,
+html:not(.dark) .aura-theme .text-red-200     { color: #991b1b !important; }
+
+/* --- Translucent surfaces at /20–/30 → strengthen so chips read on white --- */
+html:not(.dark) .aura-theme .bg-emerald-500\/20 { background-color: rgba(16,185,129,0.22) !important; }
+html:not(.dark) .aura-theme .bg-emerald-500\/25 { background-color: rgba(16,185,129,0.26) !important; }
+html:not(.dark) .aura-theme .bg-emerald-500\/30 { background-color: rgba(16,185,129,0.32) !important; }
+html:not(.dark) .aura-theme .hover\:bg-emerald-500\/25:hover { background-color: rgba(16,185,129,0.28) !important; }
+html:not(.dark) .aura-theme .hover\:bg-emerald-500\/30:hover { background-color: rgba(16,185,129,0.34) !important; }
+
+html:not(.dark) .aura-theme .bg-teal-500\/15    { background-color: rgba(20,184,166,0.14) !important; }
+html:not(.dark) .aura-theme .bg-teal-500\/20    { background-color: rgba(20,184,166,0.22) !important; }
+html:not(.dark) .aura-theme .bg-teal-500\/25    { background-color: rgba(20,184,166,0.26) !important; }
+html:not(.dark) .aura-theme .bg-teal-500\/30    { background-color: rgba(20,184,166,0.32) !important; }
+html:not(.dark) .aura-theme .hover\:bg-teal-500\/25:hover { background-color: rgba(20,184,166,0.28) !important; }
+html:not(.dark) .aura-theme .hover\:bg-teal-500\/30:hover { background-color: rgba(20,184,166,0.34) !important; }
+
+html:not(.dark) .aura-theme .bg-sky-500\/20     { background-color: rgba(14,165,233,0.22) !important; }
+html:not(.dark) .aura-theme .bg-sky-500\/25     { background-color: rgba(14,165,233,0.26) !important; }
+html:not(.dark) .aura-theme .bg-sky-500\/30     { background-color: rgba(14,165,233,0.32) !important; }
+html:not(.dark) .aura-theme .hover\:bg-sky-500\/25:hover { background-color: rgba(14,165,233,0.28) !important; }
+html:not(.dark) .aura-theme .hover\:bg-sky-500\/30:hover { background-color: rgba(14,165,233,0.34) !important; }
+
+html:not(.dark) .aura-theme .bg-cyan-500\/15    { background-color: rgba(6,182,212,0.13) !important; }
+html:not(.dark) .aura-theme .bg-cyan-500\/20    { background-color: rgba(6,182,212,0.22) !important; }
+html:not(.dark) .aura-theme .bg-cyan-500\/25    { background-color: rgba(6,182,212,0.26) !important; }
+html:not(.dark) .aura-theme .bg-cyan-500\/30    { background-color: rgba(6,182,212,0.32) !important; }
+
+html:not(.dark) .aura-theme .bg-indigo-500\/15  { background-color: rgba(99,102,241,0.13) !important; }
+html:not(.dark) .aura-theme .bg-indigo-500\/20  { background-color: rgba(99,102,241,0.22) !important; }
+html:not(.dark) .aura-theme .bg-indigo-500\/25  { background-color: rgba(99,102,241,0.26) !important; }
+html:not(.dark) .aura-theme .bg-indigo-500\/30  { background-color: rgba(99,102,241,0.32) !important; }
+
+html:not(.dark) .aura-theme .bg-violet-500\/15  { background-color: rgba(139,92,246,0.13) !important; }
+html:not(.dark) .aura-theme .bg-violet-500\/20  { background-color: rgba(139,92,246,0.22) !important; }
+html:not(.dark) .aura-theme .bg-violet-500\/25  { background-color: rgba(139,92,246,0.26) !important; }
+html:not(.dark) .aura-theme .bg-violet-500\/30  { background-color: rgba(139,92,246,0.32) !important; }
+html:not(.dark) .aura-theme .hover\:bg-violet-500\/25:hover { background-color: rgba(139,92,246,0.28) !important; }
+html:not(.dark) .aura-theme .hover\:bg-violet-500\/30:hover { background-color: rgba(139,92,246,0.34) !important; }
+
+html:not(.dark) .aura-theme .bg-purple-500\/15  { background-color: rgba(168,85,247,0.13) !important; }
+html:not(.dark) .aura-theme .bg-purple-500\/20  { background-color: rgba(168,85,247,0.22) !important; }
+html:not(.dark) .aura-theme .bg-purple-500\/25  { background-color: rgba(168,85,247,0.26) !important; }
+html:not(.dark) .aura-theme .bg-purple-500\/30  { background-color: rgba(168,85,247,0.32) !important; }
+
+html:not(.dark) .aura-theme .bg-fuchsia-500\/15 { background-color: rgba(217,70,239,0.13) !important; }
+html:not(.dark) .aura-theme .bg-fuchsia-500\/20 { background-color: rgba(217,70,239,0.22) !important; }
+html:not(.dark) .aura-theme .bg-fuchsia-500\/25 { background-color: rgba(217,70,239,0.26) !important; }
+
+html:not(.dark) .aura-theme .bg-pink-500\/15    { background-color: rgba(236,72,153,0.13) !important; }
+html:not(.dark) .aura-theme .bg-pink-500\/20    { background-color: rgba(236,72,153,0.22) !important; }
+html:not(.dark) .aura-theme .bg-pink-500\/25    { background-color: rgba(236,72,153,0.26) !important; }
+
+html:not(.dark) .aura-theme .bg-rose-500\/15    { background-color: rgba(244,63,94,0.13) !important; }
+html:not(.dark) .aura-theme .bg-rose-500\/20    { background-color: rgba(244,63,94,0.22) !important; }
+html:not(.dark) .aura-theme .bg-rose-500\/25    { background-color: rgba(244,63,94,0.26) !important; }
+html:not(.dark) .aura-theme .bg-rose-500\/30    { background-color: rgba(244,63,94,0.32) !important; }
+html:not(.dark) .aura-theme .hover\:bg-rose-500\/30:hover { background-color: rgba(244,63,94,0.34) !important; }
+
+html:not(.dark) .aura-theme .bg-orange-500\/15  { background-color: rgba(249,115,22,0.14) !important; }
+html:not(.dark) .aura-theme .bg-orange-500\/20  { background-color: rgba(249,115,22,0.22) !important; }
+html:not(.dark) .aura-theme .bg-orange-500\/25  { background-color: rgba(249,115,22,0.26) !important; }
+html:not(.dark) .aura-theme .bg-orange-500\/30  { background-color: rgba(249,115,22,0.32) !important; }
+html:not(.dark) .aura-theme .hover\:bg-orange-500\/25:hover { background-color: rgba(249,115,22,0.28) !important; }
+
+html:not(.dark) .aura-theme .bg-amber-500\/20   { background-color: rgba(245,158,11,0.22) !important; }
+html:not(.dark) .aura-theme .bg-amber-500\/25   { background-color: rgba(245,158,11,0.26) !important; }
+html:not(.dark) .aura-theme .bg-amber-500\/30   { background-color: rgba(245,158,11,0.32) !important; }
+html:not(.dark) .aura-theme .hover\:bg-amber-500\/25:hover { background-color: rgba(245,158,11,0.28) !important; }
+
+html:not(.dark) .aura-theme .bg-red-500\/20     { background-color: rgba(239,68,68,0.20) !important; }
+html:not(.dark) .aura-theme .bg-red-500\/25     { background-color: rgba(239,68,68,0.24) !important; }
+html:not(.dark) .aura-theme .bg-red-500\/30     { background-color: rgba(239,68,68,0.30) !important; }
+html:not(.dark) .aura-theme .hover\:bg-red-500\/25:hover { background-color: rgba(239,68,68,0.26) !important; }
+html:not(.dark) .aura-theme .hover\:bg-red-500\/30:hover { background-color: rgba(239,68,68,0.32) !important; }
+
+html:not(.dark) .aura-theme .bg-brand-500\/20   { background-color: rgba(8,145,178,0.18) !important; }
+html:not(.dark) .aura-theme .bg-brand-500\/25   { background-color: rgba(8,145,178,0.22) !important; }
+html:not(.dark) .aura-theme .bg-brand-500\/30   { background-color: rgba(8,145,178,0.28) !important; }
+html:not(.dark) .aura-theme .hover\:bg-brand-500\/25:hover { background-color: rgba(8,145,178,0.24) !important; }
+html:not(.dark) .aura-theme .hover\:bg-brand-500\/30:hover { background-color: rgba(8,145,178,0.30) !important; }
+
+/* --- Coloured borders at /40, /50 + bare -400 borders → readable on white --- */
+html:not(.dark) .aura-theme .border-emerald-500\/40,
+html:not(.dark) .aura-theme .border-emerald-500\/50,
+html:not(.dark) .aura-theme .border-emerald-400  { border-color: rgba(16,185,129,0.55) !important; }
+html:not(.dark) .aura-theme .border-teal-500\/40,
+html:not(.dark) .aura-theme .border-teal-400     { border-color: rgba(20,184,166,0.55) !important; }
+html:not(.dark) .aura-theme .border-sky-500\/40,
+html:not(.dark) .aura-theme .border-sky-400      { border-color: rgba(14,165,233,0.55) !important; }
+html:not(.dark) .aura-theme .border-cyan-500\/40,
+html:not(.dark) .aura-theme .border-cyan-400     { border-color: rgba(6,182,212,0.55) !important; }
+html:not(.dark) .aura-theme .border-indigo-500\/50,
+html:not(.dark) .aura-theme .border-indigo-400   { border-color: rgba(99,102,241,0.55) !important; }
+html:not(.dark) .aura-theme .border-violet-500\/40,
+html:not(.dark) .aura-theme .border-violet-400   { border-color: rgba(139,92,246,0.55) !important; }
+html:not(.dark) .aura-theme .border-purple-500\/40,
+html:not(.dark) .aura-theme .border-purple-400   { border-color: rgba(168,85,247,0.55) !important; }
+html:not(.dark) .aura-theme .border-fuchsia-500\/40,
+html:not(.dark) .aura-theme .border-fuchsia-400  { border-color: rgba(217,70,239,0.55) !important; }
+html:not(.dark) .aura-theme .border-pink-500\/40,
+html:not(.dark) .aura-theme .border-pink-400     { border-color: rgba(236,72,153,0.55) !important; }
+html:not(.dark) .aura-theme .border-rose-500\/40,
+html:not(.dark) .aura-theme .border-rose-500\/50,
+html:not(.dark) .aura-theme .border-rose-400     { border-color: rgba(244,63,94,0.55) !important; }
+html:not(.dark) .aura-theme .border-orange-500\/40,
+html:not(.dark) .aura-theme .border-orange-400   { border-color: rgba(249,115,22,0.55) !important; }
+html:not(.dark) .aura-theme .border-amber-500\/40,
+html:not(.dark) .aura-theme .border-amber-400    { border-color: rgba(245,158,11,0.60) !important; }
+html:not(.dark) .aura-theme .border-red-500\/40,
+html:not(.dark) .aura-theme .border-red-500\/50,
+html:not(.dark) .aura-theme .border-red-400      { border-color: rgba(239,68,68,0.55) !important; }
+html:not(.dark) .aura-theme .border-brand-500\/30,
+html:not(.dark) .aura-theme .border-brand-500\/40,
+html:not(.dark) .aura-theme .border-brand-400    { border-color: rgba(8,145,178,0.55) !important; }
+
+/* --- Solid coloured action buttons: re-affirm dark-readable foreground ---
+   The earlier blanket `.text-white → slate-900` already broke text on
+   buttons like `bg-emerald-500 text-slate-950` (text-slate-950 is dark
+   and was being forced back to white). The Phase 2 rule for
+   bg-emerald-500 sets color:#fff !important — that is fine on the
+   solid emerald-500 background, so leave it as-is. No additional rules
+   needed here other than ensuring the soft pills (covered above) read.
+*/
+
 .aura-theme .noise-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
