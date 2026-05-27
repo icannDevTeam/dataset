@@ -369,6 +369,45 @@ const CARD_BY_ID = SECTIONS.flatMap((s) => s.cards).reduce((acc, c) => {
   acc[c.id] = c; return acc;
 }, {});
 
+// ── M7: Per-card source-data retention (in days).
+//   This is the upstream retention window of the *source* collection
+//   backing each report — independent of how far back the user is
+//   asking for. Mirrors our published privacy policy + storage policies.
+//   Conservative defaults: ops 90d, attendance/pickups 365d,
+//   compliance/audit 730d, security incidents 180d, DSAR 730d.
+const RETENTION_BY_CARD = {
+  // Operational
+  attendance: 365,
+  'chaperone-roster': 730,
+  'pickup-events': 365,
+  'onboarding-forms': 730,
+  'daily-brief': 90,
+  'late-absence-trend': 365,
+  'device-sync': 90,
+  // Directory & Devices
+  'students-roster': 730,
+  terminals: 365,
+  'system-health': 90,
+  // Security & Compliance
+  'security-incidents': 180,
+  'access-logs': 365,
+  'audit-log': 730,
+  'chaperone-audit': 730,
+  'audit-export': 730,
+  'unknown-faces': 30,
+  'chaperone-activity': 365,
+  'consent-audit': 730,
+  'runs-diff': 90,
+  'dsar-export': 730,
+};
+// Decorate cards in place so DownloadCard can read `card.retentionDays`
+// without having to look it up from a separate map.
+for (const c of Object.values(CARD_BY_ID)) {
+  if (typeof c.retentionDays !== 'number') {
+    c.retentionDays = RETENTION_BY_CARD[c.id] ?? 365;
+  }
+}
+
 function relativeTime(ms) {
   if (!ms) return '—';
   const diff = Date.now() - ms;
@@ -639,6 +678,14 @@ function DownloadCard({
   const [estimating, setEstimating] = useState(false);
   const [estimate, setEstimate] = useState(null); // { rows, at }
   const [bigConfirm, setBigConfirm] = useState(null); // { rowCount } when > BIG
+  // ── M7: PII redaction toggle. Only meaningful on cards whose columns
+  //   declare a `pii` kind server-side. We persist the choice per-card
+  //   so a "privacy by default" user doesn't have to re-tick every time.
+  const [redact, setRedactRaw] = useState(() => lsGet(`downloads.redact.${card.id}`) === '1');
+  const setRedact = useCallback((v) => {
+    setRedactRaw(!!v);
+    lsSet(`downloads.redact.${card.id}`, v ? '1' : '0');
+  }, [card.id]);
 
   // Whenever preset or TZ changes (non-custom), recompute dates.
   useEffect(() => {
@@ -650,7 +697,9 @@ function DownloadCard({
   }, [presetId, timezone]);
 
   const buildBody = (extra = {}) => (
-    card.needsRange ? { format, from, to, filters, ...extra } : { format, ...extra }
+    card.needsRange
+      ? { format, from, to, filters, redact, ...extra }
+      : { format, redact, ...extra }
   );
 
   const runGenerate = useCallback(async (reauthToken) => {
@@ -848,9 +897,22 @@ function DownloadCard({
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-semibold text-white">{card.title}</h3>
           <p className="text-xs text-slate-400 mt-0.5">{card.blurb}</p>
+          {/* M7: Retention badge — surfaces the upstream data retention
+              window so operators know what window the source actually
+              covers (independent of the export's own date range). */}
+          {typeof card.retentionDays === 'number' && (
+            <p className="text-[10px] text-slate-500 mt-1" title="Maximum age of source data backing this report">
+              <i className="ph ph-archive" /> Source data retained {card.retentionDays} days
+            </p>
+          )}
           {lastRun && (
             <p className="text-[10px] text-slate-500 mt-1">
               Last run: {relativeTime(lastRun.createdAt)} · {Number(lastRun.rowCount || 0).toLocaleString()} rows
+              {lastRun.verifyToken && (
+                <span className="ml-1 text-slate-600" title={`Verification token: ${lastRun.verifyToken}`}>
+                  · verify:{String(lastRun.verifyToken).slice(0, 8)}
+                </span>
+              )}
             </p>
           )}
         </div>
@@ -946,6 +1008,21 @@ function DownloadCard({
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-1">
           {fmtPills({ value: format, onChange: setFormat, disabled: busy || previewing, allowed: allowedFormats })}
+          {/* M7: PII redaction toggle. No-op for cards whose columns
+              don't declare a `pii` kind — backend is the source of truth. */}
+          <label
+            className={`ml-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide cursor-pointer select-none ${redact ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'}`}
+            title="Hash names → initials, mask Binus IDs / emails / phone numbers in the rendered file"
+          >
+            <input
+              type="checkbox"
+              checked={redact}
+              onChange={(e) => setRedact(e.target.checked)}
+              disabled={busy || previewing}
+              className="w-3 h-3 accent-amber-400"
+            />
+            Redact PII
+          </label>
         </div>
         <div className="flex items-center gap-1.5">
           <button
