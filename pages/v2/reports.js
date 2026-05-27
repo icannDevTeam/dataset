@@ -2,6 +2,8 @@ import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import PageGuard from '../../components/v2/PageGuard';
+import AccessDenied from '../../components/v2/AccessDenied';
+import { useAuth } from '../../lib/AuthContext';
 import PickupReportExportOverlay from '../../components/v2/reports/PickupReportExportOverlay';
 import OnboardingExportOverlay from '../../components/v2/reports/OnboardingExportOverlay';
 import { useReauthGate } from '../../components/v2/ReauthGate';
@@ -181,8 +183,33 @@ function exportPickupCSV(data, fromDate, toDate) {
 
 
 export default function ReportsPage() {
-  // Module toggle: 'attendance' | 'pickup'
-  const [module, setModule] = useState('attendance');
+  const { can } = useAuth();
+
+  // Tab-level RBAC — see lib/permissions.js (reports.view_attendance /
+  // reports.view_pickup / reports.view_forms). Admins can grant the page
+  // (`view`) while hiding any subset of these three tabs.
+  const canAttendance = can('reports', 'view_attendance');
+  const canPickup = can('reports', 'view_pickup');
+  const canForms = can('reports', 'view_forms');
+  const noTabs = !canAttendance && !canPickup && !canForms;
+
+  // Initial module = first allowed tab so the user never lands on a
+  // hidden module.
+  const initialModule = canAttendance ? 'attendance' : (canPickup ? 'pickup' : (canForms ? 'forms' : 'attendance'));
+  const [module, setModule] = useState(initialModule);
+
+  // Bounce off any tab the user has lost access to (live permission edits).
+  useEffect(() => {
+    const allowed = (
+      (module === 'attendance' && canAttendance) ||
+      (module === 'pickup' && canPickup) ||
+      (module === 'forms' && canForms)
+    );
+    if (allowed) return;
+    if (canAttendance) setModule('attendance');
+    else if (canPickup) setModule('pickup');
+    else if (canForms) setModule('forms');
+  }, [canAttendance, canPickup, canForms, module]);
 
   // Step-up password gate — every download/print/export below funnels
   // through requireReauth() so the action is password-confirmed and
@@ -413,6 +440,10 @@ export default function ReportsPage() {
       <Head><title>Reports — BINUS Attendance</title></Head>
 
       <PageGuard feature="reports" action="view" what="view reports">
+      {noTabs && (
+        <AccessDenied feature="reports" action="view" what="see any reports module" variant="panel" />
+      )}
+      {!noTabs && (
       <div ref={printRef} className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
 
         {/* Print-only header (hidden on screen via .print-show) */}
@@ -436,8 +467,12 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        {/* Module toggle */}
+        {/* Module toggle — each chip is rendered only when its
+            sub-permission is granted; the toggle bar hides entirely if
+            only one tab is visible. */}
+        {[canAttendance, canPickup, canForms].filter(Boolean).length > 1 && (
         <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900/80 border border-slate-800 w-fit no-print">
+          {canAttendance && (
           <button
             onClick={() => setModule('attendance')}
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'attendance' ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -445,6 +480,8 @@ export default function ReportsPage() {
             <i className="ph ph-fingerprint"></i>
             Facial Attendance
           </button>
+          )}
+          {canPickup && (
           <button
             onClick={() => setModule('pickup')}
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'pickup' ? 'bg-orange-500/20 text-orange-200 shadow-sm border border-orange-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -452,6 +489,8 @@ export default function ReportsPage() {
             <i className="ph ph-hand-waving"></i>
             Pickup System
           </button>
+          )}
+          {canForms && (
           <button
             onClick={() => setModule('forms')}
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'forms' ? 'bg-emerald-500/20 text-emerald-200 shadow-sm border border-emerald-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -459,7 +498,9 @@ export default function ReportsPage() {
             <i className="ph ph-clipboard-text"></i>
             Onboarding Forms
           </button>
+          )}
         </div>
+        )}
 
         {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
@@ -1273,6 +1314,7 @@ export default function ReportsPage() {
         {/* end of attendance module */}
         </>)}
       </div>
+      )}
 
       {/* ═══ TERMINAL DETAIL MODAL ═══ */}
       {module === 'attendance' && selectedTerminal && (() => {

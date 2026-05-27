@@ -2,6 +2,8 @@ import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import PageGuard from '../../components/v2/PageGuard';
+import AccessDenied from '../../components/v2/AccessDenied';
+import { useAuth } from '../../lib/AuthContext';
 import { downloadCSV } from '../../lib/download';
 import { notify } from '../../lib/notify';
 
@@ -34,8 +36,21 @@ function getDateRange(days) {
 }
 
 export default function AnalyticsPage() {
-  // Module toggle
-  const [module, setModule] = useState('attendance');
+  const { can } = useAuth();
+
+  // Tab-level RBAC — see lib/permissions.js (analytics.view_attendance /
+  // analytics.view_pickup). Both default to true for viewers/guards.
+  const canAttendance = can('analytics', 'view_attendance');
+  const canPickup = can('analytics', 'view_pickup');
+  const noTabs = !canAttendance && !canPickup;
+
+  // Module toggle. Initial value picks the first allowed tab.
+  const [module, setModule] = useState(canAttendance ? 'attendance' : (canPickup ? 'pickup' : 'attendance'));
+
+  useEffect(() => {
+    if (module === 'attendance' && !canAttendance && canPickup) setModule('pickup');
+    else if (module === 'pickup' && !canPickup && canAttendance) setModule('attendance');
+  }, [canAttendance, canPickup, module]);
 
   const [days, setDays] = useState(30);
   const [data, setData] = useState(null);
@@ -208,10 +223,18 @@ export default function AnalyticsPage() {
       <Head><title>Analytics — BINUS Attendance</title></Head>
 
       <PageGuard feature="analytics" action="view" what="view analytics">
+      {noTabs ? (
+        <AccessDenied feature="analytics" action="view" what="see any analytics module" variant="panel" />
+      ) : (
+      <>
       <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
 
-        {/* Module toggle */}
+        {/* Module toggle — only render the toggle bar when more than one
+            tab is visible; render each chip only when its sub-permission
+            is granted. */}
+        {(canAttendance && canPickup) && (
         <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900/80 border border-slate-800 w-fit">
+          {canAttendance && (
           <button
             onClick={() => setModule('attendance')}
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'attendance' ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -219,6 +242,8 @@ export default function AnalyticsPage() {
             <i className="ph ph-fingerprint"></i>
             Facial Attendance
           </button>
+          )}
+          {canPickup && (
           <button
             onClick={() => setModule('pickup')}
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'pickup' ? 'bg-orange-500/20 text-orange-200 shadow-sm border border-orange-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -226,7 +251,9 @@ export default function AnalyticsPage() {
             <i className="ph ph-hand-waving"></i>
             Pickup System
           </button>
+          )}
         </div>
+        )}
 
         {/* ══ PICKUP MODULE ══ */}
         {module === 'pickup' && (
@@ -804,6 +831,8 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </footer>
+      </>
+      )}
       </PageGuard>
     </V2Layout>
   );

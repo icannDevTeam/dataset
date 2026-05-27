@@ -9,6 +9,8 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
+import AccessDenied from '../../components/v2/AccessDenied';
+import { useAuth } from '../../lib/AuthContext';
 
 function getWIBDate() {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -31,8 +33,24 @@ function formatTime12(timestamp) {
 
 export default function DashboardV2() {
   const router = useRouter();
-  // Module toggle
-  const [module, setModule] = useState('attendance');
+  const { can } = useAuth();
+
+  // Tab-level RBAC: each tab is gated by its own sub-permission so admins
+  // can grant a user the page but hide individual modules.
+  const canAttendance = can('dashboard', 'view_attendance');
+  const canPickup = can('dashboard', 'view_pickup');
+  const noTabs = !canAttendance && !canPickup;
+
+  // Module toggle. Initial value picks the first tab the user is allowed
+  // to see so they never land on a hidden module.
+  const [module, setModule] = useState(canAttendance ? 'attendance' : (canPickup ? 'pickup' : 'attendance'));
+
+  // If the user's permissions change at runtime (rare — admin live-edit),
+  // bounce them off any tab they no longer have access to.
+  useEffect(() => {
+    if (module === 'attendance' && !canAttendance && canPickup) setModule('pickup');
+    else if (module === 'pickup' && !canPickup && canAttendance) setModule('attendance');
+  }, [canAttendance, canPickup, module]);
 
   const [date, setDate] = useState(getWIBDate());
   const [records, setRecords] = useState([]);
@@ -259,10 +277,18 @@ export default function DashboardV2() {
   return (
     <V2Layout>
       <Head><title>Dashboard — BINUS Attendance</title></Head>
+      {noTabs ? (
+        <AccessDenied feature="dashboard" action="view" what="see any dashboard module" variant="panel" />
+      ) : (
+      <>
       <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
 
-        {/* Module toggle */}
+        {/* Module toggle — each tab is rendered only when the user has the
+            matching sub-permission. If only one tab is visible we skip the
+            toggle entirely to remove redundant chrome. */}
+        {(canAttendance && canPickup) && (
         <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900/80 border border-slate-800 w-fit">
+          {canAttendance && (
           <button
             onClick={() => setModule('attendance')}
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'attendance' ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -270,6 +296,8 @@ export default function DashboardV2() {
             <i className="ph ph-fingerprint"></i>
             Facial Attendance
           </button>
+          )}
+          {canPickup && (
           <button
             onClick={() => setModule('pickup')}
             className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${module === 'pickup' ? 'bg-orange-500/20 text-orange-200 shadow-sm border border-orange-500/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/50'}`}
@@ -277,7 +305,9 @@ export default function DashboardV2() {
             <i className="ph ph-hand-waving"></i>
             Pickup System
           </button>
+          )}
         </div>
+        )}
 
         {(pickupAlerts.pending > 0 || pickupAlerts.flaggedReleases > 0) && (
           <div className="relative overflow-hidden rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 animate-pulse">
@@ -759,6 +789,8 @@ export default function DashboardV2() {
           </div>
         </div>
       </footer>
+      </>
+      )}
     </V2Layout>
   );
 }
