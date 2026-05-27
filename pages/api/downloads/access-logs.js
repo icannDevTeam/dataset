@@ -1,42 +1,30 @@
 /**
  * POST /api/downloads/access-logs
- * Dashboard sign-ins from root `access_logs` collection.
+ * Dashboard sign-ins from root `access_logs` collection. Thin wrapper
+ * over `lib/download-runner` — see that file for the shared mechanics
+ * (re-auth, preview, dry-run, audit, async dispatch).
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../lib/firebase-admin';
 import { withApi } from '../../../lib/api-auth';
-const { renderDownload, validateExportRequest, buildPreview, MAX_ROWS } = require('../../../lib/downloads-helpers');
-const tenancy = require('../../../lib/tenancy');
-const { logAudit } = require('../../../lib/audit-log');
-const { verifyReauth } = require('../../../lib/reauth');
+const { runDownload } = require('../../../lib/download-runner');
+const { MAX_ROWS } = require('../../../lib/downloads-helpers');
 
 export const config = { api: { bodyParser: { sizeLimit: '128kb' }, responseLimit: false } };
 
-async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
-  const v = validateExportRequest(req.body || {}, { maxDays: 365 });
-  if (v.error) return res.status(v.error.status).json(v.error.body);
-
+async function fetcher(ctx) {
   initializeFirebase();
   const db = admin.firestore();
-  const tid = tenancy.getTenantId();
+  const fromMs = new Date(ctx.from + 'T00:00:00+07:00').getTime();
+  const toMs   = new Date(ctx.to   + 'T23:59:59+07:00').getTime();
 
-  const fromMs = new Date(v.from + 'T00:00:00+07:00').getTime();
-  const toMs   = new Date(v.to   + 'T23:59:59+07:00').getTime();
-
-  // Pull from root access_logs (legacy); tenant copy is dual-written.
-  const snap = await db.collection('access_logs')
-    .orderBy('timestamp', 'desc')
-    .limit(MAX_ROWS + 1)
-    .get()
-    .catch(() => null);
+  // Read root `access_logs` (legacy schema). The tenant copy is
+  // dual-written, so a future migration can swap the source without
+  // changing the row shape.
+  const snap = await db.collection('access_logs').orderBy('timestamp', 'desc').limit(MAX_ROWS + 1).get().catch(() => null);
 
   const rows = [];
-  const userSet = new Set();
-  const ipSet = new Set();
   let truncated = false;
-  let offHours = 0;
-
   if (snap) {
     snap.forEach((d) => {
       if (rows.length >= MAX_ROWS) { truncated = true; return; }
@@ -46,94 +34,57 @@ async function handler(req, res) {
       if (!tsIso) return;
       const ms = Date.parse(tsIso);
       if (Number.isNaN(ms) || ms < fromMs || ms > toMs) return;
-
       const wibHour = ((ms + 7 * 3600 * 1000) / 3600000) % 24 | 0;
-      if (wibHour < 6 || wibHour >= 21) offHours++;
-
-      userSet.add(r.email || '—');
-      ipSet.add(r.ip || '—');
-
-      rows.push([
-        tsIso.slice(0, 19).replace('T', ' '),
-        r.email || '—',
-        r.name || '',
-        r.ip || '—',
-        r.device || '',
-        r.browser || '',
-        r.os || '',
-        r.action || 'login',
-      ]);
-    });
-  }
-
-  const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const payload = {
-    format: v.format,
-    kind: 'access-logs',
-    dateStamp,
-    title: 'Dashboard Access Log',
-    subtitle: 'Sign-in events across the admin console',
-    theme: 'green',
-    range: `${v.from} → ${v.to} (${v.days} days)`,
-    actor: req.user?.email || '—',
-    tenant: tid,
-    kpis: [
-      ['Total sign-ins',  rows.length.toLocaleString()],
-      ['Unique users',    userSet.size.toLocaleString()],
-      ['Unique IPs',      ipSet.size.toLocaleString()],
-      ['Off-hours (9pm–6am WIB)', offHours.toLocaleString()],
-      ['Days covered',    v.days],
-      ['Avg per day',     v.days ? Math.round(rows.length / v.days) : 0],
-    ],
-    columns: ['Timestamp', 'Email', 'Name', 'IP', 'Device', 'Browser', 'OS', 'Action'],
-    colWidths: [13, 18, 14, 11, 9, 11, 10, 8],
-    rows,
-    truncated,
-    sheetName: 'Access Logs',
-    notes: [
-      'Off-hours threshold: any sign-in between 21:00 and 06:00 WIB.',
-      'Source: root collection `access_logs` (mirrored to tenant collection).',
-    ],
-  };
-
-  if (req.body && req.body.preview === true) {
-    return res.status(200).json(buildPreview(payload));
-  }
-
-  const reauth = await verifyReauth(req, { maxAgeSec: 300 });
-  if (!reauth.ok) {
-    try {
-      await logAudit(db, {
-        tenantId: tid, actor: req.user || null,
-        kind: 'downloads.access_logs.reauth_failed',
-        target: { type: 'report', id: 'access-logs' },
-        summary: `Re-auth failed for access logs download: ${reauth.error}`,
-        metadata: { error: reauth.error, format: v.format, from: v.from, to: v.to },
-        req,
+      rows.push({
+        timestamp: tsIso.slice(0, 19).replace('T', ' '),
+        email:   r.email || '\u2014',
+        name:    r.name || '',
+        ip:      r.ip || '\u2014',
+        device:  r.device || '',
+        browser: r.browser || '',
+        os:      r.os || '',
+        action:  r.action || 'login',
+        _offHours: wibHour < 6 || wibHour >= 21,
       });
-    } catch {}
-    if (reauth.retryAfterSec) res.setHeader('Retry-After', reauth.retryAfterSec);
-    return res.status(reauth.status).json({ error: reauth.error, message: reauth.message, retryAfter: reauth.retryAfterSec });
-  }
-
-  const out = await renderDownload(payload);
-
-  try {
-    await logAudit(db, {
-      tenantId: tid,
-      actor: req.user || null,
-      kind: 'downloads.access_logs.export',
-      target: { type: 'report', id: 'access-logs', label: out.filename },
-      summary: `Downloaded access logs (${v.format.toUpperCase()})`,
-      metadata: { format: v.format, from: v.from, to: v.to, rows: rows.length, truncated, reauthAuthTime: reauth.authTime },
-      req,
     });
-  } catch {}
-
-  res.setHeader('Content-Type', out.mime);
-  res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
-  res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).send(Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf));
+  }
+  return { rows, meta: { truncated, notes: [
+    'Off-hours threshold: any sign-in between 21:00 and 06:00 WIB.',
+    'Source: root collection `access_logs` (mirrored to tenant collection).',
+  ] } };
 }
 
-export default withApi(handler, { methods: ['POST'], permission: 'downloads.download_security', rateLimit: 30 });
+function kpis(rows, ctx) {
+  const userSet = new Set(), ipSet = new Set();
+  let offHours = 0;
+  for (const r of rows) { userSet.add(r.email); ipSet.add(r.ip); if (r._offHours) offHours++; }
+  return [
+    ['Total sign-ins',          rows.length.toLocaleString()],
+    ['Unique users',            userSet.size.toLocaleString()],
+    ['Unique IPs',              ipSet.size.toLocaleString()],
+    ['Off-hours (9pm\u20136am WIB)', offHours.toLocaleString()],
+    ['Days covered',            ctx.days],
+    ['Avg per day',             ctx.days ? Math.round(rows.length / ctx.days) : 0],
+  ];
+}
+
+export default withApi(runDownload({
+  cardId: 'access-logs',
+  title: 'Dashboard Access Log',
+  subtitle: 'Sign-in events across the admin console',
+  theme: 'green',
+  sheetName: 'Access Logs',
+  maxDays: 365,
+  columns: [
+    { id: 'timestamp', label: 'Timestamp', width: 13 },
+    { id: 'email',     label: 'Email',     width: 18 },
+    { id: 'name',      label: 'Name',      width: 14 },
+    { id: 'ip',        label: 'IP',        width: 11 },
+    { id: 'device',    label: 'Device',    width: 9 },
+    { id: 'browser',   label: 'Browser',   width: 11 },
+    { id: 'os',        label: 'OS',        width: 10 },
+    { id: 'action',    label: 'Action',    width: 8 },
+  ],
+  fetcher,
+  kpis,
+}), { methods: ['POST'], permission: 'downloads.download_security', rateLimit: 30 });

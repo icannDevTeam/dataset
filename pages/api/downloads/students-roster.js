@@ -130,4 +130,11 @@ async function handler(req, res) {
   return res.status(200).send(Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf));
 }
 
-export default withApi(handler, { methods: ['POST'], permission: 'downloads.download_operational', rateLimit: 30 });
+// Accessible to either operational or directory holders \u2014 the roster
+// is needed by ops dashboards (attendance correlation) and is also the
+// canonical directory export.
+export default withApi(handler, {
+  methods: ['POST'],
+  anyPermission: ['downloads.download_operational', 'downloads.download_directory'],
+  rateLimit: 30,
+});

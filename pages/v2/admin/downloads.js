@@ -26,6 +26,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import AdminLayout from '../../../components/v2/AdminLayout';
 import ReauthModal from '../../../components/v2/ReauthModal';
+import { useAuth } from '../../../lib/AuthContext';
 
 const today = () => {
   const d = new Date(Date.now() + 7 * 3600 * 1000);
@@ -51,6 +52,7 @@ const SECTIONS = [
         tone: 'teal',
         needsRange: true,
         filters: ['class', 'status'],
+        permission: 'download_operational',
       },
       {
         id: 'chaperone-roster',
@@ -60,6 +62,7 @@ const SECTIONS = [
         blurb: 'Full directory of registered pickup chaperones / guardians.',
         tone: 'green',
         needsRange: false,
+        permission: 'download_compliance',
       },
       {
         id: 'pickup-events',
@@ -70,6 +73,7 @@ const SECTIONS = [
         tone: 'orange',
         needsRange: true,
         filters: ['class'],
+        permission: 'download_operational',
       },
       {
         id: 'onboarding-forms',
@@ -80,6 +84,7 @@ const SECTIONS = [
         tone: 'green',
         needsRange: true,
         filters: ['formStatus'],
+        permission: 'download_directory',
       },
     ],
   },
@@ -95,6 +100,7 @@ const SECTIONS = [
         blurb: 'Every registered student — Binusian ID, class, parent contacts.',
         tone: 'sky',
         needsRange: false,
+        anyPermission: ['download_operational', 'download_directory'],
       },
       {
         id: 'terminals',
@@ -104,6 +110,7 @@ const SECTIONS = [
         blurb: 'All face terminals & gate devices with online / heartbeat status.',
         tone: 'indigo',
         needsRange: false,
+        permission: 'download_operational',
       },
       {
         id: 'system-health',
@@ -113,6 +120,7 @@ const SECTIONS = [
         blurb: 'Live terminal status + today’s attendance + 24h pickup volume.',
         tone: 'red',
         needsRange: false,
+        permission: 'download_operational',
       },
     ],
   },
@@ -128,6 +136,7 @@ const SECTIONS = [
         blurb: 'Spoof attempts, liveness failures and low-confidence events.',
         tone: 'red',
         needsRange: true,
+        permission: 'download_security',
       },
       {
         id: 'access-logs',
@@ -137,6 +146,7 @@ const SECTIONS = [
         blurb: 'Every sign-in to the admin console — user, IP, device, time.',
         tone: 'sky',
         needsRange: true,
+        permission: 'download_security',
       },
       {
         id: 'audit-log',
@@ -147,6 +157,7 @@ const SECTIONS = [
         tone: 'indigo',
         needsRange: true,
         filters: ['auditKind'],
+        permission: 'download_compliance',
       },
       {
         id: 'chaperone-audit',
@@ -156,6 +167,7 @@ const SECTIONS = [
         blurb: 'Shadow-delete, restore and mutation history per chaperone.',
         tone: 'orange',
         needsRange: true,
+        permission: 'download_compliance',
       },
     ],
   },
@@ -578,8 +590,31 @@ const CROSS_LINKS = [
   { href: '/v2/admin/system-audit',     icon: 'ph-clipboard-text',      label: 'System Audit Console',  blurb: 'Browse the full mutation trail in real time.' },
 ];
 
+// Decide if the current user can see a given card. A card may declare:
+//   permission: 'download_x'             — single key, must match
+//   anyPermission: ['download_x', ...]   — ANY of these keys grants access
+//   (neither)                            — always shown (back-compat)
+function cardVisible(card, can) {
+  if (!can) return true;
+  if (Array.isArray(card.anyPermission) && card.anyPermission.length) {
+    return card.anyPermission.some((a) => can('downloads', a));
+  }
+  if (card.permission) return can('downloads', card.permission);
+  return true;
+}
+
 export default function DownloadsPage() {
-  const allCards = useMemo(() => SECTIONS.flatMap((s) => s.cards), []);
+  const { can, permissions } = useAuth();
+  // Filter SECTIONS through RBAC. Owners see everything (every action true);
+  // others see only the cards backed by a permission they hold.
+  const visibleSections = useMemo(() => {
+    return SECTIONS.map((s) => ({
+      ...s,
+      cards: s.cards.filter((c) => cardVisible(c, can)),
+    }));
+    // Re-evaluate when the resolved permissions object changes.
+  }, [can, permissions]);
+  const allCards = useMemo(() => visibleSections.flatMap((s) => s.cards), [visibleSections]);
   const router = useRouter();
   const cardRefs = useRef({});
   const [highlightedId, setHighlightedId] = useState(null);
@@ -636,22 +671,28 @@ export default function DownloadsPage() {
           </div>
         </div>
 
-        {SECTIONS.map((section) => (
+        {visibleSections.map((section) => (
           <section key={section.heading} className="space-y-3">
             <div>
               <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">{section.heading}</h2>
               <p className="text-xs text-slate-500 mt-0.5">{section.description}</p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {section.cards.map((c) => (
-                <DownloadCard
-                  key={c.id}
-                  card={c}
-                  highlighted={highlightedId === c.id}
-                  registerRef={registerCardRef}
-                />
-              ))}
-            </div>
+            {section.cards.length === 0 ? (
+              <div className="text-[11px] text-slate-500 italic border border-dashed border-slate-700/60 rounded-lg px-3 py-4">
+                You don’t have permission to export anything in this section.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {section.cards.map((c) => (
+                  <DownloadCard
+                    key={c.id}
+                    card={c}
+                    highlighted={highlightedId === c.id}
+                    registerRef={registerCardRef}
+                  />
+                ))}
+              </div>
+            )}
           </section>
         ))}
 

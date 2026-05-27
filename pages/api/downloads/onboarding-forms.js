@@ -5,14 +5,17 @@
  * Intentionally a roster — not the deep per-submission PDF rendered by
  * `/api/pickup/admin/onboarding-export`. Use that endpoint when you need
  * the full form contents; use this one for compliance / audit summaries.
+ *
+ * Permission moved from `download_operational` to `download_directory`
+ * (M1 — directory data sits in its own bucket so the pickup-admin role
+ * can have operational without also pulling parent contact info).
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../lib/firebase-admin';
 import { withApi } from '../../../lib/api-auth';
-const { renderDownload, validateExportRequest, buildPreview, MAX_ROWS } = require('../../../lib/downloads-helpers');
+const { runDownload } = require('../../../lib/download-runner');
+const { MAX_ROWS } = require('../../../lib/downloads-helpers');
 const tenancy = require('../../../lib/tenancy');
-const { logAudit } = require('../../../lib/audit-log');
-const { verifyReauth } = require('../../../lib/reauth');
 
 export const config = { api: { bodyParser: { sizeLimit: '128kb' }, responseLimit: false } };
 
@@ -24,37 +27,19 @@ function toIso(v) {
   return '';
 }
 
-async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
-
-  const v = validateExportRequest(req.body || {}, { maxDays: 365 });
-  if (v.error) return res.status(v.error.status).json(v.error.body);
-  const { from, to, format: fmt } = v;
-  const filters = req.body?.filters || {};
-  const statusFilter = filters.status ? String(filters.status).toLowerCase() : null;
-
+async function fetcher(ctx) {
   initializeFirebase();
   const db = admin.firestore();
-  const tid = tenancy.getTenantId();
-
-  // Range is inclusive of `to`; the collection stores `createdAt` as a
-  // Firestore Timestamp. We over-fetch and filter client-side because the
-  // collection is small enough (< MAX_ROWS) and avoids needing a composite
-  // index on (status, createdAt).
-  const fromMs = new Date(`${from}T00:00:00.000Z`).getTime();
-  const toMs   = new Date(`${to}T23:59:59.999Z`).getTime();
+  const tid = ctx.tenantId || tenancy.getTenantId();
+  const fromMs = new Date(`${ctx.from}T00:00:00.000Z`).getTime();
+  const toMs   = new Date(`${ctx.to}T23:59:59.999Z`).getTime();
+  const statusFilter = ctx.filters?.status ? String(ctx.filters.status).toLowerCase() : null;
 
   const snap = await db.collection(tenancy.pickupOnboardingPath(tid))
-    .orderBy('createdAt', 'desc')
-    .limit(MAX_ROWS + 1)
-    .get()
-    .catch(() => null);
+    .orderBy('createdAt', 'desc').limit(MAX_ROWS + 1).get().catch(() => null);
 
   const rows = [];
-  let approved = 0, pending = 0, rejected = 0;
-  let chaperoneTotal = 0;
   let truncated = false;
-
   if (snap) {
     snap.forEach((d) => {
       if (rows.length >= MAX_ROWS) { truncated = true; return; }
@@ -64,91 +49,63 @@ async function handler(req, res) {
       if (createdMs && (createdMs < fromMs || createdMs > toMs)) return;
       const status = String(s.status || s.state || 'pending').toLowerCase();
       if (statusFilter && status !== statusFilter) return;
-      if (status === 'approved') approved++;
-      else if (status === 'rejected' || status === 'denied') rejected++;
-      else pending++;
       const chaps = Array.isArray(s.chaperones) ? s.chaperones : [];
       const studs = Array.isArray(s.students) ? s.students : [];
-      chaperoneTotal += chaps.length;
-      rows.push([
-        d.id,
-        createdIso ? createdIso.slice(0, 10) : '—',
-        s.parentName || s.submitterName || '—',
-        s.parentEmail || s.email || '',
-        s.parentPhone || s.phone || '',
-        studs.map((x) => x.name || x.binusId || '').filter(Boolean).join(', '),
-        chaps.map((c) => c.name || '').filter(Boolean).join(', '),
+      rows.push({
+        submissionId: d.id,
+        submitted:    createdIso ? createdIso.slice(0, 10) : '\u2014',
+        parent:       s.parentName || s.submitterName || '\u2014',
+        email:        s.parentEmail || s.email || '',
+        phone:        s.parentPhone || s.phone || '',
+        students:     studs.map((x) => x.name || x.binusId || '').filter(Boolean).join(', '),
+        chaperones:   chaps.map((c) => c.name || '').filter(Boolean).join(', '),
         status,
-        s.reviewedBy || '',
-        toIso(s.reviewedAt).slice(0, 10),
-      ]);
-    });
-  }
-
-  const payload = {
-    format: fmt,
-    kind: 'onboarding-forms',
-    dateStamp: new Date().toISOString().slice(0, 10).replace(/-/g, ''),
-    title: 'Onboarding Forms',
-    subtitle: 'Parent-submitted pickup onboarding forms',
-    theme: 'green',
-    range: `${from} → ${to}`,
-    actor: req.user?.email || '—',
-    tenant: tid,
-    kpis: [
-      ['Submissions',      rows.length.toLocaleString()],
-      ['Approved',         approved.toLocaleString()],
-      ['Pending review',   pending.toLocaleString()],
-      ['Rejected',         rejected.toLocaleString()],
-      ['Chaperones total', chaperoneTotal.toLocaleString()],
-      ['Avg per form',     rows.length ? (chaperoneTotal / rows.length).toFixed(1) : '0'],
-    ],
-    columns: ['Submission ID', 'Submitted', 'Parent', 'Email', 'Phone', 'Students', 'Chaperones', 'Status', 'Reviewed By', 'Reviewed'],
-    colWidths: [12, 10, 16, 18, 13, 18, 18, 9, 14, 10],
-    rows,
-    truncated,
-    sheetName: 'Onboarding',
-    notes: statusFilter ? [`Filtered by status: ${statusFilter}`] : [],
-  };
-
-  if (req.body && req.body.preview === true) {
-    return res.status(200).json(buildPreview(payload));
-  }
-
-  const reauth = await verifyReauth(req, { maxAgeSec: 300 });
-  if (!reauth.ok) {
-    try {
-      await logAudit(db, {
-        tenantId: tid, actor: req.user || null,
-        kind: 'downloads.onboarding_forms.reauth_failed',
-        target: { type: 'report', id: 'onboarding-forms' },
-        summary: `Re-auth failed for onboarding forms download: ${reauth.error}`,
-        metadata: { error: reauth.error, format: fmt, range: `${from}..${to}` },
-        req,
+        reviewedBy:   s.reviewedBy || '',
+        reviewed:     toIso(s.reviewedAt).slice(0, 10),
+        _chapCount:   chaps.length,
       });
-    } catch {}
-    if (reauth.retryAfterSec) res.setHeader('Retry-After', reauth.retryAfterSec);
-    return res.status(reauth.status).json({ error: reauth.error, message: reauth.message, retryAfter: reauth.retryAfterSec });
-  }
-
-  const out = await renderDownload(payload);
-
-  try {
-    await logAudit(db, {
-      tenantId: tid,
-      actor: req.user || null,
-      kind: 'downloads.onboarding_forms.export',
-      target: { type: 'report', id: 'onboarding-forms', label: out.filename },
-      summary: `Downloaded onboarding forms (${fmt.toUpperCase()})`,
-      metadata: { format: fmt, rows: rows.length, range: `${from}..${to}`, statusFilter, truncated, reauthAuthTime: reauth.authTime },
-      req,
     });
-  } catch {}
-
-  res.setHeader('Content-Type', out.mime);
-  res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
-  res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).send(Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf));
+  }
+  return { rows, meta: { truncated, notes: statusFilter ? [`Filtered by status: ${statusFilter}`] : [] } };
 }
 
-export default withApi(handler, { methods: ['POST'], permission: 'downloads.download_operational', rateLimit: 30 });
+function kpis(rows) {
+  let approved = 0, pending = 0, rejected = 0, chaperoneTotal = 0;
+  for (const r of rows) {
+    if (r.status === 'approved') approved++;
+    else if (r.status === 'rejected' || r.status === 'denied') rejected++;
+    else pending++;
+    chaperoneTotal += r._chapCount || 0;
+  }
+  return [
+    ['Submissions',      rows.length.toLocaleString()],
+    ['Approved',         approved.toLocaleString()],
+    ['Pending review',   pending.toLocaleString()],
+    ['Rejected',         rejected.toLocaleString()],
+    ['Chaperones total', chaperoneTotal.toLocaleString()],
+    ['Avg per form',     rows.length ? (chaperoneTotal / rows.length).toFixed(1) : '0'],
+  ];
+}
+
+export default withApi(runDownload({
+  cardId: 'onboarding-forms',
+  title: 'Onboarding Forms',
+  subtitle: 'Parent-submitted pickup onboarding forms',
+  theme: 'green',
+  sheetName: 'Onboarding',
+  maxDays: 365,
+  columns: [
+    { id: 'submissionId', label: 'Submission ID', width: 12 },
+    { id: 'submitted',    label: 'Submitted',     width: 10 },
+    { id: 'parent',       label: 'Parent',        width: 16 },
+    { id: 'email',        label: 'Email',         width: 18 },
+    { id: 'phone',        label: 'Phone',         width: 13 },
+    { id: 'students',     label: 'Students',      width: 18 },
+    { id: 'chaperones',   label: 'Chaperones',    width: 18 },
+    { id: 'status',       label: 'Status',        width: 9 },
+    { id: 'reviewedBy',   label: 'Reviewed By',   width: 14 },
+    { id: 'reviewed',     label: 'Reviewed',      width: 10 },
+  ],
+  fetcher,
+  kpis,
+}), { methods: ['POST'], permission: 'downloads.download_directory', rateLimit: 30 });

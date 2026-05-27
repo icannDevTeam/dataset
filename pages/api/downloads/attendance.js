@@ -4,15 +4,17 @@
  * Branded export of facial-attendance scans across a date range.
  * Pulls from root `attendance/{YYYY-MM-DD}/records/*` (legacy schema).
  *
- * Body: { format, from, to, filters?: { class, status } }
+ * Body: { format, from, to, filters?: { class, status }, preview?, dryRun? }
+ *
+ * All cross-cutting concerns (re-auth, audit, preview, dry-run, async job
+ * dispatch, render + stream) live in lib/download-runner.js — this file is
+ * just the fetcher + column config for the attendance dataset.
  */
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../lib/firebase-admin';
 import { withApi } from '../../../lib/api-auth';
-const { renderDownload, validateExportRequest, buildPreview, MAX_ROWS } = require('../../../lib/downloads-helpers');
-const tenancy = require('../../../lib/tenancy');
-const { logAudit } = require('../../../lib/audit-log');
-const { verifyReauth } = require('../../../lib/reauth');
+const { runDownload } = require('../../../lib/download-runner');
+const { MAX_ROWS } = require('../../../lib/downloads-helpers');
 
 export const config = { api: { bodyParser: { sizeLimit: '128kb' }, responseLimit: false } };
 
@@ -20,27 +22,19 @@ function dateRange(from, to) {
   const out = [];
   const cur = new Date(from + 'T00:00:00Z');
   const end = new Date(to + 'T00:00:00Z');
-  while (cur <= end) {
-    out.push(cur.toISOString().slice(0, 10));
-    cur.setUTCDate(cur.getUTCDate() + 1);
-  }
+  while (cur <= end) { out.push(cur.toISOString().slice(0, 10)); cur.setUTCDate(cur.getUTCDate() + 1); }
   return out;
 }
 
-async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
-
-  const v = validateExportRequest(req.body || {}, { maxDays: 365 });
-  if (v.error) return res.status(v.error.status).json(v.error.body);
-
-  const filters = (req.body && req.body.filters) || {};
-  const filterClass = filters.class ? String(filters.class).trim() : null;
-  const filterStatus = filters.status ? String(filters.status).trim() : null;
-
+async function fetcher(ctx) {
   initializeFirebase();
   const db = admin.firestore();
+  const filterClass  = ctx.filters?.class  ? String(ctx.filters.class).trim()  : null;
+  const filterStatus = ctx.filters?.status ? String(ctx.filters.status).trim() : null;
 
-  // Build metadata lookup once
+  // Build the studentId → { homeroom, grade, name } lookup once. We merge
+  // the legacy `student_metadata` collection with the canonical `students`
+  // collection so newly enrolled students still resolve a homeroom.
   const [metaSnap, studentsSnap] = await Promise.all([
     db.collection('student_metadata').get(),
     db.collection('students').get().catch(() => ({ forEach: () => {} })),
@@ -55,13 +49,9 @@ async function handler(req, res) {
     if (!metaMap[d.id]) metaMap[d.id] = { homeroom: x.homeroom || '', grade: x.gradeCode || x.grade || '', name: x.name || '' };
   });
 
-  const days = dateRange(v.from, v.to);
   const rows = [];
-  let totalScans = 0, onTime = 0, late = 0;
-  const studentSet = new Set();
   let truncated = false;
-
-  for (const date of days) {
+  for (const date of dateRange(ctx.from, ctx.to)) {
     if (rows.length >= MAX_ROWS) { truncated = true; break; }
     const snap = await db.collection('attendance').doc(date).collection('records').get().catch(() => null);
     if (!snap) continue;
@@ -73,98 +63,66 @@ async function handler(req, res) {
       const homeroom = r.homeroom || meta.homeroom || '';
       const grade = r.grade || meta.grade || '';
       const status = r.status || (r.late ? 'Late' : 'Present');
-      if (filterClass && homeroom !== filterClass) return;
-      if (filterStatus && status !== filterStatus) return;
+      if (filterClass  && homeroom !== filterClass)  return;
+      if (filterStatus && status   !== filterStatus) return;
       const ts = (r.timestamp || '').slice(0, 19).replace('T', ' ');
-      rows.push([
+      rows.push({
         date,
-        ts || '—',
-        r.name || meta.name || '—',
-        empNo || '—',
-        homeroom || '—',
-        grade || '—',
+        time:       ts || '\u2014',
+        student:    r.name || meta.name || '\u2014',
+        empNo:      empNo || '\u2014',
+        homeroom:   homeroom || '\u2014',
+        grade:      grade || '\u2014',
         status,
-        r.source || r.terminal || '—',
-        r.confidence != null ? Number(r.confidence).toFixed(2) : '',
-      ]);
-      totalScans++;
-      if (status === 'Late') late++; else onTime++;
-      studentSet.add(empNo || r.name || Math.random());
-    });
-  }
-
-  const pct = (n, d) => d ? `${((n / d) * 100).toFixed(1)}%` : '—';
-  const dateStamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-
-  const payload = {
-    format: v.format,
-    kind: 'attendance',
-    dateStamp,
-    title: 'Attendance Report',
-    subtitle: 'Facial recognition attendance scans',
-    theme: 'teal',
-    range: `${v.from} → ${v.to} (${v.days} days)`,
-    actor: req.user?.email || '—',
-    tenant: tenancy.getTenantId(),
-    kpis: [
-      ['Total scans',         totalScans.toLocaleString()],
-      ['Unique students',     studentSet.size.toLocaleString()],
-      ['On-time',             `${onTime.toLocaleString()} (${pct(onTime, totalScans)})`],
-      ['Late',                `${late.toLocaleString()} (${pct(late, totalScans)})`],
-      ['Days covered',        v.days],
-      ['Avg scans / day',     v.days ? Math.round(totalScans / v.days) : 0],
-    ],
-    columns: ['Date', 'Time', 'Student', 'Employee No', 'Homeroom', 'Grade', 'Status', 'Source', 'Confidence'],
-    colWidths: [9, 11, 22, 10, 10, 8, 9, 12, 9],
-    rows,
-    truncated,
-    sheetName: 'Attendance',
-    notes: [
-      filterClass ? `Filtered by homeroom: ${filterClass}` : null,
-      filterStatus ? `Filtered by status: ${filterStatus}` : null,
-    ].filter(Boolean),
-  };
-
-  if (req.body && req.body.preview === true) {
-    return res.status(200).json(buildPreview(payload));
-  }
-
-  // Step-up auth: actual downloads require a fresh password proof (sudo mode).
-  const reauth = await verifyReauth(req, { maxAgeSec: 300 });
-  if (!reauth.ok) {
-    try {
-      await logAudit(db, {
-        tenantId: tenancy.getTenantId(),
-        actor: req.user || null,
-        kind: 'downloads.attendance.reauth_failed',
-        target: { type: 'report', id: 'attendance' },
-        summary: `Re-auth failed for attendance download: ${reauth.error}`,
-        metadata: { error: reauth.error, format: v.format, from: v.from, to: v.to },
-        req,
+        source:     r.source || r.terminal || '\u2014',
+        confidence: r.confidence != null ? Number(r.confidence).toFixed(2) : '',
       });
-    } catch {}
-    if (reauth.retryAfterSec) res.setHeader('Retry-After', reauth.retryAfterSec);
-    return res.status(reauth.status).json({ error: reauth.error, message: reauth.message, retryAfter: reauth.retryAfterSec });
-  }
-
-  const out = await renderDownload(payload);
-
-  try {
-    await logAudit(db, {
-      tenantId: tenancy.getTenantId(),
-      actor: req.user || null,
-      kind: 'downloads.attendance.export',
-      target: { type: 'report', id: 'attendance', label: out.filename },
-      summary: `Downloaded attendance report (${v.format.toUpperCase()})`,
-      metadata: { format: v.format, from: v.from, to: v.to, filters, rows: rows.length, truncated, reauthAuthTime: reauth.authTime },
-      req,
     });
-  } catch {}
-
-  res.setHeader('Content-Type', out.mime);
-  res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
-  res.setHeader('Cache-Control', 'no-store');
-  return res.status(200).send(Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf));
+  }
+  const notes = [
+    filterClass  ? `Filtered by homeroom: ${filterClass}`  : null,
+    filterStatus ? `Filtered by status: ${filterStatus}`   : null,
+  ].filter(Boolean);
+  return { rows, meta: { truncated, notes } };
 }
 
-export default withApi(handler, { methods: ['POST'], permission: 'downloads.download_operational', rateLimit: 30 });
+function kpis(rows, ctx) {
+  const total = rows.length;
+  let late = 0; const studentSet = new Set();
+  for (const r of rows) {
+    if (r.status === 'Late') late++;
+    studentSet.add(r.empNo || r.student);
+  }
+  const onTime = total - late;
+  const pct = (n, d) => d ? `${((n / d) * 100).toFixed(1)}%` : '\u2014';
+  return [
+    ['Total scans',     total.toLocaleString()],
+    ['Unique students', studentSet.size.toLocaleString()],
+    ['On-time',         `${onTime.toLocaleString()} (${pct(onTime, total)})`],
+    ['Late',            `${late.toLocaleString()} (${pct(late, total)})`],
+    ['Days covered',    ctx.days],
+    ['Avg scans / day', ctx.days ? Math.round(total / ctx.days) : 0],
+  ];
+}
+
+export default withApi(runDownload({
+  cardId: 'attendance',
+  title: 'Attendance Report',
+  subtitle: 'Facial recognition attendance scans',
+  theme: 'teal',
+  sheetName: 'Attendance',
+  maxDays: 365,
+  columns: [
+    { id: 'date',       label: 'Date',        width: 9 },
+    { id: 'time',       label: 'Time',        width: 11 },
+    { id: 'student',    label: 'Student',     width: 22 },
+    { id: 'empNo',      label: 'Employee No', width: 10 },
+    { id: 'homeroom',   label: 'Homeroom',    width: 10 },
+    { id: 'grade',      label: 'Grade',       width: 8 },
+    { id: 'status',     label: 'Status',      width: 9 },
+    { id: 'source',     label: 'Source',      width: 12 },
+    { id: 'confidence', label: 'Confidence',  width: 9 },
+  ],
+  fetcher,
+  kpis,
+}), { methods: ['POST'], permission: 'downloads.download_operational', rateLimit: 30 });
