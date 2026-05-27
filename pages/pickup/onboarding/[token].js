@@ -901,10 +901,12 @@ export default function PickupOnboardingPage() {
       }
 
       if (!student) {
-        // Both lookups failed → offer manual fallback.
+        // Both lookups failed → offer manual fallback. Be specific so the
+        // parent knows their typo is the most likely cause and can fix it
+        // before falling back to manual entry.
         if (!silent) {
           setManualMode(true);
-          setError('We could not auto-fill this Binusian ID. Please enter the student’s name and class manually below.');
+          setError(`We couldn’t find Binusian ID “${sid}” in the school records. Please double-check the ID printed on your child’s student card and try again. If the ID is correct, you can enter the student’s name and class manually below.`);
         } else {
           // Silent auto-add (token-bound primary student) failed.
           // Inject a stub so the token's required student is in the list,
@@ -996,12 +998,28 @@ export default function PickupOnboardingPage() {
     setError(null);
     const c = chaperones[idx];
     if (!c) return;
-    if (!c.name.trim()) {
+    // Mirror the server-side rules (submit.js sanitizeChaperone) so the
+    // parent gets an immediate, specific error per field instead of being
+    // told only at final submit. Name & phone min lengths match the API.
+    const name = (c.name || '').trim();
+    const phone = (c.phone || '').trim();
+    if (!name) {
       setError(`Person #${idx + 1}: name is required.`);
       return;
     }
-    if (!c.phone.trim()) {
+    if (name.length < 2) {
+      setError(`Person #${idx + 1}: name must be at least 2 letters — please type the chaperone’s full name.`);
+      return;
+    }
+    if (!phone) {
       setError(`Person #${idx + 1}: phone number is required.`);
+      return;
+    }
+    // Strip spaces, dashes and parentheses for the digit count check so
+    // a typical "+62 812-3456-7890" still passes.
+    const phoneDigits = phone.replace(/[^0-9]/g, '');
+    if (phoneDigits.length < 8) {
+      setError(`Person #${idx + 1}: phone number looks too short (need at least 8 digits).`);
       return;
     }
     if (!c.relation || !String(c.relation).trim()) {
@@ -1010,6 +1028,15 @@ export default function PickupOnboardingPage() {
     }
     if (c.authorizedStudentIds.length === 0) {
       setError(`Person #${idx + 1}: select at least one student they may pick up.`);
+      return;
+    }
+    // Require at least one face photo up-front so the parent can't reach
+    // the consent step only to be bounced back here. The server-side
+    // sanitizer accepts 0 photos (admin can add later) but for the parent
+    // self-service flow we make the photo mandatory.
+    const faceCount = Array.isArray(c.facePaths) ? c.facePaths.length : 0;
+    if (faceCount === 0) {
+      setError(`Person #${idx + 1}: please capture at least one clear face photo before saving this person.`);
       return;
     }
     setChaperones((prev) => prev.map((x, i) =>
@@ -1087,9 +1114,15 @@ export default function PickupOnboardingPage() {
       return `Please tap "Save this person" on Person #${unsaved + 1} before submitting.`;
     }
     for (const c of chaperones) {
-      if (!c.name.trim()) return 'Every chaperone needs a name.';
+      if (!c.name.trim() || c.name.trim().length < 2) return 'Every chaperone needs a full name (at least 2 letters).';
       if (!c.phone.trim()) return `Phone number missing for ${c.name || 'a chaperone'}.`;
       if (c.authorizedStudentIds.length === 0) return `${c.name} must be authorized for at least one student.`;
+      // Mandatory at the parent-form layer — see confirmChaperone() for the
+      // same gate. Even though the API tolerates zero photos, we never
+      // want a parent-submitted form without one because the office would
+      // have to chase them again.
+      const faceCount = Array.isArray(c.facePaths) ? c.facePaths.length : 0;
+      if (faceCount === 0) return `${c.name || 'A chaperone'} needs at least one face photo before submitting.`;
     }
     return null;
   }
@@ -1905,8 +1938,9 @@ export default function PickupOnboardingPage() {
 
                       <div style={{ marginTop: 18 }}>
                         <label style={label()}>
-                          Face photos <span style={{ fontWeight: 400, color: BRAND.textSubtle }}>
-                            (optional now — ACOP can capture them at the office)
+                          Face photos <span style={{ color: BRAND.danger, fontWeight: 600 }}>*</span>{' '}
+                          <span style={{ fontWeight: 400, color: BRAND.textSubtle }}>
+                            (at least 1 clear photo — used by the gate camera to recognise this person)
                           </span>
                         </label>
                         <ChaperoneFaceCapture

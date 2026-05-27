@@ -46,6 +46,59 @@ const SECTIONS = [
         tone: 'green',
         needsRange: false,
       },
+      {
+        id: 'pickup-events',
+        endpoint: '/api/downloads/pickup-events',
+        icon: 'ph-hand-waving',
+        title: 'Pickup Events Report',
+        blurb: 'Every student release at the gate — chaperone, method, officer.',
+        tone: 'orange',
+        needsRange: true,
+        filters: ['class'],
+      },
+      {
+        id: 'onboarding-forms',
+        endpoint: '/api/downloads/onboarding-forms',
+        icon: 'ph-clipboard-text',
+        title: 'Onboarding Forms',
+        blurb: 'Parent-submitted onboarding forms — status, chaperones, students.',
+        tone: 'green',
+        needsRange: true,
+        filters: ['formStatus'],
+      },
+    ],
+  },
+  {
+    heading: 'Directory & Devices',
+    description: 'Master rosters of students and terminal hardware.',
+    cards: [
+      {
+        id: 'students-roster',
+        endpoint: '/api/downloads/students-roster',
+        icon: 'ph-graduation-cap',
+        title: 'Student Body Roster',
+        blurb: 'Every registered student — Binusian ID, class, parent contacts.',
+        tone: 'sky',
+        needsRange: false,
+      },
+      {
+        id: 'terminals',
+        endpoint: '/api/downloads/terminals',
+        icon: 'ph-device-tablet',
+        title: 'Terminals & Devices',
+        blurb: 'All face terminals & gate devices with online / heartbeat status.',
+        tone: 'indigo',
+        needsRange: false,
+      },
+      {
+        id: 'system-health',
+        endpoint: '/api/downloads/system-health',
+        icon: 'ph-heartbeat',
+        title: 'System Health Snapshot',
+        blurb: 'Live terminal status + today’s attendance + 24h pickup volume.',
+        tone: 'red',
+        needsRange: false,
+      },
     ],
   },
   {
@@ -90,6 +143,7 @@ const TONES = {
   red:     { ring: 'border-rose-500/30',    bg: 'bg-rose-500/10',    fg: 'text-rose-300',    btn: 'bg-rose-600 hover:bg-rose-500' },
   sky:     { ring: 'border-sky-500/30',     bg: 'bg-sky-500/10',     fg: 'text-sky-300',     btn: 'bg-sky-600 hover:bg-sky-500' },
   indigo:  { ring: 'border-indigo-500/30',  bg: 'bg-indigo-500/10',  fg: 'text-indigo-300',  btn: 'bg-indigo-600 hover:bg-indigo-500' },
+  orange:  { ring: 'border-orange-500/30',  bg: 'bg-orange-500/10',  fg: 'text-orange-300',  btn: 'bg-orange-600 hover:bg-orange-500' },
 };
 
 function fmtPills({ value, onChange, disabled }) {
@@ -402,6 +456,18 @@ function DownloadCard({ card }) {
           <option value="">All statuses</option>
           <option value="Present">Present</option>
           <option value="Late">Late</option>
+        </select>
+      )}
+      {card.filters?.includes('formStatus') && (
+        <select
+          value={filters.status || ''}
+          onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+          className="w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
+        >
+          <option value="">All form statuses</option>
+          <option value="pending">Pending review</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
         </select>
       )}
       {card.filters?.includes('auditKind') && (
