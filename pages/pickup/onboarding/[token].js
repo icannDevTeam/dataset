@@ -763,6 +763,11 @@ export default function PickupOnboardingPage() {
   const [studentInputId, setStudentInputId] = useState('');
   const [studentLookupBusy, setStudentLookupBusy] = useState(false);
   const [students, setStudents] = useState([]);
+  // Inline error for the Student section only — keeps lookup failures
+  // (typo'd Binusian ID, already-registered, etc.) next to the input so
+  // the parent doesn't have to scroll to the bottom of the form to see
+  // what went wrong.
+  const [studentError, setStudentError] = useState(null);
   // Phase 3: manual fallback when BINUS API is down or returns nothing.
   const [manualMode, setManualMode] = useState(false);
   const [manualName, setManualName] = useState('');
@@ -854,14 +859,14 @@ export default function PickupOnboardingPage() {
     const sid = (sidOverride || studentInputId || '').trim();
     if (!sid) return;
     if (!/^[A-Za-z0-9_-]{4,32}$/.test(sid)) {
-      if (!silent) setError('Binusian ID looks invalid (4–32 letters, digits, dash or underscore).');
+      if (!silent) setStudentError('ID looks invalid (4–32 letters or digits).');
       return;
     }
     if (students.find((s) => s.id === sid)) {
-      if (!silent) setError('That student is already added.');
+      if (!silent) setStudentError('That student is already added.');
       return;
     }
-    setStudentLookupBusy(true); setError(null);
+    setStudentLookupBusy(true); setStudentError(null); setError(null);
     try {
       // Phase 3: query BINUS API and tenant Firestore in parallel.
       // Tenant Firestore is authoritative for token scope; BINUS API enriches
@@ -895,18 +900,17 @@ export default function PickupOnboardingPage() {
       // gives the parent a friendlier message.
       if (alreadyRegistered) {
         const fn = alreadyRegistered.formNumber ? ` (form #${alreadyRegistered.formNumber})` : '';
-        const who = student?.name ? `${student.name}` : `Student ${sid}`;
-        setError(`${who} already has a pickup form on file${fn}. Status: ${alreadyRegistered.status}. Please contact the school office if you need to change anything.`);
+        const who = student?.name ? student.name : `Student ${sid}`;
+        setStudentError(`${who} already has a pickup form${fn} — status: ${alreadyRegistered.status}. Contact the school office to change it.`);
         return;
       }
 
       if (!student) {
-        // Both lookups failed → offer manual fallback. Be specific so the
-        // parent knows their typo is the most likely cause and can fix it
-        // before falling back to manual entry.
+        // Both lookups failed → offer manual fallback. Keep the message
+        // tight and inline so the parent sees it without scrolling.
         if (!silent) {
           setManualMode(true);
-          setError(`We couldn’t find Binusian ID “${sid}” in the school records. Please double-check the ID printed on your child’s student card and try again. If the ID is correct, you can enter the student’s name and class manually below.`);
+          setStudentError(`ID “${sid}” not found. Re-check the student card, or enter details manually below.`);
         } else {
           // Silent auto-add (token-bound primary student) failed.
           // Inject a stub so the token's required student is in the list,
@@ -919,7 +923,7 @@ export default function PickupOnboardingPage() {
           })));
           setStudentInputId(sid);
           setManualMode(true);
-          setError(`This invite link is for student ${sid}, but we could not auto-fill their details. Please enter the name and class below to continue.`);
+          setStudentError(`Couldn’t auto-fill student ${sid}. Please enter name and class below.`);
         }
         return;
       }
@@ -931,24 +935,25 @@ export default function PickupOnboardingPage() {
         authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), student.id])),
       })));
       setStudentInputId('');
+      setStudentError(null);
       setManualMode(false);
       setManualName(''); setManualHomeroom('');
     } catch (e) {
-      if (!silent) setError(e.message || 'Lookup failed. You can switch to manual entry below.');
+      if (!silent) setStudentError(e.message || 'Lookup failed — try manual entry below.');
       setManualMode(true);
     } finally { setStudentLookupBusy(false); }
   }
 
   function addStudentManual() {
-    setError(null);
+    setError(null); setStudentError(null);
     const sid = studentInputId.trim();
     const nm = manualName.trim();
     const hr = manualHomeroom.trim();
-    if (!sid) return setError('Binusian ID is required.');
-    if (!/^[A-Za-z0-9_-]{4,32}$/.test(sid)) return setError('Binusian ID looks invalid.');
-    if (!nm) return setError('Please type the student’s full name.');
+    if (!sid) return setStudentError('Binusian ID is required.');
+    if (!/^[A-Za-z0-9_-]{4,32}$/.test(sid)) return setStudentError('ID looks invalid.');
+    if (!nm) return setStudentError('Student’s full name is required.');
     const existing = students.find((s) => s.id === sid);
-    if (existing && !existing._needsManual) return setError('That student is already added.');
+    if (existing && !existing._needsManual) return setStudentError('That student is already added.');
     const student = { id: sid, name: nm, homeroom: hr || null, photoUrl: null };
     if (existing && existing._needsManual) {
       // Replace the stub (token-bound primary student that lookup couldn't fill).
@@ -1734,10 +1739,14 @@ export default function PickupOnboardingPage() {
                   }}>
                     <label style={label()}>Binusian ID *</label>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <input style={{ ...input(), flex: 1 }}
+                      <input style={{
+                          ...input(),
+                          flex: 1,
+                          ...(studentError ? { borderColor: BRAND.danger } : {}),
+                        }}
                         placeholder="e.g. 2270005673"
                         value={studentInputId}
-                        onChange={(e) => setStudentInputId(e.target.value)}
+                        onChange={(e) => { setStudentInputId(e.target.value); if (studentError) setStudentError(null); }}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }} />
                       <button type="button" style={btn()}
                         onClick={() => addStudent()} disabled={studentLookupBusy || !studentInputId.trim()}>
@@ -1745,11 +1754,22 @@ export default function PickupOnboardingPage() {
                       </button>
                     </div>
 
+                    {/* Inline lookup error — sits right under the input
+                        so the parent doesn't have to scroll. */}
+                    {studentError && (
+                      <div role="alert" style={{
+                        marginTop: 8, padding: '8px 12px',
+                        background: BRAND.dangerBg, color: BRAND.danger,
+                        fontSize: 13, lineHeight: 1.45, borderRadius: 6,
+                        border: `1px solid ${BRAND.danger}33`,
+                      }}>{studentError}</div>
+                    )}
+
                     {!manualMode && (
                       <div style={{ marginTop: 8, fontSize: 12, color: BRAND.textSubtle }}>
                         Can’t find your child?{' '}
                         <button type="button"
-                          onClick={() => { setManualMode(true); setError(null); }}
+                          onClick={() => { setManualMode(true); setError(null); setStudentError(null); }}
                           style={{
                             background: 'none', border: 'none', padding: 0,
                             color: BRAND.navy, fontWeight: 600, cursor: 'pointer',
@@ -1786,7 +1806,7 @@ export default function PickupOnboardingPage() {
                             Add manually
                           </button>
                           <button type="button" style={btnGhost()}
-                            onClick={() => { setManualMode(false); setManualName(''); setManualHomeroom(''); setError(null); }}>
+                            onClick={() => { setManualMode(false); setManualName(''); setManualHomeroom(''); setError(null); setStudentError(null); }}>
                             Cancel
                           </button>
                         </div>
