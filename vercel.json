@@ -12,6 +12,16 @@
     "pages/api/face/upload.js": {
       "maxDuration": 30,
       "memory": 1024
+    },
+    "pages/api/cron/**/*.js": {
+      "maxDuration": 300,
+      "memory": 1024
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/run-scheduled-reports",
+      "schedule": "*/15 * * * *"
+    }
+  ]
 }

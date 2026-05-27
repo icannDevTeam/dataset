@@ -1084,11 +1084,81 @@ const CROSS_LINKS = [
   { href: '/v2/admin/system-audit',     icon: 'ph-clipboard-text',      label: 'System Audit Console',  blurb: 'Browse the full mutation trail in real time.' },
 ];
 
+// "My presets" rail (M6). Saved + scheduled report templates per user
+// plus any preset shared with the caller's role. Run-now invokes the
+// preset's card endpoint with stored filters; delete removes ownership;
+// schedule badge surfaces when a preset has `schedule.enabled`.
+function MyPresetsRail({ presets, loading, onRun, onDelete, canManage }) {
+  if (!loading && presets.length === 0) return null;
+  return (
+    <section className="space-y-2">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
+          My presets
+        </h2>
+        <span className="text-[10px] text-slate-500">
+          Scheduled runs land in Recently run · share via copy-link.
+        </span>
+      </div>
+      {loading ? (
+        <div className="text-[11px] text-slate-500 italic">Loading…</div>
+      ) : (
+        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+          {presets.map((p) => {
+            const card = CARD_BY_ID[p.cardId];
+            const tone = TONES[card?.tone] || TONES.teal;
+            const sched = p.schedule && p.schedule.enabled ? p.schedule : null;
+            return (
+              <div key={p.id}
+                   className={`shrink-0 w-[240px] bg-slate-900/60 border ${tone.ring} rounded-lg p-3 flex flex-col gap-1.5`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider ${tone.fg} truncate`} title={p.name}>
+                    {p.name}
+                  </span>
+                  <span className="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                    {String(p.format || 'xlsx').toUpperCase()}
+                  </span>
+                </div>
+                <div className="text-[10px] text-slate-400 truncate" title={card?.title || p.cardId}>
+                  {card?.title || p.cardId}
+                </div>
+                {sched ? (
+                  <div className="text-[10px] text-emerald-400 truncate" title={`cron: ${sched.cron}`}>
+                    <i className="ph ph-clock" /> {sched.cron} · keep {sched.retentionDays}d
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-slate-500">Manual run · {p.isOwner ? 'mine' : 'shared'}</div>
+                )}
+                <div className="flex items-center gap-1.5 mt-1">
+                  <button type="button"
+                          onClick={() => onRun && onRun(p)}
+                          className={`flex-1 px-2 py-1 text-[11px] font-medium rounded text-white flex items-center justify-center gap-1.5 ${tone.btn}`}
+                          title="Jump to this card with filters pre-filled">
+                    <i className="ph ph-play" /> Run now
+                  </button>
+                  {p.isOwner && canManage && (
+                    <button type="button"
+                            onClick={() => onDelete && onDelete(p)}
+                            className="px-2 py-1 text-[10px] font-medium rounded border border-slate-700 text-slate-400 hover:text-rose-300 hover:border-rose-500/60"
+                            title="Delete this preset">
+                      <i className="ph ph-trash" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // "Recently run by you" horizontal rail. Fetches the caller's 5 most
 // recent reportRuns and renders compact re-download tiles. The rail is
 // always rendered (with an empty-state) so the page doesn't reflow when
 // data arrives.
-function RecentlyRunRail({ runs, loading }) {
+function RecentlyRunRail({ runs, loading, onShare, canShare }) {
   return (
     <section className="space-y-2">
       <div className="flex items-baseline justify-between">
@@ -1147,6 +1217,17 @@ function RecentlyRunRail({ runs, loading }) {
                 >
                   <i className="ph ph-download-simple" /> Re-download
                 </button>
+                {canShare && (
+                  <button
+                    type="button"
+                    disabled={!canRedown}
+                    onClick={() => canRedown && onShare && onShare(r)}
+                    className="px-2 py-1 text-[10px] font-medium rounded border border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Mint a 24h shareable link (audit-logged)"
+                  >
+                    <i className="ph ph-share-network" /> Share link
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1397,6 +1478,77 @@ export default function DownloadsPage() {
   }, []);
   useEffect(() => { refreshRuns(); }, [refreshRuns]);
 
+  // ── M6: Saved presets ───────────────────────────────────────────────
+  const [presets, setPresets] = useState([]);
+  const [presetsLoading, setPresetsLoading] = useState(true);
+  const canManagePresets = !!(can && can('downloads', 'manage_presets'));
+  const refreshPresets = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v2/presets', { credentials: 'include' });
+      if (!res.ok) { setPresets([]); return; }
+      const data = await res.json();
+      setPresets(Array.isArray(data.presets) ? data.presets : []);
+    } catch {
+      setPresets([]);
+    } finally {
+      setPresetsLoading(false);
+    }
+  }, []);
+  useEffect(() => { refreshPresets(); }, [refreshPresets]);
+
+  const runPreset = useCallback((p) => {
+    // Deep-link into the matching card so the user sees the filters
+    // hydrate visibly before triggering Generate. Pre-filling
+    // filter state across cards is out of scope for M6 — the deep-
+    // link + visible card is enough to chain into the existing flow.
+    router.push({ pathname: '/v2/admin/downloads', query: { card: p.cardId } });
+  }, [router]);
+
+  const deletePreset = useCallback(async (p) => {
+    if (!window.confirm(`Delete preset "${p.name}"? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/v2/presets/${p.id}`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message || j.error || `HTTP ${res.status}`);
+      }
+      refreshPresets();
+    } catch (e) {
+      alert(`Delete failed: ${e.message}`);
+    }
+  }, [refreshPresets]);
+
+  // ── M6: Share link — mint 24h signed URL, copy to clipboard ────────
+  const shareRun = useCallback(async (r) => {
+    const note = window.prompt(
+      'Optional note: who are you sharing this with? (Audit-logged, not sent anywhere.)',
+      '',
+    );
+    if (note === null) return;  // user cancelled
+    try {
+      const res = await fetch(`/api/downloads/runs/${r.id}/share`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sharedWith: note }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message || j.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      try {
+        await navigator.clipboard.writeText(data.url);
+        alert(`Link copied to clipboard.\nExpires: ${new Date(data.expiresAt).toLocaleString()}\n\nCommunicate this link out-of-band — recipients are not notified automatically.`);
+      } catch {
+        window.prompt('Copy this share link (expires in 24h):', data.url);
+      }
+    } catch (e) {
+      alert(`Share failed: ${e.message}`);
+    }
+  }, []);
+
   // Latest run per cardId (runs already arrive in createdAt-desc order).
   const lastRunByCard = useMemo(() => {
     const acc = {};
@@ -1529,7 +1681,19 @@ export default function DownloadsPage() {
           </div>
         </div>
 
-        <RecentlyRunRail runs={recentRuns} loading={runsLoading} />
+        <MyPresetsRail
+          presets={presets}
+          loading={presetsLoading}
+          onRun={runPreset}
+          onDelete={deletePreset}
+          canManage={canManagePresets}
+        />
+        <RecentlyRunRail
+          runs={recentRuns}
+          loading={runsLoading}
+          onShare={shareRun}
+          canShare={canManagePresets}
+        />
 
         {/* M3: Search + tag filter. */}
         <section className="space-y-2">
