@@ -28,15 +28,65 @@ import AdminLayout from '../../../components/v2/AdminLayout';
 import ReauthModal from '../../../components/v2/ReauthModal';
 import { useAuth } from '../../../lib/AuthContext';
 
-const today = () => {
-  const d = new Date(Date.now() + 7 * 3600 * 1000);
-  return d.toISOString().slice(0, 10);
-};
-const daysAgo = (n) => {
-  const d = new Date(Date.now() + 7 * 3600 * 1000);
-  d.setUTCDate(d.getUTCDate() - n);
-  return d.toISOString().slice(0, 10);
-};
+// ── Timezone-aware date helpers ──────────────────────────────────────
+// All M3 date computations (presets, default range, default `from`/`to`)
+// route through `dateInTz` so changing the hub timezone re-anchors the
+// whole UI. The backend itself still operates in WIB — TZ is purely a
+// presentation concern: "today in Tokyo" just picks a different YYYY-MM-DD.
+const TIMEZONES = [
+  { id: 'Asia/Jakarta',         label: 'Asia/Jakarta (WIB · default)' },
+  { id: 'UTC',                  label: 'UTC' },
+  { id: 'Asia/Singapore',       label: 'Asia/Singapore' },
+  { id: 'Asia/Tokyo',           label: 'Asia/Tokyo' },
+  { id: 'Europe/London',        label: 'Europe/London' },
+  { id: 'America/Los_Angeles',  label: 'America/Los_Angeles' },
+  { id: 'America/New_York',     label: 'America/New_York' },
+];
+const ALLOWED_TZ = new Set(TIMEZONES.map((t) => t.id));
+
+function dateInTz(tz, offsetDays = 0) {
+  try {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + offsetDays);
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(d);
+    const y = parts.find((p) => p.type === 'year')?.value || '1970';
+    const m = parts.find((p) => p.type === 'month')?.value || '01';
+    const da = parts.find((p) => p.type === 'day')?.value || '01';
+    return `${y}-${m}-${da}`;
+  } catch {
+    // Fallback to WIB if Intl rejects the zone.
+    const d = new Date(Date.now() + 7 * 3600 * 1000);
+    d.setUTCDate(d.getUTCDate() + offsetDays);
+    return d.toISOString().slice(0, 10);
+  }
+}
+const today  = (tz = 'Asia/Jakarta') => dateInTz(tz, 0);
+const daysAgo = (n, tz = 'Asia/Jakarta') => dateInTz(tz, -n);
+
+// Built-in date-range presets. Each returns {from, to} in the user's TZ.
+// `Custom` is rendered as a sentinel — selecting it just reveals the
+// existing date pickers without overwriting their current values.
+const RANGE_PRESETS = [
+  { id: 'today',     label: 'Today',         range: (tz) => ({ from: today(tz), to: today(tz) }) },
+  { id: 'yesterday', label: 'Yesterday',     range: (tz) => ({ from: daysAgo(1, tz), to: daysAgo(1, tz) }) },
+  { id: 'week',      label: 'This week',     range: (tz) => {
+      // ISO week: Monday → today. Compute via JS Date in TZ-day terms.
+      const todayStr = today(tz);
+      const d = new Date(todayStr + 'T00:00:00Z');
+      const dow = d.getUTCDay();          // 0 Sun … 6 Sat
+      const back = dow === 0 ? 6 : dow - 1; // back to Monday
+      return { from: daysAgo(back, tz), to: todayStr };
+    } },
+  { id: 'last7',     label: 'Last 7 days',   range: (tz) => ({ from: daysAgo(6, tz),  to: today(tz) }) },
+  { id: 'month',     label: 'This month',    range: (tz) => {
+      const todayStr = today(tz);
+      return { from: todayStr.slice(0, 8) + '01', to: todayStr };
+    } },
+  { id: 'last90',    label: 'Last term (90 days)', range: (tz) => ({ from: daysAgo(89, tz), to: today(tz) }) },
+  { id: 'custom',    label: 'Custom',        range: null },
+];
 
 const SECTIONS = [
   {
@@ -53,6 +103,8 @@ const SECTIONS = [
         needsRange: true,
         filters: ['class', 'status'],
         permission: 'download_operational',
+        tags: ['attendance', 'operations', 'daily'],
+        formats: ['csv', 'xlsx'],
       },
       {
         id: 'chaperone-roster',
@@ -63,6 +115,8 @@ const SECTIONS = [
         tone: 'green',
         needsRange: false,
         permission: 'download_compliance',
+        tags: ['pickup', 'directory'],
+        formats: ['csv', 'xlsx'],
       },
       {
         id: 'pickup-events',
@@ -74,6 +128,8 @@ const SECTIONS = [
         needsRange: true,
         filters: ['class'],
         permission: 'download_operational',
+        tags: ['pickup', 'operations', 'daily'],
+        formats: ['csv', 'xlsx'],
       },
       {
         id: 'onboarding-forms',
@@ -85,6 +141,8 @@ const SECTIONS = [
         needsRange: true,
         filters: ['formStatus'],
         permission: 'download_directory',
+        tags: ['pickup', 'directory', 'compliance'],
+        formats: ['csv', 'xlsx'],
       },
     ],
   },
@@ -101,6 +159,8 @@ const SECTIONS = [
         tone: 'sky',
         needsRange: false,
         anyPermission: ['download_operational', 'download_directory'],
+        tags: ['directory', 'students'],
+        formats: ['csv', 'xlsx'],
       },
       {
         id: 'terminals',
@@ -111,6 +171,8 @@ const SECTIONS = [
         tone: 'indigo',
         needsRange: false,
         permission: 'download_operational',
+        tags: ['devices', 'infrastructure'],
+        formats: ['csv', 'xlsx'],
       },
       {
         id: 'system-health',
@@ -121,6 +183,8 @@ const SECTIONS = [
         tone: 'red',
         needsRange: false,
         permission: 'download_operational',
+        tags: ['devices', 'operations', 'health'],
+        formats: ['csv', 'xlsx'],
       },
     ],
   },
@@ -137,6 +201,8 @@ const SECTIONS = [
         tone: 'red',
         needsRange: true,
         permission: 'download_security',
+        tags: ['security', 'incidents'],
+        formats: ['csv', 'xlsx'],
       },
       {
         id: 'access-logs',
@@ -147,6 +213,8 @@ const SECTIONS = [
         tone: 'sky',
         needsRange: true,
         permission: 'download_security',
+        tags: ['security', 'audit'],
+        formats: ['csv', 'xlsx'],
       },
       {
         id: 'audit-log',
@@ -158,6 +226,8 @@ const SECTIONS = [
         needsRange: true,
         filters: ['auditKind'],
         permission: 'download_compliance',
+        tags: ['compliance', 'security', 'audit'],
+        formats: ['csv', 'xlsx'],
       },
       {
         id: 'chaperone-audit',
@@ -168,6 +238,8 @@ const SECTIONS = [
         tone: 'orange',
         needsRange: true,
         permission: 'download_compliance',
+        tags: ['pickup', 'compliance', 'audit'],
+        formats: ['csv', 'xlsx'],
       },
     ],
   },
@@ -203,8 +275,9 @@ function relativeTime(ms) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-function fmtPills({ value, onChange, disabled }) {
-  return ['xlsx', 'pdf', 'csv'].map((f) => (
+function fmtPills({ value, onChange, disabled, allowed }) {
+  const list = Array.isArray(allowed) && allowed.length ? allowed : ['xlsx', 'pdf', 'csv'];
+  return list.map((f) => (
     <button
       key={f}
       type="button"
@@ -227,10 +300,11 @@ function safeCell(v) {
   return s.length > 80 ? s.slice(0, 77) + '…' : s;
 }
 
-function PreviewModal({ data, tone, format, onClose, onConfirm }) {
+function PreviewModal({ data, tone, format, onClose, onConfirm, onApplyLast7 }) {
   const cols = data.columns || [];
   const rows = data.sampleRows || [];
   const more = Math.max(0, (data.totalRows || 0) - rows.length);
+  const isEmpty = (data.totalRows || 0) === 0;
 
   return (
     <div
@@ -286,6 +360,27 @@ function PreviewModal({ data, tone, format, onClose, onConfirm }) {
 
         {/* Sample table */}
         <div className="flex-1 overflow-auto px-5 py-3">
+          {/* M3: empty-state coaching banner — only when the user has a
+              way to widen the range (the hub passes onApplyLast7). */}
+          {isEmpty && typeof onApplyLast7 === 'function' && (
+            <div className="mb-3 flex items-start gap-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-amber-200">
+              <i className="ph ph-info text-base mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[12px] font-medium">No data in this range.</p>
+                <p className="text-[11px] text-amber-200/80 mt-0.5">
+                  Try expanding to the last 7 days — most reports surface
+                  something useful at that window.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onApplyLast7}
+                className="shrink-0 px-2.5 py-1 text-[11px] font-semibold rounded bg-amber-500/30 hover:bg-amber-500/50 text-amber-50 border border-amber-400/40"
+              >
+                Apply: last 7 days
+              </button>
+            </div>
+          )}
           <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">
             Showing first {rows.length.toLocaleString()} of {(data.totalRows || 0).toLocaleString()} rows
             {data.truncated && <span className="ml-2 text-amber-300">· truncated at server cap</span>}
@@ -353,23 +448,97 @@ function PreviewModal({ data, tone, format, onClose, onConfirm }) {
   );
 }
 
-function DownloadCard({ card, highlighted, registerRef, lastRun }) {
+// localStorage helpers — never throw on SSR / private-mode storage.
+function lsGet(key) {
+  try { if (typeof window === 'undefined') return null; return window.localStorage.getItem(key); }
+  catch { return null; }
+}
+function lsSet(key, val) {
+  try { if (typeof window === 'undefined') return; window.localStorage.setItem(key, val); } catch {}
+}
+
+// Resolve a preset id → { from, to } in the supplied timezone. Returns
+// null for the `custom` sentinel; the caller keeps the existing
+// from/to values when the user picks Custom.
+function resolvePreset(id, tz) {
+  const preset = RANGE_PRESETS.find((p) => p.id === id);
+  if (!preset || !preset.range) return null;
+  try { return preset.range(tz); } catch { return null; }
+}
+
+function DownloadCard({
+  card, highlighted, registerRef, lastRun,
+  timezone = 'Asia/Jakarta',
+  isFavourite = false,
+  onToggleFavourite,
+  isSelected = false,
+  onToggleSelected,
+  formatDefault,           // server-side preference, optional
+}) {
   const tone = TONES[card.tone] || TONES.teal;
   const cardRef = useRef(null);
   useEffect(() => {
     if (registerRef) registerRef(card.id, cardRef.current);
   }, [card.id, registerRef]);
-  const [from, setFrom] = useState(daysAgo(29));
-  const [to, setTo] = useState(today());
-  const [format, setFormat] = useState('xlsx');
+
+  // Allowed formats: server-declared list with safety fallback.
+  const allowedFormats = useMemo(
+    () => (Array.isArray(card.formats) && card.formats.length ? card.formats : ['xlsx', 'csv']),
+    [card.formats],
+  );
+
+  // Initial format = LS choice → server pref → first allowed.
+  const initialFormat = useMemo(() => {
+    const ls = lsGet(`downloads.format.${card.id}`);
+    if (ls && allowedFormats.includes(ls)) return ls;
+    if (formatDefault && allowedFormats.includes(formatDefault)) return formatDefault;
+    return allowedFormats[0];
+  }, [card.id, allowedFormats, formatDefault]);
+  const [format, setFormatRaw] = useState(initialFormat);
+  const setFormat = useCallback((f) => {
+    setFormatRaw(f);
+    lsSet(`downloads.format.${card.id}`, f);
+  }, [card.id]);
+
+  // Initial preset = LS → 'last7' default. We persist by preset id only;
+  // `custom` keeps the user-typed dates intact.
+  const initialPreset = useMemo(() => {
+    const ls = lsGet(`downloads.range.${card.id}`);
+    if (ls && RANGE_PRESETS.some((p) => p.id === ls)) return ls;
+    return 'last7';
+  }, [card.id]);
+  const [presetId, setPresetIdRaw] = useState(initialPreset);
+  const setPresetId = useCallback((id) => {
+    setPresetIdRaw(id);
+    lsSet(`downloads.range.${card.id}`, id);
+  }, [card.id]);
+
+  // Compute initial from/to from the chosen preset in the current TZ.
+  const initialRange = useMemo(() => {
+    const r = resolvePreset(initialPreset, timezone);
+    return r || { from: daysAgo(6, timezone), to: today(timezone) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [from, setFrom] = useState(initialRange.from);
+  const [to,   setTo]   = useState(initialRange.to);
   const [filters, setFilters] = useState({});
   const [busy, setBusy] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [preview, setPreview] = useState(null);
   const [msg, setMsg] = useState(null);
   const [reauthOpen, setReauthOpen] = useState(false);
+  const [estimating, setEstimating] = useState(false);
+  const [estimate, setEstimate] = useState(null); // { rows, at }
+  const [bigConfirm, setBigConfirm] = useState(null); // { rowCount } when > BIG
 
-  const setRange = (n) => { setFrom(daysAgo(n - 1)); setTo(today()); };
+  // Whenever preset or TZ changes (non-custom), recompute dates.
+  useEffect(() => {
+    if (presetId === 'custom') return;
+    const r = resolvePreset(presetId, timezone);
+    if (r) { setFrom(r.from); setTo(r.to); }
+    // Reset stale estimate any time the range moves under us.
+    setEstimate(null);
+  }, [presetId, timezone]);
 
   const buildBody = (extra = {}) => (
     card.needsRange ? { format, from, to, filters, ...extra } : { format, ...extra }
@@ -421,11 +590,90 @@ function DownloadCard({ card, highlighted, registerRef, lastRun }) {
     }
   }, [card, format, from, to, filters]);
 
-  // Public "Generate" button → ALWAYS prompts for password first.
+  // Public "Generate" button. If we have a fresh estimate over the
+  // background threshold, prompt the user to enqueue rather than
+  // tying up the browser tab on a 5k+ row sync export.
+  const BIG_ROW_THRESHOLD = 5000;
   const generate = useCallback(() => {
     setMsg(null);
+    if (estimate && estimate.rows > BIG_ROW_THRESHOLD) {
+      setBigConfirm({ rowCount: estimate.rows });
+      return;
+    }
     setReauthOpen(true);
+  }, [estimate]);
+
+  const runDryRun = useCallback(async () => {
+    setEstimating(true); setMsg(null);
+    try {
+      const res = await fetch(card.endpoint, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildBody({ dryRun: true })),
+      });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try { const j = await res.json(); detail = j.message || j.error || detail; } catch {}
+        throw new Error(detail);
+      }
+      const data = await res.json();
+      const rows = Number(data.rowCount || 0);
+      setEstimate({ rows, at: Date.now() });
+    } catch (err) {
+      setMsg({ ok: false, text: err.message || 'Estimate failed' });
+    } finally {
+      setEstimating(false);
+    }
+  }, [card, format, from, to, filters]);
+
+  // Enqueue background job — confirmation path after big-row warning.
+  const enqueueBackground = useCallback(async () => {
+    setBigConfirm(null);
+    setBusy(true); setMsg(null);
+    try {
+      // Background jobs require re-auth via X-Reauth-Token; reuse the
+      // same modal. We stash the enqueue intent on the ref to know what
+      // to do once the user confirms.
+      setReauthOpen('background');
+    } finally {
+      setBusy(false);
+    }
   }, []);
+
+  const runEnqueue = useCallback(async (reauthToken) => {
+    setBusy(true); setMsg(null);
+    try {
+      const res = await fetch('/api/downloads/_jobs/start', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(reauthToken ? { 'X-Reauth-Token': reauthToken } : {}),
+        },
+        body: JSON.stringify({
+          cardId: card.id, format,
+          from: card.needsRange ? from : null,
+          to:   card.needsRange ? to : null,
+          filters,
+        }),
+      });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try { const j = await res.json(); detail = j.message || j.error || detail; } catch {}
+        throw new Error(detail);
+      }
+      const data = await res.json();
+      setMsg({
+        ok: true,
+        text: `Queued — we'll prepare it in the background (job ${String(data.jobId || '').slice(0, 8)}). Check "Recently run".`,
+      });
+    } catch (err) {
+      setMsg({ ok: false, text: err.message || 'Enqueue failed' });
+    } finally {
+      setBusy(false);
+    }
+  }, [card, format, from, to, filters]);
 
   const runPreview = useCallback(async () => {
     setPreviewing(true); setMsg(null);
@@ -454,11 +702,37 @@ function DownloadCard({ card, highlighted, registerRef, lastRun }) {
     <div
       ref={cardRef}
       data-card-id={card.id}
-      className={`bg-slate-900/60 border ${tone.ring} rounded-xl p-4 flex flex-col gap-3 transition-shadow ${
+      className={`bg-slate-900/60 border ${tone.ring} rounded-xl p-4 flex flex-col gap-3 transition-shadow relative ${
         highlighted ? 'ring-2 ring-teal-400/70 ring-offset-2 ring-offset-slate-950 shadow-[0_0_30px_rgba(45,212,191,0.35)]' : ''
-      }`}
+      } ${isSelected ? 'outline outline-2 outline-teal-400/60' : ''}`}
     >
-      <div className="flex items-start gap-3">
+      {/* Top-corner actions: bulk-select checkbox + favourite pin. */}
+      {onToggleSelected && (
+        <label className="absolute top-2 left-2 z-10 flex items-center cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelected(card.id)}
+            className="w-4 h-4 rounded border-slate-600 bg-slate-950 text-teal-500 focus:ring-teal-500 focus:ring-offset-slate-950"
+            aria-label={`Select ${card.title} for bulk run`}
+          />
+        </label>
+      )}
+      {onToggleFavourite && (
+        <button
+          type="button"
+          onClick={() => onToggleFavourite(card.id)}
+          className={`absolute top-2 right-2 z-10 p-1 rounded hover:bg-white/5 transition-colors ${
+            isFavourite ? 'text-amber-300' : 'text-slate-500 hover:text-slate-300'
+          }`}
+          aria-label={isFavourite ? 'Unpin from favourites' : 'Pin to favourites'}
+          title={isFavourite ? 'Unpin from favourites' : 'Pin to favourites'}
+        >
+          <i className={`ph${isFavourite ? '-fill' : ''} ph-push-pin text-base`} />
+        </button>
+      )}
+
+      <div className="flex items-start gap-3 pl-7 pr-7">
         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${tone.bg} ${tone.fg}`}>
           <i className={`ph ${card.icon} text-xl`} />
         </div>
@@ -475,38 +749,45 @@ function DownloadCard({ card, highlighted, registerRef, lastRun }) {
 
       {card.needsRange && (
         <>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {[7, 30, 90].map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setRange(n)}
-                className="px-2 py-0.5 text-[10px] font-medium rounded border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
-              >
-                Last {n}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] uppercase tracking-wide text-slate-500 shrink-0">Range</label>
+            <select
+              value={presetId}
+              onChange={(e) => setPresetId(e.target.value)}
+              className="flex-1 text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
+            >
+              {RANGE_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-[10px] uppercase tracking-wide text-slate-500">
-              From
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="mt-0.5 w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
-              />
-            </label>
-            <label className="text-[10px] uppercase tracking-wide text-slate-500">
-              To
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="mt-0.5 w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
-              />
-            </label>
-          </div>
+          {presetId === 'custom' && (
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-[10px] uppercase tracking-wide text-slate-500">
+                From
+                <input
+                  type="date"
+                  value={from}
+                  onChange={(e) => { setFrom(e.target.value); setEstimate(null); }}
+                  className="mt-0.5 w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
+                />
+              </label>
+              <label className="text-[10px] uppercase tracking-wide text-slate-500">
+                To
+                <input
+                  type="date"
+                  value={to}
+                  onChange={(e) => { setTo(e.target.value); setEstimate(null); }}
+                  className="mt-0.5 w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
+                />
+              </label>
+            </div>
+          )}
+          {presetId !== 'custom' && (
+            <p className="text-[10px] text-slate-500 -mt-1.5">
+              {from} → {to} · {timezone}
+            </p>
+          )}
         </>
       )}
 
@@ -515,14 +796,14 @@ function DownloadCard({ card, highlighted, registerRef, lastRun }) {
           type="text"
           placeholder="Homeroom (optional, e.g. 4A)"
           value={filters.class || ''}
-          onChange={(e) => setFilters((f) => ({ ...f, class: e.target.value }))}
+          onChange={(e) => { setFilters((f) => ({ ...f, class: e.target.value })); setEstimate(null); }}
           className="w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
         />
       )}
       {card.filters?.includes('status') && (
         <select
           value={filters.status || ''}
-          onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+          onChange={(e) => { setFilters((f) => ({ ...f, status: e.target.value })); setEstimate(null); }}
           className="w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
         >
           <option value="">All statuses</option>
@@ -533,7 +814,7 @@ function DownloadCard({ card, highlighted, registerRef, lastRun }) {
       {card.filters?.includes('formStatus') && (
         <select
           value={filters.status || ''}
-          onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+          onChange={(e) => { setFilters((f) => ({ ...f, status: e.target.value })); setEstimate(null); }}
           className="w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
         >
           <option value="">All form statuses</option>
@@ -547,37 +828,57 @@ function DownloadCard({ card, highlighted, registerRef, lastRun }) {
           type="text"
           placeholder="Kind prefix (optional, e.g. pickup.)"
           value={filters.kind || ''}
-          onChange={(e) => setFilters((f) => ({ ...f, kind: e.target.value }))}
+          onChange={(e) => { setFilters((f) => ({ ...f, kind: e.target.value })); setEstimate(null); }}
           className="w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200"
         />
       )}
 
-      <div className="flex items-center justify-between gap-2 pt-1 mt-auto">
+      {/* Format pills + dry-run estimate. */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-1">
-          {fmtPills({ value: format, onChange: setFormat, disabled: busy || previewing })}
+          {fmtPills({ value: format, onChange: setFormat, disabled: busy || previewing, allowed: allowedFormats })}
         </div>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={runPreview}
-            disabled={busy || previewing}
-            className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 hover:bg-slate-800 flex items-center gap-1.5 disabled:opacity-50"
+            onClick={runDryRun}
+            disabled={busy || previewing || estimating}
+            className="px-2 py-1 text-[11px] font-medium rounded border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 disabled:opacity-40 flex items-center gap-1"
+            title="Quickly estimate the row count for this range"
           >
-            {previewing
-              ? (<><i className="ph ph-circle-notch animate-spin" /> …</>)
-              : (<><i className="ph ph-eye" /> Preview</>)}
+            {estimating
+              ? (<><i className="ph ph-circle-notch animate-spin" /> Estimating…</>)
+              : (<><i className="ph ph-calculator" /> Estimate rows</>)}
           </button>
-          <button
-            type="button"
-            onClick={generate}
-            disabled={busy || previewing}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg text-white flex items-center gap-1.5 ${tone.btn} disabled:opacity-50`}
-          >
-            {busy
-              ? (<><i className="ph ph-circle-notch animate-spin" /> Generating…</>)
-              : (<><i className="ph ph-download-simple" /> Generate</>)}
-          </button>
+          {estimate && !estimating && (
+            <span className="px-2 py-0.5 text-[11px] font-semibold rounded bg-slate-800/80 text-slate-200 border border-slate-700">
+              ≈ {estimate.rows.toLocaleString()} rows
+            </span>
+          )}
         </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 pt-1 mt-auto">
+        <button
+          type="button"
+          onClick={runPreview}
+          disabled={busy || previewing}
+          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 hover:bg-slate-800 flex items-center gap-1.5 disabled:opacity-50"
+        >
+          {previewing
+            ? (<><i className="ph ph-circle-notch animate-spin" /> …</>)
+            : (<><i className="ph ph-eye" /> Preview</>)}
+        </button>
+        <button
+          type="button"
+          onClick={generate}
+          disabled={busy || previewing}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg text-white flex items-center gap-1.5 ${tone.btn} disabled:opacity-50`}
+        >
+          {busy
+            ? (<><i className="ph ph-circle-notch animate-spin" /> Generating…</>)
+            : (<><i className="ph ph-download-simple" /> Download</>)}
+        </button>
       </div>
 
       {msg && (
@@ -595,15 +896,73 @@ function DownloadCard({ card, highlighted, registerRef, lastRun }) {
           format={format}
           onClose={() => setPreview(null)}
           onConfirm={() => { setPreview(null); generate(); }}
+          onApplyLast7={() => {
+            // Coaching banner — jump to the Last 7 days preset and
+            // re-trigger the preview. We deliberately reset to the
+            // built-in preset so the user can see the source range
+            // even after closing the modal.
+            setPresetId('last7');
+            const r = resolvePreset('last7', timezone);
+            if (r) { setFrom(r.from); setTo(r.to); }
+            setEstimate(null);
+            setPreview(null);
+            // Defer so the new from/to state is captured by buildBody().
+            setTimeout(() => runPreview(), 0);
+          }}
         />
       )}
 
+      {bigConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setBigConfirm(null); }}
+        >
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md p-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-500/15 text-amber-300 flex items-center justify-center shrink-0">
+                <i className="ph ph-clock-countdown text-xl" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-white">Large export</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  This export will produce <span className="text-slate-200 font-semibold">{bigConfirm.rowCount.toLocaleString()}</span> rows.
+                  We'll run it in the background — you'll be notified in <span className="text-slate-200">Recently run</span> when it's ready. Continue?
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBigConfirm(null)}
+                className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 hover:bg-slate-800 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={enqueueBackground}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white bg-amber-600 hover:bg-amber-500 flex items-center gap-1.5"
+              >
+                <i className="ph ph-paper-plane-tilt" /> Continue in background
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ReauthModal
-        open={reauthOpen}
+        open={!!reauthOpen}
         title="Confirm download"
         action={`download the ${card.title.toLowerCase()}`}
         onCancel={() => setReauthOpen(false)}
-        onConfirm={(token) => { setReauthOpen(false); runGenerate(token); }}
+        onConfirm={(token) => {
+          const mode = reauthOpen;
+          setReauthOpen(false);
+          if (mode === 'background') runEnqueue(token);
+          else runGenerate(token);
+        }}
       />
     </div>
   );
@@ -717,6 +1076,197 @@ export default function DownloadsPage() {
   const cardRefs = useRef({});
   const [highlightedId, setHighlightedId] = useState(null);
 
+  // ── M3: per-user preferences (timezone, favourites, format defaults).
+  //   Loaded once on mount; toggling a favourite or changing TZ writes
+  //   through the merge-patch endpoint immediately so other tabs/devices
+  //   see the change on next load.
+  const [timezone, setTimezoneState] = useState('Asia/Jakarta');
+  const [favourites, setFavouritesState] = useState([]); // string[]
+  const [formatDefaults, setFormatDefaults] = useState({}); // { cardId: 'xlsx' }
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/v2/users/me/preferences', { credentials: 'include' });
+        if (!res.ok) throw new Error('prefs_load_failed');
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.timezone && ALLOWED_TZ.has(data.timezone)) setTimezoneState(data.timezone);
+        if (Array.isArray(data.favourites)) setFavouritesState(data.favourites);
+        if (data.formatDefaults && typeof data.formatDefaults === 'object') {
+          setFormatDefaults(data.formatDefaults);
+        }
+      } catch {
+        // Silent — defaults already in state.
+      } finally {
+        if (!cancelled) setPrefsLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const persistPref = useCallback(async (body) => {
+    try {
+      await fetch('/api/v2/users/me/preferences', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch { /* optimistic UI — server write is best-effort */ }
+  }, []);
+
+  const setTimezone = useCallback((tz) => {
+    if (!ALLOWED_TZ.has(tz)) return;
+    setTimezoneState(tz);
+    persistPref({ timezone: tz });
+  }, [persistPref]);
+
+  const toggleFavourite = useCallback((cardId) => {
+    setFavouritesState((cur) => {
+      const has = cur.includes(cardId);
+      const next = has ? cur.filter((id) => id !== cardId) : [...cur, cardId];
+      persistPref({ favourite: { id: cardId, action: has ? 'remove' : 'add' } });
+      return next;
+    });
+  }, [persistPref]);
+
+  // ── M3: search + tag-filter state. Search is debounced 200ms to keep
+  //   typing snappy; tag selection is AND across chips.
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQ, setSearchQ] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQ(searchInput.trim().toLowerCase()), 200);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+  const [activeTags, setActiveTags] = useState([]); // string[]
+  const allTags = useMemo(() => {
+    const set = new Set();
+    for (const c of allCards) (c.tags || []).forEach((t) => set.add(t));
+    return Array.from(set).sort();
+  }, [allCards]);
+  const toggleTag = useCallback((t) => {
+    setActiveTags((cur) => cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]);
+  }, []);
+  const clearFilters = useCallback(() => {
+    setSearchInput(''); setSearchQ(''); setActiveTags([]);
+  }, []);
+  const filterActive = searchQ.length > 0 || activeTags.length > 0;
+
+  // Filter visible sections through search + tags. Sections that end up
+  // empty after filtering collapse out of the grid.
+  const filteredSections = useMemo(() => {
+    return visibleSections
+      .map((s) => ({
+        ...s,
+        cards: s.cards.filter((c) => {
+          if (activeTags.length) {
+            const cardTags = c.tags || [];
+            // AND semantics: every active tag must be on the card.
+            if (!activeTags.every((t) => cardTags.includes(t))) return false;
+          }
+          if (searchQ) {
+            const hay = `${c.id} ${c.title} ${c.blurb}`.toLowerCase();
+            if (!hay.includes(searchQ)) return false;
+          }
+          return true;
+        }),
+      }))
+      .filter((s) => s.cards.length > 0);
+  }, [visibleSections, activeTags, searchQ]);
+
+  // Pinned section: any visible card whose id appears in `favourites`.
+  // Built from the unfiltered visible list so the pin row doesn't
+  // disappear when the user types a search query.
+  const pinnedCards = useMemo(() => {
+    if (!favourites.length) return [];
+    const seen = new Set();
+    const out = [];
+    for (const id of favourites) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const card = allCards.find((c) => c.id === id);
+      if (card) out.push(card);
+    }
+    return out;
+  }, [favourites, allCards]);
+
+  // ── M3: bulk-run selection ──────────────────────────────────────────
+  const [selected, setSelected] = useState(() => new Set()); // Set<cardId>
+  const [bulkFormat, setBulkFormat] = useState('xlsx');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState(null);
+  const [bulkReauthOpen, setBulkReauthOpen] = useState(false);
+  const toggleSelected = useCallback((id) => {
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  const runBulk = useCallback(async (reauthToken) => {
+    setBulkBusy(true); setBulkMsg(null);
+    try {
+      // Use the first selected card's preset range as the bulk window,
+      // honouring the hub timezone. Falls back to last7 if no card needs
+      // a date range.
+      const r = resolvePreset('last7', timezone) || { from: daysAgo(6, timezone), to: today(timezone) };
+      const ids = Array.from(selected);
+      const res = await fetch('/api/downloads/bulk', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(reauthToken ? { 'X-Reauth-Token': reauthToken } : {}),
+        },
+        body: JSON.stringify({ cardIds: ids, format: bulkFormat, from: r.from, to: r.to }),
+      });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try { const j = await res.json(); detail = j.message || j.error || detail; } catch {}
+        throw new Error(detail);
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      const m = /filename="([^"]+)"/.exec(cd);
+      const filename = m ? m[1] : `bulk_${r.from}_${r.to}.zip`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setBulkMsg({ ok: true, text: `Downloaded ${filename} (${ids.length} reports)` });
+      clearSelection();
+      // Refresh the recently-run rail so the bulk run shows up.
+      refreshRuns();
+    } catch (err) {
+      setBulkMsg({ ok: false, text: err.message || 'Bulk export failed' });
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [selected, bulkFormat, timezone, clearSelection]);
+
+  // ── M3: timezone gear popover ───────────────────────────────────────
+  const [tzOpen, setTzOpen] = useState(false);
+  const tzPopRef = useRef(null);
+  useEffect(() => {
+    if (!tzOpen) return;
+    const onClick = (e) => {
+      if (tzPopRef.current && !tzPopRef.current.contains(e.target)) setTzOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setTzOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [tzOpen]);
+
   // M2: "Recently run by you" — backs both the rail and the per-card
   // "Last run: …" caption. Single fetch, grouped client-side so we don't
   // pay 10× Firestore reads on mount.
@@ -755,7 +1305,7 @@ export default function DownloadsPage() {
   // preview / dry-run noise.
   const recentRuns = useMemo(
     () => runs
-      .filter((r) => r.status === 'completed' && (r.mode === 'sync' || r.mode === 'async'))
+      .filter((r) => r.status === 'completed' && (r.mode === 'sync' || r.mode === 'async' || r.mode === 'bulk'))
       .slice(0, 5),
     [runs],
   );
@@ -787,6 +1337,27 @@ export default function DownloadsPage() {
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [router.isReady, router.query.card, allCards]);
 
+  // Common render helper for a card grid (used by Pinned + each section).
+  const renderCardGrid = (cards) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {cards.map((c) => (
+        <DownloadCard
+          key={c.id}
+          card={c}
+          highlighted={highlightedId === c.id}
+          registerRef={registerCardRef}
+          lastRun={lastRunByCard[c.id] || null}
+          timezone={timezone}
+          isFavourite={favourites.includes(c.id)}
+          onToggleFavourite={prefsLoaded ? toggleFavourite : undefined}
+          isSelected={selected.has(c.id)}
+          onToggleSelected={toggleSelected}
+          formatDefault={formatDefaults[c.id] || null}
+        />
+      ))}
+    </div>
+  );
+
   return (
     <AdminLayout title="Downloads" subtitle="Reports, audits & compliance exports">
       <Head><title>Downloads · Admin</title></Head>
@@ -799,46 +1370,194 @@ export default function DownloadsPage() {
               <i className="ph ph-download-simple text-2xl" />
             </div>
             <div className="flex-1">
-              <h2 className="text-base font-semibold text-white">One-stop compliance desk</h2>
-              <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-                Every export below is fully branded (BINUS cover page, theme colours, zebra striping),
-                rate-limited and recorded in the audit log. Use the cards to pull the slice you need;
-                switch between XLSX, PDF and CSV with one click.
-              </p>
-              <p className="text-[11px] text-slate-400 mt-2">
-                {allCards.length} exports available · Owner &amp; Admin roles only
-              </p>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-white">One-stop compliance desk</h2>
+                  <p className="text-xs text-slate-300 mt-1 max-w-2xl">
+                    Every export below is fully branded (BINUS cover page, theme colours, zebra striping),
+                    rate-limited and recorded in the audit log. Use the cards to pull the slice you need;
+                    switch between XLSX, PDF and CSV with one click.
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-2">
+                    {allCards.length} exports available · Timezone <span className="text-slate-200">{timezone}</span>
+                  </p>
+                </div>
+                {/* TZ gear popover */}
+                <div className="relative" ref={tzPopRef}>
+                  <button
+                    type="button"
+                    onClick={() => setTzOpen((v) => !v)}
+                    className="p-2 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white hover:bg-slate-800/60 flex items-center gap-1.5"
+                    aria-haspopup="true"
+                    aria-expanded={tzOpen}
+                    title="Hub preferences"
+                  >
+                    <i className="ph ph-gear text-base" />
+                  </button>
+                  {tzOpen && (
+                    <div className="absolute right-0 mt-2 w-72 z-30 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-4">
+                      <h3 className="text-xs font-semibold text-white">Hub timezone</h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Date presets and per-card range pickers compute days in this zone. Backend data is unchanged.
+                      </p>
+                      <label className="block mt-3 text-[10px] uppercase tracking-wider text-slate-500">
+                        Timezone
+                        <select
+                          value={timezone}
+                          onChange={(e) => setTimezone(e.target.value)}
+                          className="mt-1 w-full text-xs bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200"
+                        >
+                          {TIMEZONES.map((t) => (
+                            <option key={t.id} value={t.id}>{t.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         <RecentlyRunRail runs={recentRuns} loading={runsLoading} />
 
-        {visibleSections.map((section) => (
-          <section key={section.heading} className="space-y-3">
-            <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">{section.heading}</h2>
-              <p className="text-xs text-slate-500 mt-0.5">{section.description}</p>
+        {/* M3: Search + tag filter. */}
+        <section className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-[200px] max-w-md">
+              <i className="ph ph-magnifying-glass absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 text-sm" />
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search exports by name…"
+                className="w-full pl-7 pr-3 py-1.5 text-xs bg-slate-950 border border-slate-700 rounded-lg text-slate-200 placeholder:text-slate-500 focus:border-teal-500 focus:outline-none"
+              />
             </div>
-            {section.cards.length === 0 ? (
-              <div className="text-[11px] text-slate-500 italic border border-dashed border-slate-700/60 rounded-lg px-3 py-4">
-                You don’t have permission to export anything in this section.
+            {filterActive && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="px-2.5 py-1.5 text-[11px] font-medium rounded-lg text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 hover:bg-slate-800 flex items-center gap-1.5"
+              >
+                <i className="ph ph-x" /> Clear filters
+              </button>
+            )}
+          </div>
+          {allTags.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {allTags.map((t) => {
+                const on = activeTags.includes(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => toggleTag(t)}
+                    className={`px-2 py-0.5 text-[11px] font-medium rounded-full border transition-colors ${
+                      on
+                        ? 'bg-teal-500/20 text-teal-200 border-teal-400/50'
+                        : 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                    }`}
+                    aria-pressed={on}
+                  >
+                    #{t}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* M3: Bulk-run toolbar (sticky-style banner when any card selected). */}
+        {selected.size > 0 && (
+          <div className="sticky top-0 z-20 bg-slate-900/95 backdrop-blur border border-teal-500/30 rounded-xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap shadow-lg">
+            <div className="text-xs text-slate-200">
+              <span className="font-semibold text-teal-200">{selected.size} selected</span>
+              <span className="text-slate-400"> · bundled as ZIP, audited per card</span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                {fmtPills({ value: bulkFormat, onChange: setBulkFormat, disabled: bulkBusy, allowed: ['xlsx', 'csv'] })}
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {section.cards.map((c) => (
-                  <DownloadCard
-                    key={c.id}
-                    card={c}
-                    highlighted={highlightedId === c.id}
-                    registerRef={registerCardRef}
-                    lastRun={lastRunByCard[c.id] || null}
-                  />
-                ))}
+              <button
+                type="button"
+                onClick={clearSelection}
+                disabled={bulkBusy}
+                className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 hover:bg-slate-800 disabled:opacity-50"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => { setBulkMsg(null); setBulkReauthOpen(true); }}
+                disabled={bulkBusy || selected.size === 0}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white flex items-center gap-1.5 bg-teal-600 hover:bg-teal-500 disabled:opacity-50"
+              >
+                {bulkBusy
+                  ? (<><i className="ph ph-circle-notch animate-spin" /> Bundling…</>)
+                  : (<><i className="ph ph-archive" /> Run {selected.size} selected</>)}
+              </button>
+            </div>
+            {bulkMsg && (
+              <div className={`basis-full text-[11px] rounded px-2 py-1 ${
+                bulkMsg.ok ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'
+              }`}>
+                {bulkMsg.text}
               </div>
             )}
+            <ReauthModal
+              open={bulkReauthOpen}
+              title="Confirm bulk download"
+              action={`bulk-download ${selected.size} reports`}
+              onCancel={() => setBulkReauthOpen(false)}
+              onConfirm={(token) => { setBulkReauthOpen(false); runBulk(token); }}
+            />
+          </div>
+        )}
+
+        {/* Pinned section sits above the regular grid when any pins exist. */}
+        {pinnedCards.length > 0 && !filterActive && (
+          <section className="space-y-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-amber-300/90 flex items-center gap-1.5">
+                <i className="ph-fill ph-push-pin" /> Pinned
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">Your favourite exports — quick access at the top.</p>
+            </div>
+            {renderCardGrid(pinnedCards)}
           </section>
-        ))}
+        )}
+
+        {filteredSections.length === 0 && filterActive ? (
+          <div className="text-center text-slate-400 italic border border-dashed border-slate-700/60 rounded-lg px-3 py-10">
+            <i className="ph ph-magnifying-glass text-2xl block mb-2 text-slate-500" />
+            No exports match your search.
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="ml-2 text-teal-300 hover:text-teal-200 underline"
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : (
+          filteredSections.map((section) => (
+            <section key={section.heading} className="space-y-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">{section.heading}</h2>
+                <p className="text-xs text-slate-500 mt-0.5">{section.description}</p>
+              </div>
+              {renderCardGrid(section.cards)}
+            </section>
+          ))
+        )}
+
+        {!filterActive && visibleSections.every((s) => s.cards.length === 0) && (
+          <div className="text-[11px] text-slate-500 italic border border-dashed border-slate-700/60 rounded-lg px-3 py-4">
+            You don't have permission to export anything yet — ask an owner to grant a download role.
+          </div>
+        )}
 
         <section className="space-y-3">
           <div>

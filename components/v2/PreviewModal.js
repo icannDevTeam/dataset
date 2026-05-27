@@ -219,6 +219,16 @@ export default function PreviewModal({
 
                 {rows.length === 0 ? (
                   <div className="text-center py-10 text-slate-500 text-sm">
+                    <div className="mx-auto max-w-md mb-4 p-3 bg-amber-500/10 border border-amber-400/30 rounded-lg text-left">
+                      <div className="flex items-start gap-2">
+                        <i className="ph ph-lightbulb text-amber-300 text-base mt-0.5" />
+                        <div className="text-[11px] text-amber-100/90 leading-snug">
+                          <strong className="text-amber-200">No data for this range.</strong>{' '}
+                          Try widening the date window, removing filters, or check whether the date
+                          column you're filtering by has values for the selected period.
+                        </div>
+                      </div>
+                    </div>
                     <i className="ph ph-tray text-3xl block mb-2" />
                     Nothing to preview yet.
                   </div>
