@@ -39,12 +39,16 @@ const { logAudit } = require('../../../lib/audit-log');
 export const config = { api: { bodyParser: { sizeLimit: '8kb' } } };
 
 function authorize(req) {
-  const secret = process.env.CRON_SECRET;
-  const header = req.headers['authorization'] || '';
+  // Trim to defend against env vars accidentally saved with trailing
+  // whitespace/newline (a common Vercel UI paste hazard).
+  const secret = (process.env.CRON_SECRET || '').trim();
+  const header = String(req.headers['authorization'] || '').trim();
   if (secret) {
     if (header === `Bearer ${secret}`) return true;
+    // Also accept the bare token (some cron callers strip the scheme).
+    if (header === secret) return true;
   }
-  if (String(req.headers['x-vercel-cron'] || '') === '1') return true;
+  if (String(req.headers['x-vercel-cron'] || '').trim() === '1') return true;
   if (process.env.NODE_ENV !== 'production' && req.query?.dev === '1') return true;
   return false;
 }
