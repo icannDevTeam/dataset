@@ -1,9 +1,12 @@
 import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
+import PageGuard from '../../components/v2/PageGuard';
 import PickupReportExportOverlay from '../../components/v2/reports/PickupReportExportOverlay';
 import OnboardingExportOverlay from '../../components/v2/reports/OnboardingExportOverlay';
 import { useReauthGate } from '../../components/v2/ReauthGate';
+import { downloadCSV } from '../../lib/download';
+import { notify } from '../../lib/notify';
 
 function getWIBDate(offset = 0) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -38,16 +41,9 @@ const QUICK_RANGES = [
 // Cooldown — keep aligned with backend/attendance_listener.py DUPLICATE_WINDOW
 const SCAN_COOLDOWN_HOURS = 8;
 
-function downloadCSV(filename, rows) {
-  const csv = rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+// CSV download moved to lib/download.js so every export uses the
+// same DOM-attached anchor + deferred revokeObjectURL pattern, which
+// fixes silent failures in Firefox/Safari.
 
 /**
  * Server-side audit log of a client-only download/print action.
@@ -175,7 +171,12 @@ function exportPickupCSV(data, fromDate, toDate) {
     r.note || '',
     (r.students || []).map(s => `${s.name}${s.homeroom ? ` (${s.homeroom})` : ''}`).join(' | '),
   ]));
-  downloadCSV(`pickup-system-report-${fromDate}-to-${toDate}.csv`, rows);
+  try {
+    downloadCSV(`pickup-system-report-${fromDate}-to-${toDate}.csv`, rows);
+    notify.success('Pickup report downloaded');
+  } catch (err) {
+    notify.apiError(err, 'Failed to start the download. Please try again.');
+  }
 }
 
 
@@ -363,7 +364,12 @@ export default function ReportsPage() {
       rows.push(['Terminal', 'Total Scans', 'Unique Students', 'On-Time', 'Late', 'On-Time %']);
       data.sourceSummary.forEach((s) => rows.push([s.source, s.totalScans, s.uniqueStudents, s.present ?? 0, s.late ?? 0, `${s.presentRate ?? 0}%`]));
     }
-    downloadCSV(`attendance-report-${fromDate}-to-${toDate}.csv`, rows);
+    try {
+      downloadCSV(`attendance-report-${fromDate}-to-${toDate}.csv`, rows);
+      notify.success('Attendance report downloaded');
+    } catch (err) {
+      notify.apiError(err, 'Failed to start the download. Please try again.');
+    }
   }, [data, fromDate, toDate, filterClass, filterGrade, filterSource, requireReauth]);
 
   const handlePrint = useCallback(async () => {
@@ -406,6 +412,7 @@ export default function ReportsPage() {
     <V2Layout>
       <Head><title>Reports — BINUS Attendance</title></Head>
 
+      <PageGuard feature="reports" action="view" what="view reports">
       <div ref={printRef} className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
 
         {/* Print-only header (hidden on screen via .print-show) */}
@@ -1531,6 +1538,7 @@ export default function ReportsPage() {
       />
 
       {reauthModal}
+      </PageGuard>
     </V2Layout>
   );
 }
@@ -2128,7 +2136,12 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
     const scopeLabel = scope === 'school' ? 'whole-school'
       : scope === 'grade' ? `grade-${grade || 'any'}`
       : 'individual';
-    downloadCSV(`onboarding-forms_${scopeLabel}_${fromDate}_to_${toDate}.csv`, rows);
+    try {
+      downloadCSV(`onboarding-forms_${scopeLabel}_${fromDate}_to_${toDate}.csv`, rows);
+      notify.success(`Onboarding CSV downloaded (${rows.length - 1} rows)`);
+    } catch (err) {
+      notify.apiError(err, 'Failed to start the download. Please try again.');
+    }
   };
 
   const handlePrint = async () => {

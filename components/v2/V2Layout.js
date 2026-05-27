@@ -10,12 +10,30 @@ function getWIBTime() {
   return now.toISOString().slice(11, 19);
 }
 
-// NAV temporarily reduced to the Pickup System only — all other sections
-// (Main: Dashboard/Analytics/Reports, Management: Enrollment/Device Manager/
-// Attendance Monitor/Hikvision/Device Sync) and bottom items (Downloads,
-// Admin Console) are intentionally hidden so the workspace can focus on the
-// pickup module. Pages still exist; only the sidebar entries are hidden.
+// Full V2 sidebar. Dashboard, Analytics, and Reports are essential and must
+// always be visible — see /memories/ui-rules.md.
 const NAV_SECTIONS = [
+  {
+    label: 'Main',
+    items: [
+      { href: '/v2', icon: 'ph-squares-four', label: 'Dashboard' },
+      { href: '/v2/analytics', icon: 'ph-chart-line-up', label: 'Analytics' },
+      { href: '/v2/reports', icon: 'ph-file-text', label: 'Reports' },
+    ],
+  },
+  {
+    label: 'Management',
+    items: [
+      { icon: 'ph-user-circle-plus', label: 'Enrollment', children: [
+        { href: '/enrollment', label: 'Dataset Capture' },
+        { href: '/mobile-enrollment', label: 'Mobile Enrollment' },
+      ]},
+      { href: '/device-manager', icon: 'ph-cpu', label: 'Device Manager' },
+      { href: '/attendance-monitor', icon: 'ph-list-checks', label: 'Attendance Monitor' },
+      { href: '/hikvision', icon: 'ph-fingerprint', label: 'Hikvision' },
+      { href: '/v2/device-sync', icon: 'ph-cloud-arrow-down', label: 'Device Sync' },
+    ],
+  },
   {
     label: 'Pickup System',
     items: [
@@ -32,8 +50,13 @@ const NAV_SECTIONS = [
   },
 ];
 
-// Bottom standalone items hidden to keep focus on Pickup System.
-const BOTTOM_NAV = [];
+// Bottom standalone items (always visible, not in collapsible sections).
+// Settings surface is folded into the Admin Console (/v2/admin/rbac); the
+// page still exists for deep links.
+const BOTTOM_NAV = [
+  { href: '/v2/admin/downloads', icon: 'ph-download-simple', label: 'Downloads', permissionKey: 'downloads' },
+  { href: '/v2/admin/rbac', icon: 'ph-shield-checkered', label: 'Admin Console', adminOnly: true, badge: 'ADMIN' },
+];
 
 export default function V2Layout({ children }) {
   const router = useRouter();
@@ -254,8 +277,7 @@ export default function V2Layout({ children }) {
           );
         })}
 
-        {/* Bottom standalone nav (Settings/RBAC) — hidden while NAV is reduced to Pickup System only. */}
-        {BOTTOM_NAV.length > 0 && (
+        {/* Bottom standalone nav (Downloads / Admin Console) */}
         <div className="pt-2">
           <div className={`w-full border-t border-slate-800/60 mb-3`}></div>
           {!collapsed && (
@@ -301,7 +323,6 @@ export default function V2Layout({ children }) {
             })}
           </div>
         </div>
-        )}
       </nav>
 
       {/* Bottom section */}

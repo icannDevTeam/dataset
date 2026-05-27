@@ -2,9 +2,11 @@ import '../styles/globals.css';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState } from 'react';
+import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
 import { canAccessPath } from '../lib/permissions';
 import { FOUC_SCRIPT } from '../lib/theme';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 // Pages that don't require authentication
 const PUBLIC_PAGES = ['/login'];
@@ -157,9 +159,24 @@ export default function App({ Component, pageProps }) {
         {/* Pre-hydration theme application — prevents FOUC on light mode */}
         <script dangerouslySetInnerHTML={{ __html: FOUC_SCRIPT }} />
       </Head>
-      <AuthProvider>
-        <AuthGate Component={Component} pageProps={pageProps} />
-      </AuthProvider>
+      <ErrorBoundary>
+        <AuthProvider>
+          <AuthGate Component={Component} pageProps={pageProps} />
+        </AuthProvider>
+      </ErrorBoundary>
+      {/* App-wide toast notifications. `richColors` gives semantic colors
+          for success/error/warning; `closeButton` lets users dismiss long
+          error toasts. Theme is controlled by the html.dark class via the
+          `theme="system"` setting which reads media + class. */}
+      <Toaster
+        position="top-right"
+        richColors
+        closeButton
+        toastOptions={{
+          className: 'sonner-toast',
+          style: { fontSize: '13px' },
+        }}
+      />
     </>
   );
 }

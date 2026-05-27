@@ -18,6 +18,8 @@ import Head from 'next/head';
 import Link from 'next/link';
 import React, { useState, useCallback, useEffect } from 'react';
 import styles from '../styles/attendance-monitor.module.css';
+import { downloadCSV } from '../lib/download';
+import { notify } from '../lib/notify';
 
 function getWIBDate(offset = 0) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -168,14 +170,12 @@ export default function AttendanceMonitor() {
       r.idStudent, r.idBinusian, r.date, r.time, r.userIn,
       r.stsrc ? 'OK' : 'Error', r.imageDesc,
     ]);
-    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `binus-attendance-${startDate}-to-${endDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      downloadCSV(`binus-attendance-${startDate}-to-${endDate}.csv`, [headers, ...rows]);
+      notify.success('Attendance CSV downloaded');
+    } catch (err) {
+      notify.apiError(err, 'Failed to start the download. Please try again.');
+    }
   };
 
   // Column sort handler

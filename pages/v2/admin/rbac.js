@@ -23,6 +23,8 @@ import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import AdminLayout from '../../../components/v2/AdminLayout';
 import { useAuth } from '../../../lib/AuthContext';
+import { downloadBlob } from '../../../lib/download';
+import { notify } from '../../../lib/notify';
 import {
   FEATURES,
   FEATURE_GROUPS,
@@ -369,10 +371,12 @@ export default function AdminRbacPage() {
   function downloadTemplate() {
     const csv = 'email,name,password,role,classScopes\nuser@school.edu,John Doe,Pass@123,viewer,\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'user-import-template.csv'; a.click();
-    URL.revokeObjectURL(url);
+    try {
+      downloadBlob(blob, 'user-import-template.csv');
+      notify.success('Template downloaded');
+    } catch (err) {
+      notify.apiError(err, 'Failed to download the template.');
+    }
   }
 
   // ── render ──────────────────────────────────────────────────────────────

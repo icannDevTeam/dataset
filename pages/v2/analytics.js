@@ -1,6 +1,9 @@
 import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
+import PageGuard from '../../components/v2/PageGuard';
+import { downloadCSV } from '../../lib/download';
+import { notify } from '../../lib/notify';
 
 function getWIBDate() {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -192,20 +195,19 @@ export default function AnalyticsPage() {
     if (!data) return;
     const rows = [['Date', 'Total', 'On-Time', 'Late']];
     data.dailyTrends.forEach((d) => rows.push([d.date, d.total, d.present, d.late]));
-    const csv = rows.map((r) => r.join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `attendance-analytics-${data.range.from}-to-${data.range.to}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      downloadCSV(`attendance-analytics-${data.range.from}-to-${data.range.to}.csv`, rows);
+      notify.success('Analytics CSV downloaded');
+    } catch (err) {
+      notify.apiError(err, 'Failed to start the download. Please try again.');
+    }
   }, [data]);
 
   return (
     <V2Layout>
       <Head><title>Analytics — BINUS Attendance</title></Head>
 
+      <PageGuard feature="analytics" action="view" what="view analytics">
       <div className="px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-6 max-w-[1600px] mx-auto">
 
         {/* Module toggle */}
@@ -802,6 +804,7 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </footer>
+      </PageGuard>
     </V2Layout>
   );
 }

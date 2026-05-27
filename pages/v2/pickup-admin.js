@@ -19,6 +19,7 @@ import Head from 'next/head';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/router';
 import V2Layout from '../../components/v2/V2Layout';
+import PageGuard from '../../components/v2/PageGuard';
 
 const TABS = [
   { key: 'pending',  label: 'Pending',  badge: true },
@@ -758,6 +759,7 @@ export default function PickupAdminPage() {
     <>
       <Head><title>Pickup Admin · BINUSFace</title></Head>
       <V2Layout>
+        <PageGuard feature="pickup_admin" action="view" what="open pickup admin">
         <ToastHost toasts={toasts} onDismiss={(id) => setToasts((ts) => ts.filter((t) => t.id !== id))} />
 
         <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-[90rem] mx-auto">
@@ -1135,6 +1137,7 @@ export default function PickupAdminPage() {
             .pg-no-print { display: none !important; }
           }
         `}</style>
+        </PageGuard>
       </V2Layout>
     </>
   );

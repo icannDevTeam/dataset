@@ -4,6 +4,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import { useAuth } from '../../lib/AuthContext';
 import { getAllowedSettingsTabs, FEATURES, FEATURE_GROUPS, resolvePermissions, diffFromDefaults } from '../../lib/permissions';
+import { downloadBlob } from '../../lib/download';
+import { notify } from '../../lib/notify';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -165,12 +167,12 @@ export default function SettingsPage() {
     const sample = 'user@school.edu,John Doe,Pass@123,viewer,';
     const csv = `${header}\n${sample}\n`;
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'user-import-template.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      downloadBlob(blob, 'user-import-template.csv');
+      notify.success('Template downloaded');
+    } catch (err) {
+      notify.apiError(err, 'Failed to download the template.');
+    }
   }
 
   function handleBulkImportFile(e, target) {
