@@ -1,11 +1,11 @@
 import Head from 'next/head';
+import Link from 'next/link';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import PageGuard from '../../components/v2/PageGuard';
 import AccessDenied from '../../components/v2/AccessDenied';
+import PreviewModal from '../../components/v2/PreviewModal';
 import { useAuth } from '../../lib/AuthContext';
-import { downloadCSV } from '../../lib/download';
-import { notify } from '../../lib/notify';
 
 function getWIBDate() {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -207,16 +207,12 @@ export default function AnalyticsPage() {
   }, [confidenceDist]);
 
   const exportCSV = useCallback(() => {
-    if (!data) return;
-    const rows = [['Date', 'Total', 'On-Time', 'Late']];
-    data.dailyTrends.forEach((d) => rows.push([d.date, d.total, d.present, d.late]));
-    try {
-      downloadCSV(`attendance-analytics-${data.range.from}-to-${data.range.to}.csv`, rows);
-      notify.success('Analytics CSV downloaded');
-    } catch (err) {
-      notify.apiError(err, 'Failed to start the download. Please try again.');
-    }
-  }, [data]);
+    // Export superseded by the Downloads Hub preview → hub flow.
+    // Kept as a no-op shim so future links don't 404 against this handler.
+    setPreviewOpen(true);
+  }, []);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
     <V2Layout>
@@ -304,14 +300,25 @@ export default function AnalyticsPage() {
             </div>
 
             <button
-              onClick={exportCSV}
+              onClick={() => setPreviewOpen(true)}
               disabled={!data}
               className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold transition-all shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:shadow-[0_0_25px_rgba(6,182,212,0.5)] active:scale-95 group disabled:opacity-50"
             >
-              <i className="ph ph-download-simple text-lg group-hover:-translate-y-0.5 transition-transform"></i>
-              Export Report
-              <span className="border-l border-slate-950/20 pl-2 ml-1 text-xs opacity-80 font-normal">CSV</span>
+              <i className="ph ph-eye text-lg group-hover:-translate-y-0.5 transition-transform"></i>
+              Preview report
             </button>
+          </div>
+        </div>
+
+        {/* Hub deep-link banner */}
+        <div className="flex items-start gap-3 rounded-xl border border-teal-500/30 bg-teal-500/10 px-4 py-2.5 text-sm text-teal-100">
+          <i className="ph ph-info text-teal-300 text-lg mt-0.5"></i>
+          <div className="flex-1">
+            Need the full report? Use the{' '}
+            <Link href="/v2/admin/downloads?card=attendance" className="underline font-semibold hover:text-white">
+              Downloads Hub →
+            </Link>{' '}
+            for complete exports (XLSX, PDF, CSV).
           </div>
         </div>
 
@@ -834,6 +841,20 @@ export default function AnalyticsPage() {
       </>
       )}
       </PageGuard>
+
+      <PreviewModal
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        endpoint="/api/downloads/attendance"
+        cardId="attendance"
+        title="Attendance Report"
+        body={{
+          format: 'xlsx',
+          from: data?.range?.from,
+          to: data?.range?.to,
+          filters: {},
+        }}
+      />
     </V2Layout>
   );
 }

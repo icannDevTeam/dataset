@@ -2,10 +2,12 @@
  * /v2/chaperone/[id]
  *
  * Per-chaperone audit timeline (#15). Shows:
- *   - Chaperone profile + last-seen
+ *   - Chaperone profile (hero thumbnail) + last-seen
+ *   - Linked-student chips
  *   - Onboarding submission link
  *   - Chronological feed of pickup_events (green/yellow/red)
  *   - Security incidents flagged against this chaperone
+ *   - Shadow-delete / restore revision history
  *
  * Read-only — for admin investigation when something looks wrong.
  */
@@ -13,6 +15,53 @@ import Head from 'next/head';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import V2Layout from '../../../components/v2/V2Layout';
+
+const AVATAR_COLORS = [
+  'bg-rose-500/30 text-rose-100',
+  'bg-amber-500/30 text-amber-100',
+  'bg-emerald-500/30 text-emerald-100',
+  'bg-sky-500/30 text-sky-100',
+  'bg-violet-500/30 text-violet-100',
+  'bg-fuchsia-500/30 text-fuchsia-100',
+  'bg-teal-500/30 text-teal-100',
+  'bg-orange-500/30 text-orange-100',
+];
+function initialsOf(name) {
+  const s = String(name || '').trim();
+  if (!s) return '?';
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+function colorOf(name) {
+  const s = String(name || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+function HeroAvatar({ url, name, size = 96 }) {
+  if (url) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt={name || 'chaperone'}
+        className="rounded-2xl object-cover border border-slate-700"
+        style={{ width: size, height: size }}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  return (
+    <div
+      className={`rounded-2xl border border-slate-700 flex items-center justify-center font-bold ${colorOf(name)}`}
+      style={{ width: size, height: size, fontSize: Math.floor(size * 0.34) }}
+    >
+      {initialsOf(name)}
+    </div>
+  );
+}
 
 export default function ChaperoneAuditPage() {
   const router = useRouter();
@@ -77,19 +126,33 @@ export default function ChaperoneAuditPage() {
               {/* Header */}
               <div className="rounded-2xl border border-slate-800 bg-white/5 p-5 mb-5">
                 <div className="flex items-start justify-between gap-4 flex-wrap">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-widest text-slate-500">Chaperone audit</div>
-                    <h1 className="text-2xl font-bold text-white tracking-tight mt-1">
-                      {data.chaperone.name || '—'}
-                    </h1>
-                    <div className="text-sm text-slate-400 mt-1 flex items-center gap-3 flex-wrap">
-                      <span><i className="ph ph-id-card mr-1"></i>#{data.chaperone.employeeNo || '—'}</span>
-                      {data.chaperone.relationship && <span>· {data.chaperone.relationship}</span>}
-                      <span>· {data.chaperone.authorizedStudentIds?.length || 0} student(s)</span>
-                      <span>· {data.chaperone.photoCount} photo(s)</span>
-                    </div>
-                    <div className="text-xs text-slate-500 mt-2">
-                      Last seen: {data.chaperone.lastSeenAt ? `${fmt(data.chaperone.lastSeenAt)} at ${data.chaperone.lastSeenGate || '—'}` : 'never'}
+                  <div className="flex items-start gap-4">
+                    <HeroAvatar url={data.chaperone.photoUrl} name={data.chaperone.name} size={96} />
+                    <div>
+                      <div className="text-[11px] uppercase tracking-widest text-slate-500">Chaperone audit</div>
+                      <h1 className="text-2xl font-bold text-white tracking-tight mt-1 flex items-center gap-2 flex-wrap">
+                        {data.chaperone.name || '—'}
+                        {data.chaperone.lifecycleStatus === 'deleted' && (
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-200 border border-rose-500/30">DELETED</span>
+                        )}
+                      </h1>
+                      <div className="text-sm text-slate-400 mt-1 flex items-center gap-3 flex-wrap">
+                        <span><i className="ph ph-id-card mr-1"></i>#{data.chaperone.employeeNo || '—'}</span>
+                        {data.chaperone.relationship && <span>· {data.chaperone.relationship}</span>}
+                        <span>· {data.chaperone.authorizedStudentIds?.length || 0} student(s)</span>
+                        <span>· {data.chaperone.photoCount} photo(s)</span>
+                      </div>
+                      <div className="text-xs text-slate-500 mt-2">
+                        Last seen: {data.chaperone.lastSeenAt ? `${fmt(data.chaperone.lastSeenAt)} at ${data.chaperone.lastSeenGate || '—'}` : 'never'}
+                      </div>
+                      {data.chaperone.lifecycleStatus === 'deleted' && data.chaperone.deletedReason && (
+                        <div className="mt-2 text-xs text-rose-300/90">
+                          <i className="ph ph-trash mr-1" />
+                          Deleted{data.chaperone.deletedAt && <> on {fmt(data.chaperone.deletedAt)}</>}
+                          {data.chaperone.deletedBy?.email && <> by {data.chaperone.deletedBy.email}</>}
+                          {' '}— “{data.chaperone.deletedReason}”
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-center">
@@ -99,6 +162,28 @@ export default function ChaperoneAuditPage() {
                     <Stat label="Deny" value={counts.deny} tone="red" />
                   </div>
                 </div>
+
+                {/* Linked students */}
+                {data.linkedStudents && data.linkedStudents.length > 0 && (
+                  <div className="mt-4 pt-3 border-t border-slate-800">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">
+                      Linked students ({data.linkedStudents.length})
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {data.linkedStudents.map((s) => (
+                        <span
+                          key={s.id || s.binusId}
+                          title={[s.name, s.homeroom, s.grade].filter(Boolean).join(' · ')}
+                          className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800/80 border border-slate-700 text-slate-200"
+                        >
+                          {s.name || s.binusId || s.id}
+                          {s.homeroom && <span className="ml-1 text-slate-500">· {s.homeroom}</span>}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {data.onboarding && (
                   <div className="mt-4 pt-3 border-t border-slate-800 text-xs text-slate-400">
                     Onboarded by <span className="text-slate-200 font-medium">{data.onboarding.guardian || '—'}</span>
@@ -121,6 +206,45 @@ export default function ChaperoneAuditPage() {
                 <ol className="relative border-l border-slate-800 ml-3 space-y-3">
                   {timeline.map((it, i) => <TimelineItem key={`${it.kind}-${it.id || i}`} it={it} />)}
                 </ol>
+              )}
+
+              {/* Revisions history (shadow-delete / restore) */}
+              <h2 className="text-sm font-semibold text-white mt-8 mb-3 px-1 flex items-center gap-2">
+                <i className="ph ph-clock-counter-clockwise text-slate-400" />
+                History ({(data.revisions || []).length})
+              </h2>
+              {(!data.revisions || data.revisions.length === 0) ? (
+                <div className="text-sm text-slate-500 py-6 text-center border border-dashed border-slate-800 rounded-xl">
+                  No revisions yet.
+                </div>
+              ) : (
+                <div className="rounded-xl border border-slate-800 bg-white/5 overflow-hidden">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-900/60 text-[11px] uppercase tracking-wider text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2 text-left">When</th>
+                        <th className="px-3 py-2 text-left">Action</th>
+                        <th className="px-3 py-2 text-left">By</th>
+                        <th className="px-3 py-2 text-left">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.revisions.map((r) => (
+                        <tr key={r.id} className="border-t border-slate-800">
+                          <td className="px-3 py-2 text-[11px] text-slate-400 tabular-nums whitespace-nowrap">{fmt(r.at)}</td>
+                          <td className="px-3 py-2">
+                            <RevisionBadge action={r.action} />
+                          </td>
+                          <td className="px-3 py-2 text-[11px] text-slate-300">
+                            {r.by?.name || r.by?.email || '—'}
+                            {r.by?.role && <span className="ml-1 text-slate-500">({r.by.role})</span>}
+                          </td>
+                          <td className="px-3 py-2 text-[11px] text-slate-300">{r.reason || <span className="text-slate-500">—</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </>
           )}
@@ -201,4 +325,20 @@ function fmt(iso) {
       day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
     });
   } catch { return iso; }
+}
+
+function RevisionBadge({ action }) {
+  const map = {
+    create:  { tone: 'bg-sky-500/20 text-sky-200 border-sky-500/30',           icon: 'ph-plus-circle', label: 'Created' },
+    update:  { tone: 'bg-slate-700/40 text-slate-200 border-slate-600/50',     icon: 'ph-pencil-simple', label: 'Updated' },
+    delete:  { tone: 'bg-rose-500/20 text-rose-200 border-rose-500/30',        icon: 'ph-trash', label: 'Deleted' },
+    restore: { tone: 'bg-emerald-500/20 text-emerald-200 border-emerald-500/30', icon: 'ph-arrow-counter-clockwise', label: 'Restored' },
+  };
+  const cfg = map[action] || { tone: 'bg-slate-700/40 text-slate-200 border-slate-600/50', icon: 'ph-circle', label: action || '—' };
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${cfg.tone}`}>
+      <i className={`ph ${cfg.icon}`} />
+      {cfg.label}
+    </span>
+  );
 }

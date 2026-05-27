@@ -34,7 +34,11 @@ import {
 import rbac from '../../../lib/rbac';
 import { useReauthGate } from '../../../components/v2/ReauthGate';
 
-const { ACTIONS } = rbac;
+const { ACTIONS, can } = rbac;
+
+// Five sensitive_user_access action keys the RBAC matrix highlights as
+// "Owner-only by default". Kept in sync with lib/permissions.js.
+const SENSITIVE_ACTIONS = ['view_rbac', 'edit_rbac', 'reset_user_password', 'view_user_directory', 'manage_custom_claims'];
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -110,8 +114,10 @@ function actionLabel(featureKey, action) {
 // ── page ───────────────────────────────────────────────────────────────────
 
 export default function AdminRbacPage() {
-  const { user, role: myRole } = useAuth();
+  const { user, role: myRole, permissions: myPermissions } = useAuth();
   const isAdmin = ['owner', 'admin'].includes(myRole);
+  const isOwner = myRole === 'owner';
+  const canViewRbac = can(myPermissions, 'sensitive_user_access.view_rbac');
   const { requireReauth, reauthModal } = useReauthGate();
 
   // Users + auth
@@ -381,6 +387,40 @@ export default function AdminRbacPage() {
 
   // ── render ──────────────────────────────────────────────────────────────
 
+  // Hard gate: if the caller lacks sensitive_user_access.view_rbac we render
+  // ONLY an access-denied panel. No user list, no detail pane, no fetches
+  // beyond what's already in flight (the effect will resolve harmlessly).
+  if (!canViewRbac) {
+    return (
+      <AdminLayout title="RBAC" subtitle="Roles, users, and fine-grained permissions">
+        <Head><title>RBAC · Admin</title></Head>
+        <div className="p-6 lg:p-10 max-w-2xl mx-auto">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center space-y-4">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+              <i className="ph ph-lock-key text-amber-300 text-3xl" />
+            </div>
+            <h2 className="text-xl font-semibold text-white">You don&apos;t have access to the RBAC console</h2>
+            <p className="text-sm text-slate-400 leading-relaxed">
+              RBAC is part of Sensitive User Access. Only Owners — or admins who
+              have been explicitly granted <span className="font-mono text-slate-300">view_rbac</span> —
+              can open this page.
+            </p>
+            {myRole && (
+              <div className="text-xs text-slate-500">
+                Your current role: <span className="font-mono text-slate-300">{myRole}</span>
+              </div>
+            )}
+            <div className="text-xs text-slate-500 pt-2 border-t border-slate-800/60">
+              Ask an Owner to grant
+              <span className="font-mono text-slate-300"> sensitive_user_access.view_rbac </span>
+              under your user.
+            </div>
+          </div>
+        </div>
+      </AdminLayout>
+    );
+  }
+
   const headerActions = (
     <div className="flex items-center gap-2">
       {isAdmin && (
@@ -519,6 +559,31 @@ export default function AdminRbacPage() {
 
         {/* ── Detail (right) ───────────────────────────────────────── */}
         <section className="flex flex-col min-h-0 overflow-hidden">
+          {/* Sensitive User Access notice — always visible above the detail
+              pane so every admin viewing RBAC understands which actions
+              require an Owner grant and that those grants are audit-logged. */}
+          <div className="flex-shrink-0 px-4 lg:px-6 pt-4">
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-100 px-4 py-3 text-sm flex items-start gap-3">
+              <i className="ph ph-shield-warning text-amber-300 text-xl mt-0.5" />
+              <div className="space-y-1 min-w-0">
+                <div className="font-semibold text-amber-200 flex items-center gap-2 flex-wrap">
+                  Sensitive User Access — granted by Owner only
+                  {!isOwner && (
+                    <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700">
+                      Read-only for your role
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-amber-200/80 leading-relaxed">
+                  These five actions ({SENSITIVE_ACTIONS.join(', ')}) are owner-only by default.
+                  Every grant or revoke is logged with severity <span className="font-mono">rbac.sensitive_grant</span>.
+                  {isOwner
+                    ? ' Use the per-user permissions drawer to tick/untick individual actions.'
+                    : ' Ask an Owner if you need any of these capabilities.'}
+                </div>
+              </div>
+            </div>
+          </div>
           {!selectedUser ? (
             <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
               <div className="text-center">

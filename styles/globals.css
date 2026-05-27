@@ -579,14 +579,85 @@ html:not(.dark) .aura-theme .border-brand-500\/30,
 html:not(.dark) .aura-theme .border-brand-500\/40,
 html:not(.dark) .aura-theme .border-brand-400    { border-color: rgba(8,145,178,0.55) !important; }
 
-/* --- Solid coloured action buttons: re-affirm dark-readable foreground ---
-   The earlier blanket `.text-white → slate-900` already broke text on
-   buttons like `bg-emerald-500 text-slate-950` (text-slate-950 is dark
-   and was being forced back to white). The Phase 2 rule for
-   bg-emerald-500 sets color:#fff !important — that is fine on the
-   solid emerald-500 background, so leave it as-is. No additional rules
-   needed here other than ensuring the soft pills (covered above) read.
-*/
+/* ──────────────────────────────────────────────────────────────────────
+   Light-mode pass 4 (added 2026-05-27) — Toast / banner dark-surface fix
+   ----------------------------------------------------------------------
+   Toasts and inline banners deliberately keep a dark `bg-{color}-950`
+   surface in BOTH modes (the look the team wants). They pair that with
+   light text utilities like `text-red-100` / `text-amber-200` /
+   `text-white`. The blanket pale-text → dark-text override in passes 1-3
+   inverts those colours and the text disappears against the dark
+   coloured background.
+
+   Fix: when a `text-*` utility is rendered *inside* an element whose
+   className contains `bg-{color}-950`, restore a legible light hue.
+   We use the attribute-substring selector `[class*="bg-red-950"]` so it
+   matches every alpha variant (`bg-red-950`, `bg-red-950/60`,
+   `bg-red-950/90`, …) without touching anything else.
+
+   Specificity: 4 classes + 1 attribute = wins over the 3-class blanket
+   overrides above. Cleanest existing-structure fit (no new attributes
+   on every toast/banner, no new CSS file). Regression sites verified:
+   pickup-admin.js:79-81 (ToastHost), :1470 (red error banner) — both
+   are now legible. The amber callout at :4439 sits on `bg-amber-500/10`
+   which is a *light* surface and is unaffected.
+   ────────────────────────────────────────────────────────────────────── */
+
+/* Red-950 surface (error toast + error banner) → light red text */
+html:not(.dark) .aura-theme [class*="bg-red-950"] .text-red-100,
+html:not(.dark) .aura-theme [class*="bg-red-950"] .text-red-200,
+html:not(.dark) .aura-theme [class*="bg-red-950"] .text-rose-100,
+html:not(.dark) .aura-theme [class*="bg-red-950"] .text-rose-200,
+html:not(.dark) .aura-theme [class*="bg-red-950"] .text-white { color: #fee2e2 !important; }
+
+/* Rose-950 (alt red palette) */
+html:not(.dark) .aura-theme [class*="bg-rose-950"] .text-red-100,
+html:not(.dark) .aura-theme [class*="bg-rose-950"] .text-red-200,
+html:not(.dark) .aura-theme [class*="bg-rose-950"] .text-rose-100,
+html:not(.dark) .aura-theme [class*="bg-rose-950"] .text-rose-200,
+html:not(.dark) .aura-theme [class*="bg-rose-950"] .text-white { color: #ffe4e6 !important; }
+
+/* Amber-950 surface (warn toast) */
+html:not(.dark) .aura-theme [class*="bg-amber-950"] .text-amber-100,
+html:not(.dark) .aura-theme [class*="bg-amber-950"] .text-amber-200,
+html:not(.dark) .aura-theme [class*="bg-amber-950"] .text-yellow-100,
+html:not(.dark) .aura-theme [class*="bg-amber-950"] .text-yellow-200,
+html:not(.dark) .aura-theme [class*="bg-amber-950"] .text-white { color: #fef3c7 !important; }
+
+/* Emerald-950 surface (success toast) */
+html:not(.dark) .aura-theme [class*="bg-emerald-950"] .text-emerald-100,
+html:not(.dark) .aura-theme [class*="bg-emerald-950"] .text-emerald-200,
+html:not(.dark) .aura-theme [class*="bg-emerald-950"] .text-green-100,
+html:not(.dark) .aura-theme [class*="bg-emerald-950"] .text-green-200,
+html:not(.dark) .aura-theme [class*="bg-emerald-950"] .text-white { color: #d1fae5 !important; }
+
+/* Sky / blue / indigo / violet / orange -950 — same idea for other tones */
+html:not(.dark) .aura-theme [class*="bg-sky-950"] .text-sky-100,
+html:not(.dark) .aura-theme [class*="bg-sky-950"] .text-sky-200,
+html:not(.dark) .aura-theme [class*="bg-sky-950"] .text-white { color: #e0f2fe !important; }
+html:not(.dark) .aura-theme [class*="bg-blue-950"] .text-blue-100,
+html:not(.dark) .aura-theme [class*="bg-blue-950"] .text-blue-200,
+html:not(.dark) .aura-theme [class*="bg-blue-950"] .text-white { color: #dbeafe !important; }
+html:not(.dark) .aura-theme [class*="bg-indigo-950"] .text-indigo-100,
+html:not(.dark) .aura-theme [class*="bg-indigo-950"] .text-indigo-200,
+html:not(.dark) .aura-theme [class*="bg-indigo-950"] .text-white { color: #e0e7ff !important; }
+html:not(.dark) .aura-theme [class*="bg-violet-950"] .text-violet-100,
+html:not(.dark) .aura-theme [class*="bg-violet-950"] .text-violet-200,
+html:not(.dark) .aura-theme [class*="bg-violet-950"] .text-white { color: #ede9fe !important; }
+html:not(.dark) .aura-theme [class*="bg-orange-950"] .text-orange-100,
+html:not(.dark) .aura-theme [class*="bg-orange-950"] .text-orange-200,
+html:not(.dark) .aura-theme [class*="bg-orange-950"] .text-white { color: #ffedd5 !important; }
+
+/* Inline icons inside those toasts/banners inherit the right colour too. */
+html:not(.dark) .aura-theme [class*="bg-red-950"] i,
+html:not(.dark) .aura-theme [class*="bg-rose-950"] i,
+html:not(.dark) .aura-theme [class*="bg-amber-950"] i,
+html:not(.dark) .aura-theme [class*="bg-emerald-950"] i,
+html:not(.dark) .aura-theme [class*="bg-sky-950"] i,
+html:not(.dark) .aura-theme [class*="bg-blue-950"] i,
+html:not(.dark) .aura-theme [class*="bg-indigo-950"] i,
+html:not(.dark) .aura-theme [class*="bg-violet-950"] i,
+html:not(.dark) .aura-theme [class*="bg-orange-950"] i { color: inherit; }
 
 .aura-theme .noise-overlay {
   position: fixed;

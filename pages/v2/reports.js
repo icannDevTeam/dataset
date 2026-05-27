@@ -1,4 +1,5 @@
 import Head from 'next/head';
+import Link from 'next/link';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import PageGuard from '../../components/v2/PageGuard';
@@ -6,6 +7,7 @@ import AccessDenied from '../../components/v2/AccessDenied';
 import { useAuth } from '../../lib/AuthContext';
 import PickupReportExportOverlay from '../../components/v2/reports/PickupReportExportOverlay';
 import OnboardingExportOverlay from '../../components/v2/reports/OnboardingExportOverlay';
+import PreviewModal from '../../components/v2/PreviewModal';
 import { useReauthGate } from '../../components/v2/ReauthGate';
 import { downloadCSV } from '../../lib/download';
 import { notify } from '../../lib/notify';
@@ -227,6 +229,8 @@ export default function ReportsPage() {
   const [pickupLoading, setPickupLoading] = useState(false);
   const [pickupError, setPickupError] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
+  // Preview-only export: opens PreviewModal which deep-links to Downloads Hub.
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // Filters
   const [filterClass, setFilterClass] = useState('');
@@ -502,6 +506,25 @@ export default function ReportsPage() {
         </div>
         )}
 
+        {/* Downloads Hub deep-link banner */}
+        <div className="flex items-start gap-3 rounded-xl border border-teal-500/30 bg-teal-500/10 px-4 py-2.5 text-sm text-teal-100 no-print">
+          <i className="ph ph-info text-teal-300 text-lg mt-0.5"></i>
+          <div className="flex-1">
+            Need the full report? Use the{' '}
+            <Link
+              href={module === 'pickup'
+                ? '/v2/admin/downloads?card=pickup-events'
+                : module === 'forms'
+                  ? '/v2/admin/downloads?card=onboarding-forms'
+                  : '/v2/admin/downloads?card=attendance'}
+              className="underline font-semibold hover:text-white"
+            >
+              Downloads Hub →
+            </Link>{' '}
+            for complete exports (XLSX, PDF, CSV) with branded cover pages.
+          </div>
+        </div>
+
         {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
           <div>
@@ -537,12 +560,12 @@ export default function ReportsPage() {
             {module === 'attendance' && (
               <>
                 <button
-                  onClick={exportCSV}
+                  onClick={() => setPreviewOpen(true)}
                   disabled={!data}
                   className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-all border border-slate-700 disabled:opacity-50"
                 >
-                  <i className="ph ph-file-csv text-lg"></i>
-                  Export CSV
+                  <i className="ph ph-eye text-lg"></i>
+                  Preview report
                 </button>
                 <button
                   onClick={handlePrint}
@@ -557,36 +580,12 @@ export default function ReportsPage() {
             {module === 'pickup' && (
               <>
                 <button
-                  onClick={async () => {
-                    const token = await requireReauth({ action: 'Open pickup export options' });
-                    if (!token) return;
-                    setExportOpen(true);
-                  }}
+                  onClick={() => setPreviewOpen(true)}
                   disabled={!pickupData}
                   className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold border border-brand-400 disabled:opacity-50 shadow-[0_0_20px_rgba(6,182,212,0.3)]"
                 >
-                  <i className="ph ph-export text-lg"></i>
-                  Export report…
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!pickupData) return;
-                    const token = await requireReauth({ action: 'Quick pickup CSV download' });
-                    if (!token) return;
-                    await logAuditExport(token, {
-                      action: 'pickup.export.quick-csv',
-                      label: `Pickup quick CSV ${fromDate} → ${toDate}`,
-                      scope: 'pickup',
-                      filters: { from: fromDate, to: toDate },
-                    });
-                    exportPickupCSV(pickupData, fromDate, toDate);
-                  }}
-                  disabled={!pickupData}
-                  title="Quick CSV — single-shot, no parameters"
-                  className="flex items-center gap-2 px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50"
-                >
-                  <i className="ph ph-file-csv text-lg"></i>
-                  Quick CSV
+                  <i className="ph ph-eye text-lg"></i>
+                  Preview report
                 </button>
                 <button
                   onClick={fetchPickupReport}
@@ -1579,6 +1578,26 @@ export default function ReportsPage() {
         defaultTo={toDate}
       />
 
+      <PreviewModal
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        endpoint={module === 'pickup' ? '/api/downloads/pickup-events' : '/api/downloads/attendance'}
+        cardId={module === 'pickup' ? 'pickup-events' : 'attendance'}
+        title={module === 'pickup' ? 'Pickup Events Report' : 'Attendance Report'}
+        body={{
+          format: 'xlsx',
+          from: fromDate,
+          to: toDate,
+          filters: module === 'attendance'
+            ? {
+                ...(filterClass ? { class: filterClass } : {}),
+                ...(filterGrade ? { grade: filterGrade } : {}),
+                ...(filterSource ? { source: filterSource } : {}),
+              }
+            : {},
+        }}
+      />
+
       {reauthModal}
       </PageGuard>
     </V2Layout>
@@ -2091,6 +2110,7 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const fetchForms = async () => {
     setLoading(true); setError(null);
@@ -2283,19 +2303,10 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
             className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium border border-slate-700 disabled:opacity-50">
             <i className="ph ph-arrows-clockwise mr-1"></i>{loading ? 'Loading…' : 'Apply filters'}
           </button>
-          <button onClick={async () => {
-              const token = await requireReauth({ action: 'Open onboarding export options' });
-              if (!token) return;
-              setExportOpen(true);
-            }}
+          <button onClick={() => setPreviewOpen(true)}
             disabled={!filtered.length}
             className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg text-sm font-semibold disabled:opacity-50 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-            <i className="ph ph-export mr-1"></i>Export report…
-          </button>
-          <button onClick={exportCSV} disabled={!filtered.length}
-            title="Quick CSV — single-shot, no parameters"
-            className="px-4 py-2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30 rounded-lg text-sm font-medium disabled:opacity-50">
-            <i className="ph ph-file-csv mr-1"></i>Quick CSV ({filtered.length})
+            <i className="ph ph-eye mr-1"></i>Preview report
           </button>
         </div>
       </div>
@@ -2406,6 +2417,25 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
         defaultGrade={scope === 'grade' ? grade : ''}
         defaultHomeroom={scope === 'individual' ? homeroom : ''}
         defaultStudentId={scope === 'individual' ? studentId : ''}
+      />
+
+      <PreviewModal
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        endpoint="/api/downloads/onboarding-forms"
+        cardId="onboarding-forms"
+        title="Onboarding Forms"
+        body={{
+          format: 'xlsx',
+          from: fromDate,
+          to: toDate,
+          filters: {
+            ...(status && status !== 'all' ? { status } : {}),
+            ...(scope === 'grade' && grade ? { grade } : {}),
+            ...(scope === 'individual' && homeroom ? { homeroom } : {}),
+            ...(scope === 'individual' && studentId ? { studentId } : {}),
+          },
+        }}
       />
       {reauthModal}
     </div>

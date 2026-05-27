@@ -31,7 +31,7 @@ async function handler(req, res) {
     .catch(() => null);
 
   const rows = [];
-  let active = 0, suspended = 0, withFaces = 0;
+  let active = 0, suspended = 0, withFaces = 0, deletedCount = 0;
   let truncated = false;
 
   if (snap) {
@@ -42,6 +42,10 @@ async function handler(req, res) {
       if (status === 'suspended') suspended++; else active++;
       const faceCount = (c.facePaths || c.photoUrls || []).length;
       if (faceCount > 0) withFaces++;
+      const lifecycle = c.lifecycleStatus || 'active';
+      if (lifecycle === 'deleted') deletedCount++;
+      const deletedAtIso = c.deletedAt?.toDate ? c.deletedAt.toDate().toISOString()
+        : (typeof c.deletedAt === 'string' ? c.deletedAt : '');
 
       const createdIso = c.createdAt?.toDate ? c.createdAt.toDate().toISOString()
         : (typeof c.createdAt === 'string' ? c.createdAt : '');
@@ -55,6 +59,9 @@ async function handler(req, res) {
         (c.authorizedStudentIds || []).join(', '),
         faceCount,
         status,
+        lifecycle,
+        deletedAtIso ? deletedAtIso.slice(0, 19).replace('T', ' ') : '',
+        c.deletedReason || '',
         c.deviceEnrolled ? 'YES' : '',
         createdIso ? createdIso.slice(0, 10) : '',
       ]);
@@ -76,12 +83,13 @@ async function handler(req, res) {
       ['Total chaperones',    rows.length.toLocaleString()],
       ['Active',              active.toLocaleString()],
       ['Suspended',           suspended.toLocaleString()],
+      ['Shadow-deleted',      deletedCount.toLocaleString()],
       ['Face-enrolled',       withFaces.toLocaleString()],
       ['Enrollment rate',     rows.length ? `${((withFaces / rows.length) * 100).toFixed(1)}%` : '—'],
       ['As of',               new Date().toISOString().slice(0, 10)],
     ],
-    columns: ['Name', 'Relation', 'Phone', 'Email', 'ID Number', 'Authorized Students', 'Faces', 'Status', 'Enrolled', 'Added'],
-    colWidths: [16, 8, 12, 18, 11, 16, 6, 8, 7, 9],
+    columns: ['Name', 'Relation', 'Phone', 'Email', 'ID Number', 'Authorized Students', 'Faces', 'Status', 'Lifecycle', 'Deleted At', 'Deleted Reason', 'Enrolled', 'Added'],
+    colWidths: [14, 7, 11, 16, 9, 13, 5, 7, 7, 12, 18, 5, 7],
     rows,
     truncated,
     sheetName: 'Chaperones',

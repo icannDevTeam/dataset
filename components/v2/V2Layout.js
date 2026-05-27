@@ -55,7 +55,10 @@ const NAV_SECTIONS = [
 // page still exists for deep links.
 const BOTTOM_NAV = [
   { href: '/v2/admin/downloads', icon: 'ph-download-simple', label: 'Downloads', permissionKey: 'downloads' },
-  { href: '/v2/admin/rbac', icon: 'ph-shield-checkered', label: 'Admin Console', adminOnly: true, badge: 'ADMIN' },
+  // RBAC link — hidden entirely unless caller has sensitive_user_access.view_rbac
+  { href: '/v2/admin/rbac', icon: 'ph-shield-checkered', label: 'Admin Console', sensitivePerm: 'view_rbac', badge: 'ADMIN' },
+  // Users directory — hidden entirely unless caller has sensitive_user_access.view_user_directory
+  { href: '/v2/admin/users', icon: 'ph-users-three', label: 'Users', sensitivePerm: 'view_user_directory', badge: 'OWNER' },
 ];
 
 export default function V2Layout({ children }) {
@@ -285,7 +288,13 @@ export default function V2Layout({ children }) {
           )}
           <div className="space-y-1">
             {BOTTOM_NAV.map((item) => {
-              // Permission check: adminOnly items need user_management view OR security_audit view
+              // Sensitive user-access gating — hide entirely (never disable)
+              // when the caller lacks the named sensitive_user_access action.
+              if (item.sensitivePerm) {
+                const allowed = !!permissions?.sensitive_user_access?.[item.sensitivePerm];
+                if (!allowed) return null;
+              }
+              // Legacy: adminOnly items need user_management view OR security_audit view
               if (item.adminOnly) {
                 const canSeeAdmin = !!(permissions?.user_management?.view || permissions?.security_audit?.view);
                 if (!canSeeAdmin) return null;

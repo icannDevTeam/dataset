@@ -22,6 +22,14 @@ const ADMIN_NAV = [
     icon: 'ph-shield-checkered',
     label: 'RBAC',
     description: 'Roles, users, permissions',
+    sensitivePerm: 'view_rbac',
+  },
+  {
+    href: '/v2/admin/users',
+    icon: 'ph-users-three',
+    label: 'Users',
+    description: 'Directory + admin password reset',
+    sensitivePerm: 'view_user_directory',
   },
   {
     href: '/v2/admin/system-audit',
@@ -50,7 +58,7 @@ function getWIBTime() {
 
 export default function AdminLayout({ children, title = 'Admin Console', subtitle, actions = null, fullBleed = false }) {
   const router = useRouter();
-  const { user, role, signOut } = useAuth();
+  const { user, role, signOut, permissions } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [clock, setClock] = useState('');
@@ -83,6 +91,12 @@ export default function AdminLayout({ children, title = 'Admin Console', subtitl
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-5 px-3 space-y-1.5">
         {ADMIN_NAV.map((item) => {
+          // Hide entirely — never disabled — when caller lacks the
+          // required sensitive_user_access action.
+          if (item.sensitivePerm) {
+            const allowed = !!permissions?.sensitive_user_access?.[item.sensitivePerm];
+            if (!allowed) return null;
+          }
           const active = isActive(item.href);
           return (
             <Link

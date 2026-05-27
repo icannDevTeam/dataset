@@ -462,6 +462,24 @@ async function handler(req, res) {
         update.permissions = newPermissions;
       }
 
+      // ── Owner-only enforcement for sensitive_user_access (M0 Track D) ──
+      // Granting or revoking any sensitive_user_access.* action is an
+      // OWNER-ONLY capability. Block here BEFORE the update is committed.
+      const beforeSensitive = doc.data().permissions?.sensitive_user_access || {};
+      const afterSensitive  = update.permissions?.sensitive_user_access || null;
+      const sensitiveDiff = [];
+      if (afterSensitive && typeof afterSensitive === 'object') {
+        const SENSITIVE_ACTIONS = ['view_rbac', 'edit_rbac', 'reset_user_password', 'view_user_directory', 'manage_custom_claims'];
+        SENSITIVE_ACTIONS.forEach((a) => {
+          const wasGranted = !!beforeSensitive[a];
+          const nowGranted = !!afterSensitive[a];
+          if (wasGranted !== nowGranted) sensitiveDiff.push({ action: a, before: wasGranted, after: nowGranted });
+        });
+      }
+      if (sensitiveDiff.length > 0 && (caller.role || '').toLowerCase() !== 'owner' && !caller.superAdmin) {
+        return res.status(403).json({ error: 'Only Owners can grant or revoke sensitive_user_access permissions.' });
+      }
+
       if (classScopes !== undefined) {
         update.classScopes = sanitizeClassScopes(classScopes);
       }
@@ -526,6 +544,26 @@ async function handler(req, res) {
           ? `Changed ${cleanEmail} role: ${beforeData.role} → ${updatedRole}`
           : `Updated permissions for ${cleanEmail}`,
       });
+
+      // High-severity audit: emit one rbac.sensitive_grant per changed
+      // sensitive_user_access action so SIEM/alerting can fire on each.
+      if (sensitiveDiff.length > 0) {
+        for (const diff of sensitiveDiff) {
+          try {
+            await logAudit(db, {
+              actor: caller, req,
+              kind: 'rbac.sensitive_grant',
+              target: { type: 'user', id: cleanEmail, label: beforeData.name || cleanEmail },
+              before: { granted: diff.before },
+              after: { granted: diff.after },
+              summary: `${diff.after ? 'Granted' : 'Revoked'} sensitive_user_access.${diff.action} for ${cleanEmail}`,
+              metadata: { feature: 'sensitive_user_access', action: diff.action, severity: 'high' },
+            });
+          } catch (auditErr) {
+            console.error('[USERS PATCH] sensitive audit log failed', auditErr?.message);
+          }
+        }
+      }
       const updatedClassScopes = update.classScopes !== undefined
         ? update.classScopes
         : (Array.isArray(doc.data().classScopes) ? doc.data().classScopes : []);

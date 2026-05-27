@@ -2,13 +2,28 @@
  * /v2/admin/downloads
  *
  * The Downloads Hub — one-stop compliance/operations export desk.
- * Wires five branded report endpoints behind a uniform date-range
- * + format picker UI. Access is gated by the `downloads` feature in
+ * Wires branded report endpoints behind a uniform date-range +
+ * format picker UI. Access is gated by the `downloads` feature in
  * lib/permissions.js (owner + admin by default).
+ *
+ * ───────────────────────────────────────────────────────────────────
+ * Deep-link contract: `/v2/admin/downloads?card=<id>`
+ *
+ * Other V2 admin pages (analytics, reports, …) ship a "Preview report"
+ * button that opens the preview modal then hands the user off here to
+ * configure the actual export. They pass the matching card `id` so we
+ * can scroll-to + highlight that card on mount.
+ *
+ * Valid `card` ids (must stay in sync with the SECTIONS array below):
+ *   attendance · chaperone-roster · pickup-events · onboarding-forms
+ *   students-roster · terminals · system-health · security-incidents
+ *   access-logs · audit-log
+ * ───────────────────────────────────────────────────────────────────
  */
 import Head from 'next/head';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import AdminLayout from '../../../components/v2/AdminLayout';
 import ReauthModal from '../../../components/v2/ReauthModal';
 
@@ -132,6 +147,15 @@ const SECTIONS = [
         tone: 'indigo',
         needsRange: true,
         filters: ['auditKind'],
+      },
+      {
+        id: 'chaperone-audit',
+        endpoint: '/api/downloads/chaperone-audit',
+        icon: 'ph-user-list',
+        title: 'Chaperone Audit Trail',
+        blurb: 'Shadow-delete, restore and mutation history per chaperone.',
+        tone: 'orange',
+        needsRange: true,
       },
     ],
   },
@@ -296,8 +320,12 @@ function PreviewModal({ data, tone, format, onClose, onConfirm }) {
   );
 }
 
-function DownloadCard({ card }) {
+function DownloadCard({ card, highlighted, registerRef }) {
   const tone = TONES[card.tone] || TONES.teal;
+  const cardRef = useRef(null);
+  useEffect(() => {
+    if (registerRef) registerRef(card.id, cardRef.current);
+  }, [card.id, registerRef]);
   const [from, setFrom] = useState(daysAgo(29));
   const [to, setTo] = useState(today());
   const [format, setFormat] = useState('xlsx');
@@ -390,7 +418,13 @@ function DownloadCard({ card }) {
   }, [card, format, from, to, filters]);
 
   return (
-    <div className={`bg-slate-900/60 border ${tone.ring} rounded-xl p-4 flex flex-col gap-3`}>
+    <div
+      ref={cardRef}
+      data-card-id={card.id}
+      className={`bg-slate-900/60 border ${tone.ring} rounded-xl p-4 flex flex-col gap-3 transition-shadow ${
+        highlighted ? 'ring-2 ring-teal-400/70 ring-offset-2 ring-offset-slate-950 shadow-[0_0_30px_rgba(45,212,191,0.35)]' : ''
+      }`}
+    >
       <div className="flex items-start gap-3">
         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${tone.bg} ${tone.fg}`}>
           <i className={`ph ${card.icon} text-xl`} />
@@ -546,6 +580,37 @@ const CROSS_LINKS = [
 
 export default function DownloadsPage() {
   const allCards = useMemo(() => SECTIONS.flatMap((s) => s.cards), []);
+  const router = useRouter();
+  const cardRefs = useRef({});
+  const [highlightedId, setHighlightedId] = useState(null);
+
+  const registerCardRef = useCallback((id, el) => {
+    if (el) cardRefs.current[id] = el;
+    else delete cardRefs.current[id];
+  }, []);
+
+  // Deep-link handler — scroll-to + highlight when ?card=<id> is present.
+  // Re-runs whenever the param changes so navigating between cards works.
+  useEffect(() => {
+    if (!router.isReady) return;
+    const raw = router.query.card;
+    const id = Array.isArray(raw) ? raw[0] : raw;
+    if (!id) { setHighlightedId(null); return; }
+    const valid = allCards.some((c) => c.id === id);
+    if (!valid) return;
+    // Wait one frame so refs are attached.
+    const t1 = setTimeout(() => {
+      const el = cardRefs.current[id];
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      setHighlightedId(id);
+    }, 60);
+    // Remove the highlight ring after a short pulse.
+    const t2 = setTimeout(() => setHighlightedId(null), 3000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [router.isReady, router.query.card, allCards]);
+
   return (
     <AdminLayout title="Downloads" subtitle="Reports, audits & compliance exports">
       <Head><title>Downloads · Admin</title></Head>
@@ -578,7 +643,14 @@ export default function DownloadsPage() {
               <p className="text-xs text-slate-500 mt-0.5">{section.description}</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {section.cards.map((c) => (<DownloadCard key={c.id} card={c} />))}
+              {section.cards.map((c) => (
+                <DownloadCard
+                  key={c.id}
+                  card={c}
+                  highlighted={highlightedId === c.id}
+                  registerRef={registerCardRef}
+                />
+              ))}
             </div>
           </section>
         ))}

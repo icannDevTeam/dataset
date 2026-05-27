@@ -6,20 +6,25 @@
  *
  * Query: ?status=all|due|never_enrolled|active   (default: all)
  *        ?limit=500
+ *        ?includeDeleted=1   include shadow-deleted chaperones
  */
 import admin from 'firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
-import { initializeFirebase } from '../../../../lib/firebase-admin';
+import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
+
+const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1h
 
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
   const limit = Math.min(1000, parseInt(req.query.limit || '500', 10));
   const status = String(req.query.status || 'all');
+  const includeDeleted = ['1', 'true', 'yes'].includes(String(req.query.includeDeleted || '').toLowerCase());
   const tid = tenancy.getTenantId(req.query.tenant);
 
   initializeFirebase();
   const db = admin.firestore();
+  const bucket = getFirebaseStorage().bucket();
 
   const snap = await db.collection(tenancy.chaperonesPath(tid))
     .orderBy('createdAt', 'desc')
@@ -28,8 +33,11 @@ async function handler(req, res) {
   const now = Date.now();
   const baseItems = [];
   const studentIdSet = new Set();
+  const facePathByItemId = {};
   snap.forEach((d) => {
     const c = d.data();
+    const lifecycleStatus = c.lifecycleStatus || 'active';
+    if (!includeDeleted && lifecycleStatus === 'deleted') return;
     const lastEnrolledAt = tsToMs(c.lastEnrolledAt);
     const reenrollDueAt = tsToMs(c.reenrollDueAt);
     const enrol = c.enrollmentSummary || null;
@@ -41,13 +49,23 @@ async function handler(req, res) {
       if (sid) studentIdSet.add(String(sid));
     });
 
+    // Resolve preferred face photo path (admin-uploaded > parent-uploaded).
+    const facePath =
+      (Array.isArray(c.facePaths) && c.facePaths[0]) ||
+      (typeof c.photoUrl === 'string' && c.photoUrl) ||
+      (Array.isArray(c.photoUrls) && c.photoUrls[0]) ||
+      null;
+    if (facePath) facePathByItemId[d.id] = facePath;
+
     baseItems.push({
       id: d.id,
       employeeNo: c.employeeNo || null,
       name: c.name || '—',
-      relationship: c.relationship || null,
+      relationship: c.relationship || c.relation || null,
       authorizedStudentIds,
-      photoCount: (c.photoUrls || []).length,
+      photoCount:
+        (Array.isArray(c.facePaths) ? c.facePaths.length : 0) ||
+        (Array.isArray(c.photoUrls) ? c.photoUrls.length : 0),
       enrollmentSummary: enrol,
       everEnrolled,
       reenrollDueAt: reenrollDueAt ? new Date(reenrollDueAt).toISOString() : null,
@@ -56,8 +74,35 @@ async function handler(req, res) {
       lastSeenGate: c.lastSeenGate || null,
       suspended: !!c.suspended,
       createdAt: tsToIso(c.createdAt),
+      // Shadow-delete bookkeeping (additive — older docs default to 'active').
+      lifecycleStatus,
+      deletedAt: tsToIso(c.deletedAt),
+      deletedBy: c.deletedBy || null,
+      deletedReason: c.deletedReason || null,
+      restoredAt: tsToIso(c.restoredAt),
     });
   });
+
+  // Sign one face URL per chaperone in parallel (TTL 1h). Best-effort: a
+  // missing storage object never breaks the row — the UI falls back to
+  // initials. Signed URLs are short-lived so raw storage paths never leak.
+  const photoUrlById = {};
+  await Promise.all(Object.entries(facePathByItemId).map(async ([itemId, p]) => {
+    try {
+      // photoUrl is sometimes already a full https URL (legacy parent flow).
+      if (/^https?:\/\//.test(p)) {
+        photoUrlById[itemId] = p;
+        return;
+      }
+      const [u] = await bucket.file(p).getSignedUrl({
+        action: 'read',
+        expires: Date.now() + SIGNED_URL_TTL_MS,
+      });
+      photoUrlById[itemId] = u;
+    } catch {
+      // swallow — fallback to initials avatar client-side
+    }
+  }));
 
   const studentMetaById = await loadStudentMetaById(db, tid, Array.from(studentIdSet));
   const items = baseItems.map((item) => {
@@ -74,6 +119,7 @@ async function handler(req, res) {
 
     return {
       ...item,
+      photoUrl: photoUrlById[item.id] || null,
       studentClasses: Array.from(classSet),
       studentGrades: Array.from(gradeSet),
       linkedStudents,
@@ -93,7 +139,9 @@ async function handler(req, res) {
       never_enrolled: items.filter((c) => !c.everEnrolled).length,
       active: items.filter((c) => c.everEnrolled && !c.suspended).length,
       suspended: items.filter((c) => c.suspended).length,
+      deleted: items.filter((c) => c.lifecycleStatus === 'deleted').length,
     },
+    includeDeleted,
   });
 }
 

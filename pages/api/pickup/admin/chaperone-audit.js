@@ -10,10 +10,12 @@
  */
 import admin from 'firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
-import { initializeFirebase } from '../../../../lib/firebase-admin';
+import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
 
 const EVENT_LIMIT = 200;
+const REVISION_LIMIT = 100;
+const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1h
 
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
@@ -23,6 +25,7 @@ async function handler(req, res) {
 
   initializeFirebase();
   const db = admin.firestore();
+  const bucket = getFirebaseStorage().bucket();
 
   // Chaperone doc
   const chapRef = db.doc(`${tenancy.chaperonesPath(tid)}/${id}`);
@@ -100,6 +103,77 @@ async function handler(req, res) {
     }
   } catch {}
 
+  // Linked student metadata for chip rendering on the detail page.
+  const linkedStudents = [];
+  const authorizedStudentIds = chap.authorizedStudentIds || [];
+  if (authorizedStudentIds.length) {
+    const sSnaps = await Promise.all(
+      authorizedStudentIds.map((sid) =>
+        db.doc(`${tenancy.studentMetadataPath(tid)}/${sid}`).get().catch(() => null)
+      )
+    );
+    sSnaps.forEach((s, idx) => {
+      const sid = authorizedStudentIds[idx];
+      if (s?.exists) {
+        const m = s.data() || {};
+        linkedStudents.push({
+          id: sid,
+          binusId: m.binusId || m.binusianId || sid,
+          name: m.name || m.studentName || null,
+          homeroom: m.homeroom || m.className || m.class || null,
+          grade: m.grade || m.gradeCode || m.gradeName || null,
+        });
+      } else {
+        linkedStudents.push({ id: sid, binusId: sid, name: null, homeroom: null, grade: null });
+      }
+    });
+  }
+
+  // Signed URL for hero thumbnail (1h TTL). Admin-uploaded > parent-uploaded.
+  const facePath =
+    (Array.isArray(chap.facePaths) && chap.facePaths[0]) ||
+    (typeof chap.photoUrl === 'string' && chap.photoUrl) ||
+    (Array.isArray(chap.photoUrls) && chap.photoUrls[0]) ||
+    null;
+  let photoUrl = null;
+  if (facePath) {
+    try {
+      if (/^https?:\/\//.test(facePath)) {
+        photoUrl = facePath;
+      } else {
+        const [u] = await bucket.file(facePath).getSignedUrl({
+          action: 'read',
+          expires: Date.now() + SIGNED_URL_TTL_MS,
+        });
+        photoUrl = u;
+      }
+    } catch {
+      photoUrl = null;
+    }
+  }
+
+  // Revisions (shadow-delete history). Admin-only via Firestore rules.
+  const revisions = [];
+  try {
+    const revSnap = await db.collection(`${tenancy.chaperonesPath(tid)}/${id}/revisions`)
+      .orderBy('at', 'desc')
+      .limit(REVISION_LIMIT)
+      .get();
+    revSnap.forEach((d) => {
+      const r = d.data() || {};
+      revisions.push({
+        id: d.id,
+        at: r.at || tsToIso(r.atServerTs),
+        by: r.by || null,
+        action: r.action || null,
+        reason: r.reason || null,
+      });
+    });
+  } catch (err) {
+    // missing index / collection — leave empty
+    console.warn('[chaperone-audit] revisions read failed', err.message);
+  }
+
   // Sort in JS (avoids composite Firestore index on employeeNo + recordedAt/createdAt)
   events.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
   incidents.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
@@ -110,14 +184,25 @@ async function handler(req, res) {
       id,
       employeeNo,
       name: chap.name,
-      relationship: chap.relationship,
-      authorizedStudentIds: chap.authorizedStudentIds || [],
-      photoCount: (chap.photoUrls || []).length,
+      relationship: chap.relationship || chap.relation || null,
+      authorizedStudentIds,
+      photoCount:
+        (Array.isArray(chap.facePaths) ? chap.facePaths.length : 0) ||
+        (Array.isArray(chap.photoUrls) ? chap.photoUrls.length : 0),
+      photoUrl,
       lastSeenAt: tsToIso(chap.lastSeenAt) || chap.lastSeenAt,
       lastSeenGate: chap.lastSeenGate,
       enrollmentSummary: chap.enrollmentSummary || null,
       reenrollDueAt: tsToIso(chap.reenrollDueAt) || chap.reenrollDueAt,
+      // Shadow-delete fields (additive).
+      lifecycleStatus: chap.lifecycleStatus || 'active',
+      deletedAt: tsToIso(chap.deletedAt),
+      deletedBy: chap.deletedBy || null,
+      deletedReason: chap.deletedReason || null,
+      restoredAt: tsToIso(chap.restoredAt),
     },
+    linkedStudents,
+    revisions,
     onboarding,
     events,
     incidents,
