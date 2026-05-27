@@ -45,3 +45,6 @@ coverage/
 *.log
 server.log
 .vercel
+
+# Commit message scratch file (PS 5.1 multi-line workaround)
+.git-commit-msg.tmp
