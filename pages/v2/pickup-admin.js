@@ -2349,11 +2349,6 @@ function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingC
           <input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
             className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
         </label>
-        <label className="block col-span-2">
-          <div className="text-[10px] text-slate-500 mb-0.5">ID Number</div>
-          <input value={form.idNumber} onChange={(e) => setForm((f) => ({ ...f, idNumber: e.target.value }))}
-            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-        </label>
       </div>
       {enrichedStudents.length > 0 && (
         <div>
@@ -2585,11 +2580,6 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
               <input value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
             </label>
-            <label className="block col-span-2">
-              <div className="text-[10px] text-slate-500 mb-0.5">ID Number</div>
-              <input value={editForm.idNumber} onChange={(e) => setEditForm((f) => ({ ...f, idNumber: e.target.value }))}
-                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-            </label>
           </div>
           {enrichedStudents.length > 0 && (
             <div>
@@ -2625,7 +2615,6 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
           {c.phone && (<span><i className="ph ph-phone text-slate-500 mr-1"></i>{c.phone}</span>)}
           {c.email && (<span><i className="ph ph-envelope text-slate-500 mr-1"></i>{c.email}</span>)}
-          {c.idNumber && (<span><i className="ph ph-identification-card text-slate-500 mr-1"></i>{c.idNumber}</span>)}
         </div>
 
         {/* Authorized to pick up */}
@@ -3034,7 +3023,6 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
                   <div className="text-xs text-slate-700 mt-1 space-y-0.5">
                     <div>Phone: <span className="font-mono">{c.phone}</span></div>
                     {c.email && <div>Email: <span className="font-mono">{c.email}</span></div>}
-                    {c.idNumber && <div>Government ID: <span className="font-mono">{c.idNumber}</span></div>}
                   </div>
                   <div className="text-xs mt-1.5">
                     <span className="text-slate-600">Authorised to pick up: </span>

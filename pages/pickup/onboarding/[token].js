@@ -1250,7 +1250,6 @@ export default function PickupOnboardingPage() {
                               <div style={{ color: BRAND.textSubtle, fontSize: 12.5, marginTop: 2 }}>
                                 {relLabel} · {c.phone || 'no phone'}
                                 {c.email && <> · {c.email}</>}
-                                {c.idNumber && <> · ID {c.idNumber}</>}
                               </div>
                               <div style={{ color: BRAND.textMuted, fontSize: 12.5, marginTop: 6 }}>
                                 <strong style={{ color: BRAND.text }}>Authorized for:</strong>{' '}
@@ -1796,11 +1795,6 @@ export default function PickupOnboardingPage() {
                           <label style={label()}>Phone *</label>
                           <input style={input()} value={c.phone}
                             onChange={(e) => updateChaperone(idx, { phone: e.target.value })} />
-                        </div>
-                        <div>
-                          <label style={label()}>ID / KTP # (optional)</label>
-                          <input style={input()} value={c.idNumber}
-                            onChange={(e) => updateChaperone(idx, { idNumber: e.target.value })} />
                         </div>
                         <div style={{ gridColumn: '1 / -1' }}>
                           <label style={label()}>Email (optional)</label>
