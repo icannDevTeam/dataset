@@ -6,11 +6,16 @@
  * Body: { token, studentId }
  * Returns: { ok, student: {id, name, homeroom, photoUrl?} }
  *
+ * Source of truth: BINUS API (live). Firestore is no longer consulted
+ * for student data here — parents only need name + homeroom keyed by
+ * Binusian ID, which the BINUS API serves directly.
+ *
  * Phase 3: in-memory LRU cache (24h TTL) + per-IP rate limit (60/min) +
  * Cache-Control to keep the form responsive even under heavy parent
  * traffic. Cache key is per-tenant so tokens for different tenants
  * never collide.
  */
+import axios from 'axios';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import admin from 'firebase-admin';
 
@@ -18,6 +23,52 @@ const tenancy = require('../../../../lib/tenancy');
 const { inspectPickupOnboardingToken } = require('../../../../lib/pickup-token');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
 const inviteLinks = require('../../../../lib/onboarding-invites');
+
+// BINUS API only serves on HTTP port 80 (HTTPS port 443 returns 404).
+const BINUS_BASE = 'http://binusian.ws';
+
+// Short-lived auth-token cache. BINUS tokens last ~60 min; we refresh
+// well before that. One token serves every concurrent lookup.
+let _binusToken = null;
+let _binusTokenExpiresAt = 0;
+async function getBinusToken() {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error('binus_api_key_missing');
+  const now = Date.now();
+  if (_binusToken && now < _binusTokenExpiresAt) return _binusToken;
+  const r = await axios.get(`${BINUS_BASE}/binusschool/auth/token`, {
+    headers: { Authorization: `Basic ${apiKey}`, 'Content-Type': 'application/json' },
+    timeout: 15000,
+  });
+  const tok =
+    r.data?.data?.token || r.data?.token || r.data?.access_token || null;
+  if (!tok) throw new Error('binus_token_empty');
+  _binusToken = tok;
+  _binusTokenExpiresAt = now + 50 * 60 * 1000; // refresh after ~50min
+  return tok;
+}
+
+async function lookupStudentFromBinus(sid) {
+  const token = await getBinusToken();
+  const r = await axios.post(
+    `${BINUS_BASE}/binusschool/bss-student-enrollment`,
+    { IdStudent: String(sid) },
+    {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      timeout: 20000,
+    }
+  );
+  const result = r.data;
+  if (result?.resultCode !== 200) return null;
+  const sd = result.studentDataResponse || result.data || result;
+  if (!sd || !sd.studentName) return null;
+  return {
+    name: sd.studentName || sd.name || sd.fullName || '',
+    homeroom: sd.homeroom || sd.class || sd.className || null,
+    gradeCode: sd.gradeCode || sd.grade || null,
+    gradeName: sd.gradeName || null,
+  };
+}
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const CACHE_MAX = 5000;
@@ -84,22 +135,25 @@ export default async function handler(req, res) {
         return res.status(usable.status || 403).json({ error: usable.reason });
       }
     }
-    let data = null;
-    const tenantSnap = await db.doc(`${tenancy.studentsPath(claims.tid)}/${sid}`).get();
-    if (tenantSnap.exists) {
-      data = tenantSnap.data() || {};
-    } else {
-      // Fall back to legacy collection (dual-read window)
-      const legacy = await db.doc(`students/${sid}`).get();
-      if (legacy.exists) data = legacy.data() || {};
+
+    // Pull student data straight from BINUS API. No Firestore student
+    // collection lookup — BINUS is the source of truth for ID → name/class.
+    let binus;
+    try {
+      binus = await lookupStudentFromBinus(sid);
+    } catch (err) {
+      console.error('[pickup/onboarding/lookup] BINUS error:', err.message);
+      return res.status(502).json({ error: 'binus_api_unavailable' });
     }
-    if (!data) return res.status(404).json({ error: 'student not found' });
+    if (!binus) return res.status(404).json({ error: 'student not found' });
 
     const student = {
       id: sid,
-      name: data.name || data.fullName || sid,
-      homeroom: data.homeroom || data.className || null,
-      photoUrl: data.photoUrl || null,
+      name: binus.name || sid,
+      homeroom: binus.homeroom || null,
+      gradeCode: binus.gradeCode || null,
+      gradeName: binus.gradeName || null,
+      photoUrl: null,
     };
 
     // Surface any prior lock so the form can refuse to add an
