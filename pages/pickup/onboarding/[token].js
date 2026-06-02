@@ -768,10 +768,6 @@ export default function PickupOnboardingPage() {
   // the parent doesn't have to scroll to the bottom of the form to see
   // what went wrong.
   const [studentError, setStudentError] = useState(null);
-  // Phase 3: manual fallback when BINUS API is down or returns nothing.
-  const [manualMode, setManualMode] = useState(false);
-  const [manualName, setManualName] = useState('');
-  const [manualHomeroom, setManualHomeroom] = useState('');
 
   const [chaperones, setChaperones] = useState([]);
 
@@ -868,30 +864,17 @@ export default function PickupOnboardingPage() {
     }
     setStudentLookupBusy(true); setStudentError(null); setError(null);
     try {
-      // Phase 3: query BINUS API and tenant Firestore in parallel.
-      // Tenant Firestore is authoritative for token scope; BINUS API enriches
-      // name/homeroom when the student isn't yet in our local copy.
-      const [tenantRes, binusRes] = await Promise.allSettled([
-        fetch('/api/pickup/onboarding/lookup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, studentId: sid }),
-        }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) })),
-        fetch('/api/student/lookup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ studentId: sid }),
-        }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) })),
-      ]);
+      const tenantRes = await fetch('/api/pickup/onboarding/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, studentId: sid }),
+      }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) }));
 
       let student = null;
       let alreadyRegistered = null;
-      if (tenantRes.status === 'fulfilled' && tenantRes.value.ok) {
-        student = tenantRes.value.body.student;
-        alreadyRegistered = tenantRes.value.body.alreadyRegistered || null;
-      } else if (binusRes.status === 'fulfilled' && binusRes.value.ok && binusRes.value.body.success) {
-        const b = binusRes.value.body;
-        student = { id: sid, name: b.name, homeroom: b.homeroom, photoUrl: null };
+      if (tenantRes.ok) {
+        student = tenantRes.body.student;
+        alreadyRegistered = tenantRes.body.alreadyRegistered || null;
       }
 
       // Hard-stop if a non-rejected pickup record already exists for this
@@ -906,25 +889,7 @@ export default function PickupOnboardingPage() {
       }
 
       if (!student) {
-        // Both lookups failed → offer manual fallback. Keep the message
-        // tight and inline so the parent sees it without scrolling.
-        if (!silent) {
-          setManualMode(true);
-          setStudentError(`ID “${sid}” not found. Re-check the student card, or enter details manually below.`);
-        } else {
-          // Silent auto-add (token-bound primary student) failed.
-          // Inject a stub so the token's required student is in the list,
-          // then surface manual-entry UI pre-filled with the SID so the
-          // parent can fill in name + homeroom and edit the stub.
-          setStudents((prev) => prev.find((s) => s.id === sid) ? prev : [...prev, { id: sid, name: '', homeroom: null, photoUrl: null, _needsManual: true }]);
-          setChaperones((prev) => prev.map((c) => ({
-            ...c,
-            authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), sid])),
-          })));
-          setStudentInputId(sid);
-          setManualMode(true);
-          setStudentError(`Couldn’t auto-fill student ${sid}. Please enter name and class below.`);
-        }
+        if (!silent) setStudentError(`ID “${sid}” not found. Re-check the student card and try again.`);
         return;
       }
 
@@ -936,37 +901,9 @@ export default function PickupOnboardingPage() {
       })));
       setStudentInputId('');
       setStudentError(null);
-      setManualMode(false);
-      setManualName(''); setManualHomeroom('');
     } catch (e) {
-      if (!silent) setStudentError(e.message || 'Lookup failed — try manual entry below.');
-      setManualMode(true);
+      if (!silent) setStudentError(e.message || 'Lookup failed — please try again.');
     } finally { setStudentLookupBusy(false); }
-  }
-
-  function addStudentManual() {
-    setError(null); setStudentError(null);
-    const sid = studentInputId.trim();
-    const nm = manualName.trim();
-    const hr = manualHomeroom.trim();
-    if (!sid) return setStudentError('Binusian ID is required.');
-    if (!/^[A-Za-z0-9_-]{4,32}$/.test(sid)) return setStudentError('ID looks invalid.');
-    if (!nm) return setStudentError('Student’s full name is required.');
-    const existing = students.find((s) => s.id === sid);
-    if (existing && !existing._needsManual) return setStudentError('That student is already added.');
-    const student = { id: sid, name: nm, homeroom: hr || null, photoUrl: null };
-    if (existing && existing._needsManual) {
-      // Replace the stub (token-bound primary student that lookup couldn't fill).
-      setStudents((prev) => prev.map((s) => (s.id === sid ? student : s)));
-    } else {
-      setStudents((prev) => [...prev, student]);
-    }
-    setChaperones((prev) => prev.map((c) => ({
-      ...c,
-      authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), student.id])),
-    })));
-    setStudentInputId(''); setManualName(''); setManualHomeroom('');
-    setManualMode(false);
   }
 
   function removeStudent(id) {
@@ -1109,10 +1046,6 @@ export default function PickupOnboardingPage() {
       return 'Type your full name exactly as the signature.';
     }
     if (students.length === 0) return 'Add at least one student.';
-    const stubStudent = students.find((s) => s._needsManual);
-    if (stubStudent) {
-      return `Please complete the details for student ${stubStudent.id} before submitting.`;
-    }
     if (chaperones.length === 0) return 'Add at least one chaperone.';
     const unsaved = chaperones.findIndex((c) => !c.confirmed);
     if (unsaved !== -1) {
@@ -1689,7 +1622,7 @@ export default function PickupOnboardingPage() {
 
                 <div style={card()}>
                   {sectionHeading(2, 'Your child(ren)',
-                    'Type the Binusian ID. We’ll auto-fill the name and class. If the system can’t find it, you can type the details manually.')}
+                    'Type the Binusian ID. We’ll auto-fill the name and class.')}
 
                   {students.length === 0 ? (
                     <div style={{
@@ -1703,15 +1636,15 @@ export default function PickupOnboardingPage() {
                       {students.map((s) => (
                         <div key={s.id} style={{
                           padding: '12px 16px',
-                          background: s._needsManual ? '#FFF7ED' : BRAND.surfaceAlt,
+                          background: BRAND.surfaceAlt,
                           borderRadius: 8,
-                          border: `1px solid ${s._needsManual ? '#FB923C' : BRAND.border}`,
+                          border: `1px solid ${BRAND.border}`,
                           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                           gap: 12,
                         }}>
                           <div>
                             <div style={{ fontWeight: 600, color: BRAND.text }}>
-                              {s.name || <span style={{ color: '#C2410C', fontStyle: 'italic' }}>⚠ Name needed — please complete below</span>}
+                              {s.name || '—'}
                             </div>
                             <div style={{ fontSize: 12, color: BRAND.textSubtle, marginTop: 2 }}>
                               Binusian ID {s.id}{s.homeroom ? ` · ${s.homeroom}` : ''}
@@ -1763,54 +1696,6 @@ export default function PickupOnboardingPage() {
                         fontSize: 13, lineHeight: 1.45, borderRadius: 6,
                         border: `1px solid ${BRAND.danger}33`,
                       }}>{studentError}</div>
-                    )}
-
-                    {!manualMode && (
-                      <div style={{ marginTop: 8, fontSize: 12, color: BRAND.textSubtle }}>
-                        Can’t find your child?{' '}
-                        <button type="button"
-                          onClick={() => { setManualMode(true); setError(null); setStudentError(null); }}
-                          style={{
-                            background: 'none', border: 'none', padding: 0,
-                            color: BRAND.navy, fontWeight: 600, cursor: 'pointer',
-                            textDecoration: 'underline', fontSize: 12,
-                          }}>Enter details manually</button>.
-                      </div>
-                    )}
-
-                    {manualMode && (
-                      <div style={{
-                        marginTop: 12, padding: 14,
-                        background: BRAND.surface, borderRadius: 8,
-                        border: `1px dashed ${BRAND.borderStrong}`,
-                      }}>
-                        <div style={{ fontSize: 12, color: BRAND.textMuted, marginBottom: 10, fontWeight: 600 }}>
-                          Manual entry (used when our directory lookup is unavailable)
-                        </div>
-                        <div className="pog-grid-2" style={{
-                          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
-                        }}>
-                          <div>
-                            <label style={label()}>Student full name *</label>
-                            <input style={input()} value={manualName}
-                              onChange={(e) => setManualName(e.target.value)} />
-                          </div>
-                          <div>
-                            <label style={label()}>Class / homeroom</label>
-                            <input style={input()} placeholder="e.g. 4C" value={manualHomeroom}
-                              onChange={(e) => setManualHomeroom(e.target.value)} />
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                          <button type="button" style={btnSecondary()} onClick={addStudentManual}>
-                            Add manually
-                          </button>
-                          <button type="button" style={btnGhost()}
-                            onClick={() => { setManualMode(false); setManualName(''); setManualHomeroom(''); setError(null); setStudentError(null); }}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
                     )}
                   </div>
                 </div>
