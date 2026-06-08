@@ -2085,13 +2085,22 @@ function DetailDrawer(props) {
 
 function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) {
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: s.name || '', homeroom: s.homeroom || '' });
+  const [editForm, setEditForm] = useState({
+    id: s.id || '',
+    name: s.name || '',
+    grade: s.grade || '',
+    className: s.className || '',
+    homeroom: s.homeroom || '',
+  });
   const [savingEdit, setSavingEdit] = useState(false);
 
   const submitEdit = async () => {
     if (!onEdit) return;
     const patch = {};
+    if ((editForm.id || '').trim() !== (s.id || '')) patch.id = (editForm.id || '').trim();
     if (editForm.name.trim() && editForm.name.trim() !== s.name) patch.name = editForm.name.trim();
+    if ((editForm.grade || '').trim() !== (s.grade || '')) patch.grade = (editForm.grade || '').trim();
+    if ((editForm.className || '').trim().toUpperCase() !== (s.className || '')) patch.className = (editForm.className || '').trim().toUpperCase();
     if ((editForm.homeroom || '').trim() !== (s.homeroom || '')) patch.homeroom = editForm.homeroom.trim();
     if (Object.keys(patch).length === 0) { setEditOpen(false); return; }
     setSavingEdit(true);
@@ -2145,8 +2154,23 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
           <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Edit student</div>
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
+              <div className="text-[10px] text-slate-500 mb-0.5">BINUS Student ID</div>
+              <input value={editForm.id} onChange={(e) => setEditForm((f) => ({ ...f, id: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono" />
+            </label>
+            <label className="block">
               <div className="text-[10px] text-slate-500 mb-0.5">Name</div>
               <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+            </label>
+            <label className="block">
+              <div className="text-[10px] text-slate-500 mb-0.5">Grade</div>
+              <input value={editForm.grade} onChange={(e) => setEditForm((f) => ({ ...f, grade: e.target.value.replace(/[^0-9]/g, '') }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+            </label>
+            <label className="block">
+              <div className="text-[10px] text-slate-500 mb-0.5">Class</div>
+              <input value={editForm.className} onChange={(e) => setEditForm((f) => ({ ...f, className: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
             </label>
             <label className="block">
@@ -2156,7 +2180,16 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
             </label>
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <button onClick={() => { setEditOpen(false); setEditForm({ name: s.name || '', homeroom: s.homeroom || '' }); }}
+            <button onClick={() => {
+              setEditOpen(false);
+              setEditForm({
+                id: s.id || '',
+                name: s.name || '',
+                grade: s.grade || '',
+                className: s.className || '',
+                homeroom: s.homeroom || '',
+              });
+            }}
               className="text-[11px] px-2 py-1 rounded bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">Cancel</button>
             <button onClick={submitEdit} disabled={savingEdit}
               className="text-[11px] px-3 py-1 rounded bg-brand-500 text-white hover:bg-brand-400 disabled:opacity-50">
@@ -2185,6 +2218,18 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
             <i className="ph ph-identification-card text-slate-500"></i>
             {s.id}
           </span>
+          {s.grade ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/60 border border-slate-700 text-[10px] text-slate-300">
+              <i className="ph ph-number-circle-four text-slate-500"></i>
+              Grade {s.grade}
+            </span>
+          ) : null}
+          {s.className ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/60 border border-slate-700 text-[10px] text-slate-300">
+              <i className="ph ph-columns text-slate-500"></i>
+              Class {s.className}
+            </span>
+          ) : null}
           {s.homeroom ? (
             <span
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand-500/15 border border-brand-500/30 text-[10px] font-bold text-brand-200"

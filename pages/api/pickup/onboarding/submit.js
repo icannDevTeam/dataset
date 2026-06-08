@@ -16,7 +16,7 @@
  *   {
  *     token,
  *     guardianName, guardianEmail, guardianPhone,
- *     students: [{ id, name, homeroom }],
+ *     students: [{ id, studentId?, name, grade?, className?, homeroom? }],
  *     chaperones: [{
  *        tempId,         // ties to /face uploads
  *        name,
@@ -127,16 +127,33 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `chaperones: 1–${MAX_CHAPERONES} required` });
   }
 
-  const cleanStudents = students.map((s) => ({
-    id: String(s.id || '').trim(),
-    name: String(s.name || '').trim().slice(0, 120),
-    homeroom: s.homeroom ? String(s.homeroom).trim().slice(0, 32) : null,
-  })).filter((s) => s.id);
+  const cleanStudents = students.map((s, idx) => {
+    const grade = s.grade ? String(s.grade).trim().slice(0, 8) : null;
+    const className = s.className ? String(s.className).trim().toUpperCase().slice(0, 8) : null;
+    const homeroom = s.homeroom
+      ? String(s.homeroom).trim().slice(0, 32)
+      : (grade && className ? `${grade}${className}` : null);
+    const studentId = String(s.studentId || '').trim().slice(0, 32);
+    return {
+      id: studentId,
+      studentId,
+      name: String(s.name || '').trim().slice(0, 120),
+      grade,
+      className,
+      homeroom,
+    };
+  }).filter((s) => s.name);
 
   if (cleanStudents.length === 0) return res.status(400).json({ error: 'no valid students' });
+  if (cleanStudents.some((s) => !s.studentId)) {
+    return res.status(400).json({ error: 'studentId required for every student' });
+  }
 
   const validStudentIds = new Set(cleanStudents.map((s) => s.id));
-  if (claims.sid && !validStudentIds.has(String(claims.sid))) {
+  const hasClaimSid = claims.sid && cleanStudents.some((s) =>
+    s.studentId === String(claims.sid) || s.id === String(claims.sid)
+  );
+  if (claims.sid && !hasClaimSid) {
     return res.status(400).json({
       error: 'token-bound-student-missing',
       message: `This invite link was issued for student ${claims.sid}. That student must be included in the submission.`,
@@ -169,7 +186,8 @@ export default async function handler(req, res) {
     const recordId = crypto.randomBytes(12).toString('hex');
     const recRef = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
     const counterRef = db.doc(tenancy.idAllocationsDoc('pickup-form-counter', tid));
-    const lockRefs = cleanStudents.map((s) => db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${s.id}`));
+    const lockCandidates = cleanStudents.map((s) => ({ sid: s.studentId, student: s }));
+    const lockRefs = lockCandidates.map(({ sid }) => db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${sid}`));
 
     const txOut = await db.runTransaction(async (tx) => {
       // Reads first (Firestore txn rule)
@@ -179,9 +197,10 @@ export default async function handler(req, res) {
         if (!snap.exists) return;
         const d = snap.data() || {};
         if (d.status && d.status !== 'rejected') {
+          const lockStudent = lockCandidates[i]?.student || {};
           conflicts.push({
-            studentId: cleanStudents[i].id,
-            studentName: d.studentName || cleanStudents[i].name,
+            studentId: lockCandidates[i]?.sid,
+            studentName: d.studentName || lockStudent.name,
             formNumber: d.formNumber || null,
             status: d.status,
           });
@@ -227,11 +246,11 @@ export default async function handler(req, res) {
         approvalNotes: null,
       });
 
-      cleanStudents.forEach((s, i) => {
+      lockCandidates.forEach(({ sid, student }, i) => {
         tx.set(lockRefs[i], {
-          studentId: s.id,
-          studentName: s.name,
-          homeroom: s.homeroom || null,
+          studentId: sid,
+          studentName: student.name,
+          homeroom: student.homeroom || null,
           recordId,
           formNumber,
           status: 'pending',

@@ -11,7 +11,7 @@
  *  { recordId, target:'chaperone', tempId, action:'delete-face', facePath }
  *  { recordId, target:'chaperone', tempId, action:'add-face', imageBase64 }
  *  { recordId, target:'record',                action:'add-chaperone', chaperone:{name,phone,email,idNumber,relation,authorizedStudentIds} }
- *  { recordId, target:'student',   id,     action:'update', patch:{name,homeroom} }
+ *  { recordId, target:'student',   id,     action:'update', patch:{id,name,grade,className,homeroom} }
  *  { recordId, target:'student',   id,     action:'delete' }
  *
  * All edits are audited via lib/audit-log.
@@ -26,7 +26,7 @@ const { logAudit } = require('../../../../lib/audit-log');
 const ALLOWED_CHAP_FIELDS = new Set([
   'name', 'phone', 'email', 'idNumber', 'relation', 'authorizedStudentIds',
 ]);
-const ALLOWED_STUDENT_FIELDS = new Set(['name', 'homeroom']);
+const ALLOWED_STUDENT_FIELDS = new Set(['id', 'name', 'grade', 'className', 'homeroom', 'studentId']);
 const MAX_FACES_PER_CHAP = 2;
 const MAX_FACE_BYTES = 800 * 1024;
 const FACE_MIME = { jpeg: 'jpg', jpg: 'jpg', png: 'png', webp: 'webp' };
@@ -424,6 +424,23 @@ async function handler(req, res) {
 
       if (action === 'update') {
         const cleaned = clean(patch, ALLOWED_STUDENT_FIELDS);
+        if (cleaned.id) {
+          cleaned.id = String(cleaned.id).trim();
+          if (!cleaned.id) {
+            return res.status(400).json({ error: 'student id cannot be empty' });
+          }
+          const duplicate = list.some((s, i) => i !== idx && String(s.id) === cleaned.id);
+          if (duplicate) {
+            return res.status(409).json({ error: 'student id already exists on this form' });
+          }
+        }
+        if (cleaned.grade) cleaned.grade = String(cleaned.grade).trim().slice(0, 8);
+        if (cleaned.className) cleaned.className = String(cleaned.className).trim().toUpperCase().slice(0, 8);
+        if (!cleaned.homeroom && (cleaned.grade || cleaned.className)) {
+          const g = cleaned.grade || original.grade;
+          const c = cleaned.className || original.className;
+          if (g && c) cleaned.homeroom = `${g}${c}`;
+        }
         if (Object.keys(cleaned).length === 0) {
           return res.status(400).json({ error: 'no editable fields supplied' });
         }
@@ -433,6 +450,24 @@ async function handler(req, res) {
         afterSnap = cleaned;
         summary = `Edited student ${original.name || id} on onboarding ${recordId}`;
         auditKind = 'onboarding.student_edit';
+
+        const oldId = String(original.id);
+        const newId = String(list[idx].id || oldId);
+        if (newId !== oldId) {
+          const chaps = (rec.chaperones || []).map((c) => ({
+            ...c,
+            authorizedStudentIds: (c.authorizedStudentIds || []).map((sid) =>
+              String(sid) === oldId ? newId : sid
+            ),
+          }));
+          await ref.update({
+            students: list,
+            chaperones: chaps,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          // Skip the generic student-only update below.
+          cleaned.__idRemapHandled = true;
+        }
       } else if (action === 'delete') {
         if (list.length <= 1) {
           return res.status(409).json({ error: 'cannot remove the only student on a record' });
@@ -456,12 +491,13 @@ async function handler(req, res) {
         return res.status(400).json({ error: 'unsupported action for student' });
       }
 
-      if (action === 'update') {
+      if (action === 'update' && !afterSnap?.__idRemapHandled) {
         await ref.update({
           students: list,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       }
+      if (afterSnap && afterSnap.__idRemapHandled) delete afterSnap.__idRemapHandled;
     }
 
     await logAudit(db, {

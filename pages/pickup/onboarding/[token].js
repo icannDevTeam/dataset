@@ -158,8 +158,9 @@ function buildReceiptHtml({
   const studentRows = (students || []).map((s) => `
     <tr>
       <td>${E(s.name || '—')}</td>
-      <td>${E(s.id || '—')}</td>
-      <td>${E(s.grade || '')}${s.homeroom ? ' / ' + E(s.homeroom) : ''}</td>
+      <td>${E(s.grade || '—')}</td>
+      <td>${E(s.className || '—')}</td>
+      <td>${E(s.studentId || '')}</td>
     </tr>`).join('');
   const chapRows = (chaperones || []).map((c, i) => {
     const auth = (c.authorizedStudentIds || [])
@@ -228,8 +229,8 @@ function buildReceiptHtml({
 
 <h2>Students (${(students || []).length})</h2>
 <table>
-  <thead><tr><th>Name</th><th>Binusian ID</th><th>Grade / Homeroom</th></tr></thead>
-  <tbody>${studentRows || '<tr><td colspan="3">—</td></tr>'}</tbody>
+  <thead><tr><th>Name</th><th>Grade</th><th>Class</th><th>Student ID (if assigned)</th></tr></thead>
+  <tbody>${studentRows || '<tr><td colspan="4">—</td></tr>'}</tbody>
 </table>
 
 <h2>Authorized pickup people (${(chaperones || []).length})</h2>
@@ -760,11 +761,13 @@ export default function PickupOnboardingPage() {
   const [guardianEmail, setGuardianEmail] = useState('');
   const [guardianPhone, setGuardianPhone] = useState('');
 
+  const [studentInputName, setStudentInputName] = useState('');
+  const [studentInputGrade, setStudentInputGrade] = useState('');
+  const [studentInputClass, setStudentInputClass] = useState('');
   const [studentInputId, setStudentInputId] = useState('');
-  const [studentLookupBusy, setStudentLookupBusy] = useState(false);
   const [students, setStudents] = useState([]);
-  // Inline error for the Student section only — keeps lookup failures
-  // (typo'd Binusian ID, already-registered, etc.) next to the input so
+  // Inline error for the Student section only — keeps validation errors
+  // (missing/invalid Student ID, grade, class, etc.) next to the input so
   // the parent doesn't have to scroll to the bottom of the form to see
   // what went wrong.
   const [studentError, setStudentError] = useState(null);
@@ -783,21 +786,21 @@ export default function PickupOnboardingPage() {
   // banner above the form and the close-date footer on the success screen.
   const [inviteInfo, setInviteInfo] = useState(null);
 
-  // Validate token + auto-fill primary student
+  // Validate token + fetch invite metadata
   useEffect(() => {
     if (!token) return;
     let cancel = false;
     (async () => {
       try {
         setLoading(true);
-        const probe = await fetch('/api/pickup/onboarding/lookup', {
+        const infoRes = await fetch('/api/pickup/onboarding/info', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, studentId: 'PROBE-INVALID-FORMAT-zz' }),
+          body: JSON.stringify({ token }),
         });
-        if (probe.status === 401) {
+        if (infoRes.status === 401) {
           let reason = null;
-          try { reason = (await probe.clone().json())?.reason || null; } catch { /* ignore */ }
+          try { reason = (await infoRes.clone().json())?.reason || null; } catch { /* ignore */ }
           const msg =
             reason === 'expired'        ? 'This link has expired. Please request a new one from the school.' :
             reason === 'bad_signature'  ? 'This link is not valid (signature mismatch). It may have been mistyped or tampered with.' :
@@ -816,7 +819,9 @@ export default function PickupOnboardingPage() {
           if (cancel) return;
           setTenantId(json.tid || null);
           setPrimarySid(json.sid || null);
-          if (json.sid) await addStudent(json.sid, true);
+          if (json.sid) {
+            setStudentInputId(String(json.sid));
+          }
         } catch { /* ignore */ }
         if (!cancel) {
           setTokenOk(true);
@@ -830,11 +835,6 @@ export default function PickupOnboardingPage() {
           // submission window. Failures here are non-fatal — the form
           // still works against an unmanaged token.
           try {
-            const infoRes = await fetch('/api/pickup/onboarding/info', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token }),
-            });
             if (infoRes.ok) {
               const info = await infoRes.json();
               if (!cancel) setInviteInfo(info);
@@ -851,63 +851,63 @@ export default function PickupOnboardingPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  async function addStudent(sidOverride, silent = false) {
-    const sid = (sidOverride || studentInputId || '').trim();
-    if (!sid) return;
-    if (!/^[A-Za-z0-9_-]{4,32}$/.test(sid)) {
-      if (!silent) setStudentError('ID looks invalid (4–32 letters or digits).');
+  function addStudent() {
+    const studentId = studentInputId.trim();
+    const name = studentInputName.trim();
+    const grade = studentInputGrade.trim();
+    const cls = studentInputClass.trim().toUpperCase();
+
+    if (!studentId) {
+      setStudentError('Student ID is required.');
       return;
     }
-    if (students.find((s) => s.id === sid)) {
-      if (!silent) setStudentError('That student is already added.');
+    if (!/^[A-Za-z0-9_-]{4,32}$/.test(studentId)) {
+      setStudentError('Student ID looks invalid (4–32 letters or digits).');
       return;
     }
-    setStudentLookupBusy(true); setStudentError(null); setError(null);
-    try {
-      const tenantRes = await fetch('/api/pickup/onboarding/lookup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, studentId: sid }),
-      }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) }));
+    if (students.some((s) => s.studentId === studentId)) {
+      setStudentError('That Student ID is already added.');
+      return;
+    }
+    if (!name) {
+      setStudentError('Student name is required.');
+      return;
+    }
+    if (!grade || !/^\d{1,2}$/.test(grade)) {
+      setStudentError('Grade must be a number, for example 4.');
+      return;
+    }
+    if (!cls || !/^[A-Z0-9]{1,3}$/.test(cls)) {
+      setStudentError('Class is required, for example C.');
+      return;
+    }
 
-      let student = null;
-      let alreadyRegistered = null;
-      if (tenantRes.ok) {
-        student = tenantRes.body.student;
-        alreadyRegistered = tenantRes.body.alreadyRegistered || null;
-      }
+    const homeroom = `${grade}${cls}`;
+    const student = {
+      id: studentId,
+      studentId,
+      name,
+      grade,
+      className: cls,
+      homeroom,
+    };
 
-      // Hard-stop if a non-rejected pickup record already exists for this
-      // student in our system. The server enforces the same constraint at
-      // submit time (HTTP 409 + per-student lock), but blocking up-front
-      // gives the parent a friendlier message.
-      if (alreadyRegistered) {
-        const fn = alreadyRegistered.formNumber ? ` (form #${alreadyRegistered.formNumber})` : '';
-        const who = student?.name ? student.name : `Student ${sid}`;
-        setStudentError(`${who} already has a pickup form${fn} — status: ${alreadyRegistered.status}. Contact the school office to change it.`);
-        return;
-      }
-
-      if (!student) {
-        if (!silent) setStudentError(`ID “${sid}” not found. Re-check the student card and try again.`);
-        return;
-      }
-
-      setStudents((prev) => [...prev, student]);
-      // Auto-include the new student in every chaperone's authorization list
-      setChaperones((prev) => prev.map((c) => ({
-        ...c,
-        authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), student.id])),
-      })));
-      setStudentInputId('');
-      setStudentError(null);
-    } catch (e) {
-      if (!silent) setStudentError(e.message || 'Lookup failed — please try again.');
-    } finally { setStudentLookupBusy(false); }
+    setStudents((prev) => [...prev, student]);
+    // Auto-include the new student in every chaperone's authorization list
+    setChaperones((prev) => prev.map((c) => ({
+      ...c,
+      authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), student.id])),
+    })));
+    setStudentInputName('');
+    setStudentInputGrade('');
+    setStudentInputClass('');
+    setStudentInputId('');
+    setStudentError(null);
   }
 
   function removeStudent(id) {
-    if (id === primarySid) {
+    const student = students.find((s) => s.id === id);
+    if (student?.studentId === primarySid) {
       setError('The primary student from your link cannot be removed.');
       return;
     }
@@ -1046,6 +1046,9 @@ export default function PickupOnboardingPage() {
       return 'Type your full name exactly as the signature.';
     }
     if (students.length === 0) return 'Add at least one student.';
+    for (const s of students) {
+      if (!String(s.studentId || '').trim()) return 'Student ID is required for every student.';
+    }
     if (chaperones.length === 0) return 'Add at least one chaperone.';
     const unsaved = chaperones.findIndex((c) => !c.confirmed);
     if (unsaved !== -1) {
@@ -1220,8 +1223,9 @@ export default function PickupOnboardingPage() {
                           {s.name || '—'}
                         </div>
                         <div style={{ color: BRAND.textSubtle, fontSize: 12.5, marginTop: 2 }}>
-                          Binusian ID {s.id}
+                          Student ID {s.studentId || '—'}
                           {s.grade && <> · Grade {s.grade}</>}
+                          {s.className && <> · Class {s.className}</>}
                           {s.homeroom && <> · {s.homeroom}</>}
                         </div>
                       </div>
@@ -1621,7 +1625,7 @@ export default function PickupOnboardingPage() {
 
                 <div style={card()}>
                   {sectionHeading(2, 'Your child(ren)',
-                    'Type the Binusian ID. We’ll auto-fill the name and class.')}
+                    'Enter student details manually: name, grade, and class.')}
 
                   {students.length === 0 ? (
                     <div style={{
@@ -1646,8 +1650,9 @@ export default function PickupOnboardingPage() {
                               {s.name || '—'}
                             </div>
                             <div style={{ fontSize: 12, color: BRAND.textSubtle, marginTop: 2 }}>
-                              Binusian ID {s.id}{s.homeroom ? ` · ${s.homeroom}` : ''}
-                              {s.id === primarySid && (
+                              Student ID {s.studentId || '—'} ·
+                              Grade {s.grade || '—'} · Class {s.className || '—'}{s.homeroom ? ` · ${s.homeroom}` : ''}
+                              {s.studentId === primarySid && (
                                 <span style={{
                                   marginLeft: 8, background: BRAND.orange, color: '#fff',
                                   padding: '2px 8px', borderRadius: 10, fontSize: 10,
@@ -1656,7 +1661,7 @@ export default function PickupOnboardingPage() {
                               )}
                             </div>
                           </div>
-                          {s.id !== primarySid && (
+                          {s.studentId !== primarySid && (
                             <button type="button" style={btnDanger()}
                               onClick={() => removeStudent(s.id)}>Remove</button>
                           )}
@@ -1669,20 +1674,36 @@ export default function PickupOnboardingPage() {
                     padding: 14, border: `1px solid ${BRAND.border}`,
                     borderRadius: 10, background: BRAND.surfaceAlt,
                   }}>
-                    <label style={label()}>Binusian ID *</label>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <input style={{
-                          ...input(),
-                          flex: 1,
-                          ...(studentError ? { borderColor: BRAND.danger } : {}),
-                        }}
-                        placeholder="e.g. 2270005673"
+                    <label style={label()}>Student details *</label>
+                    <div className="pog-grid-2" style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 0.6fr 0.6fr auto', gap: 8 }}>
+                      <input
+                        style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
+                        placeholder="Student ID *"
                         value={studentInputId}
                         onChange={(e) => { setStudentInputId(e.target.value); if (studentError) setStudentError(null); }}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }} />
+                      />
+                      <input
+                        style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
+                        placeholder="Student name"
+                        value={studentInputName}
+                        onChange={(e) => { setStudentInputName(e.target.value); if (studentError) setStudentError(null); }}
+                      />
+                      <input
+                        style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
+                        placeholder="Grade (e.g. 4)"
+                        value={studentInputGrade}
+                        onChange={(e) => { setStudentInputGrade(e.target.value.replace(/[^0-9]/g, '')); if (studentError) setStudentError(null); }}
+                      />
+                      <input
+                        style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
+                        placeholder="Class (e.g. C)"
+                        value={studentInputClass}
+                        onChange={(e) => { setStudentInputClass(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')); if (studentError) setStudentError(null); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }}
+                      />
                       <button type="button" style={btn()}
-                        onClick={() => addStudent()} disabled={studentLookupBusy || !studentInputId.trim()}>
-                        {studentLookupBusy ? 'Looking up…' : 'Look up'}
+                        onClick={() => addStudent()} disabled={!studentInputId.trim() || !studentInputName.trim() || !studentInputGrade.trim() || !studentInputClass.trim()}>
+                        Add
                       </button>
                     </div>
 
