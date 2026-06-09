@@ -288,7 +288,11 @@ export default function AdminRbacPage() {
     try {
       const headers = await getAuthHeaders();
       const res = await fetch('/api/auth/users', { method: 'PATCH', headers, body: JSON.stringify({ email, action }) });
-      if (res.ok) { setActionConfirm(null); fetchUsers(); showToast(`Action: ${action}`); }
+      if (res.ok) {
+        setActionConfirm(null);
+        fetchUsers();
+        showToast(action === 'revoke' ? 'Account removed.' : `Action: ${action}`);
+      }
     } catch {}
   }
 
@@ -1068,7 +1072,7 @@ function UserDetailPanel({ user, myEmail, isAdmin, actionConfirm, setActionConfi
             <i className="ph ph-key" /> Reset password
           </button>
 
-          {/* Revoke */}
+          {/* Remove account (revoke = hard removal) */}
           {actionConfirm?.email === user.email && actionConfirm?.action === 'revoke' ? (
             <ConfirmCluster
               tone="orange"
@@ -1078,7 +1082,7 @@ function UserDetailPanel({ user, myEmail, isAdmin, actionConfirm, setActionConfi
           ) : (
             <button onClick={() => setActionConfirm({ email: user.email, action: 'revoke' })}
               className="action-btn action-btn-orange">
-              <i className="ph ph-prohibit" /> Revoke sessions
+              <i className="ph ph-user-minus" /> Remove account
             </button>
           )}
 

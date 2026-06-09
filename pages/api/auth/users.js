@@ -207,17 +207,17 @@ async function handler(req, res) {
       // so we can roll back cleanly if the invite email fails.
       let authUser;
       let createdAuthUser = false;
+      let existingAuthWasDisabled = false;
       try {
         authUser = await admin.auth().getUserByEmail(cleanEmail);
-        if (wantsInvite) {
-          // Existing auth account but no Firestore entry — reset its password
-          // to the new OTP so the invite email is actionable. Also re-enable
-          // the account in case it was previously disabled by a DELETE.
-          await admin.auth().updateUser(authUser.uid, {
-            password: finalPassword,
-            disabled: false,
-          });
-        }
+        existingAuthWasDisabled = !!authUser.disabled;
+        // Existing auth account but no Firestore entry — always reset
+        // credentials and re-enable so re-adding a previously disabled user
+        // works in both invite and manual-password modes.
+        await admin.auth().updateUser(authUser.uid, {
+          password: finalPassword,
+          disabled: false,
+        });
       } catch (err) {
         if (err.code === 'auth/user-not-found') {
           authUser = await admin.auth().createUser({
@@ -254,6 +254,13 @@ async function handler(req, res) {
           // Roll back: only delete the auth user if WE created it just now.
           if (createdAuthUser) {
             try { await admin.auth().deleteUser(authUser.uid); } catch {}
+          } else if (existingAuthWasDisabled && authUser?.uid) {
+            // If we reactivated a previously disabled account and email send
+            // failed, restore the disabled state.
+            try {
+              await admin.auth().updateUser(authUser.uid, { disabled: true });
+              await admin.auth().revokeRefreshTokens(authUser.uid);
+            } catch {}
           }
           console.error('[USERS POST] invite email failed:', sendResult.error);
           return res.status(502).json({
@@ -333,11 +340,25 @@ async function handler(req, res) {
 
       await usersRef.doc(cleanEmail).delete();
 
-      // Disable Firebase Auth user so they can't sign in again
+      // Remove Firebase Auth user completely when possible so the same
+      // email can be re-added cleanly. Fall back to disable if deletion
+      // cannot be completed.
+      let authRemoved = false;
       try {
         const authUser = await admin.auth().getUserByEmail(cleanEmail);
-        await admin.auth().updateUser(authUser.uid, { disabled: true });
-      } catch {}
+        await admin.auth().deleteUser(authUser.uid);
+        authRemoved = true;
+      } catch (err) {
+        if (err?.code === 'auth/user-not-found') {
+          authRemoved = true;
+        } else {
+          try {
+            const authUser = await admin.auth().getUserByEmail(cleanEmail);
+            await admin.auth().updateUser(authUser.uid, { disabled: true });
+            await admin.auth().revokeRefreshTokens(authUser.uid);
+          } catch {}
+        }
+      }
 
       await logAudit(db, {
         actor: caller, req,
@@ -346,7 +367,7 @@ async function handler(req, res) {
         before: { role: targetRole },
         summary: `Deleted user ${cleanEmail}`,
       });
-      return res.status(200).json({ ok: true });
+      return res.status(200).json({ ok: true, authRemoved });
     } catch (err) {
       console.error('[USERS DELETE]', err.message);
       return res.status(500).json({ error: 'Failed to remove user' });
@@ -438,21 +459,42 @@ async function handler(req, res) {
         return res.status(200).json({ ok: true, email: cleanEmail });
       }
 
-      // Handle revoke — strip all custom permissions, reset to viewer
+      // Handle revoke — permanently remove account by admin action.
       if (patchAction === 'revoke') {
-        await usersRef.doc(cleanEmail).update({
-          role: 'viewer',
-          permissions: {},
-          classScopes: [],
-          tokenValidAfter: admin.firestore.FieldValue.serverTimestamp(),
-        });
+        if (cleanEmail === caller.email) {
+          return res.status(400).json({ error: 'You cannot remove yourself.' });
+        }
+
+        if (SUPER_ADMIN && cleanEmail === SUPER_ADMIN) {
+          return res.status(403).json({ error: 'The super admin cannot be removed.' });
+        }
+
+        await usersRef.doc(cleanEmail).delete();
+
+        let authRemoved = false;
+        try {
+          const authUser = await admin.auth().getUserByEmail(cleanEmail);
+          await admin.auth().deleteUser(authUser.uid);
+          authRemoved = true;
+        } catch (err) {
+          if (err?.code === 'auth/user-not-found') {
+            authRemoved = true;
+          } else {
+            try {
+              const authUser = await admin.auth().getUserByEmail(cleanEmail);
+              await admin.auth().updateUser(authUser.uid, { disabled: true });
+              await admin.auth().revokeRefreshTokens(authUser.uid);
+            } catch {}
+          }
+        }
+
         invalidateUser(cleanEmail);
-        await logAudit(db, { actor: caller, req, kind: 'user.revoke',
+        await logAudit(db, { actor: caller, req, kind: 'user.revoke_remove',
           target: { type: 'user', id: cleanEmail, label: doc.data()?.name || cleanEmail },
           before: { role: doc.data()?.role, classScopes: doc.data()?.classScopes || [] },
-          after: { role: 'viewer', classScopes: [] },
-          summary: `Reset ${cleanEmail} to viewer (revoked all permissions)` });
-        return res.status(200).json({ ok: true, email: cleanEmail, role: 'viewer', permissions: resolvePermissions('viewer') });
+          after: { removed: true },
+          summary: `Removed ${cleanEmail} account via revoke action` });
+        return res.status(200).json({ ok: true, email: cleanEmail, removed: true, authRemoved });
       }
 
       if (newRole && ['owner', 'admin', 'teacher', 'viewer'].includes(newRole)) {
