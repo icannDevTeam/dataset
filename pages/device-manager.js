@@ -22,6 +22,7 @@ export default function DeviceManager() {
     username: '',
     password: '',
   });
+  const [showDevicePassword, setShowDevicePassword] = useState(false);
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState(null);
@@ -265,8 +266,17 @@ export default function DeviceManager() {
                 <input type="text" value={device.username} onChange={(e) => setDevice({ ...device, username: e.target.value })} placeholder="admin" />
               </div>
               <div className={styles.formGroup}>
-                <label>Password</label>
-                <input type="password" value={device.password} onChange={(e) => setDevice({ ...device, password: e.target.value })} placeholder="password" />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label>Password</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowDevicePassword((s) => !s)}
+                    style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}
+                  >
+                    {showDevicePassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <input type={showDevicePassword ? 'text' : 'password'} value={device.password} onChange={(e) => setDevice({ ...device, password: e.target.value })} placeholder="password" />
               </div>
             </div>
             <button className={styles.connectBtn} onClick={handleConnect} disabled={connecting || !device.ip}>

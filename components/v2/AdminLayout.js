@@ -15,6 +15,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../lib/AuthContext';
+import rbac from '../../lib/rbac';
 
 const ADMIN_NAV = [
   {
@@ -94,7 +95,7 @@ export default function AdminLayout({ children, title = 'Admin Console', subtitl
           // Hide entirely — never disabled — when caller lacks the
           // required sensitive_user_access action.
           if (item.sensitivePerm) {
-            const allowed = !!permissions?.sensitive_user_access?.[item.sensitivePerm];
+            const allowed = rbac.can(permissions, `sensitive_user_access.${item.sensitivePerm}`);
             if (!allowed) return null;
           }
           const active = isActive(item.href);
@@ -171,7 +172,7 @@ export default function AdminLayout({ children, title = 'Admin Console', subtitl
   );
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="admin-console-root flex h-screen bg-slate-950 text-slate-100 overflow-hidden">
       <Head>
         <title>{title} · BINUS Admin</title>
       </Head>
@@ -216,6 +217,53 @@ export default function AdminLayout({ children, title = 'Admin Console', subtitl
           {children}
         </main>
       </div>
+
+      <style jsx global>{`
+        .admin-console-root {
+          color-scheme: dark;
+        }
+
+        .admin-console-root input,
+        .admin-console-root textarea,
+        .admin-console-root select {
+          caret-color: rgb(241, 245, 249);
+        }
+
+        .admin-console-root input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='button']):not([type='submit']):not([type='reset']),
+        .admin-console-root textarea,
+        .admin-console-root select {
+          background-color: rgba(15, 23, 42, 0.82) !important;
+          color: rgb(241, 245, 249) !important;
+          border-color: rgb(51, 65, 85) !important;
+        }
+
+        .admin-console-root input::placeholder,
+        .admin-console-root textarea::placeholder {
+          color: rgb(100, 116, 139) !important;
+          opacity: 1;
+        }
+
+        .admin-console-root select option {
+          background: rgb(2, 6, 23);
+          color: rgb(241, 245, 249);
+        }
+
+        .admin-console-root input:-webkit-autofill,
+        .admin-console-root input:-webkit-autofill:hover,
+        .admin-console-root input:-webkit-autofill:focus,
+        .admin-console-root textarea:-webkit-autofill,
+        .admin-console-root textarea:-webkit-autofill:hover,
+        .admin-console-root textarea:-webkit-autofill:focus,
+        .admin-console-root select:-webkit-autofill,
+        .admin-console-root select:-webkit-autofill:hover,
+        .admin-console-root select:-webkit-autofill:focus {
+          -webkit-text-fill-color: rgb(241, 245, 249) !important;
+          box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.92) inset !important;
+          -webkit-box-shadow: 0 0 0px 1000px rgba(15, 23, 42, 0.92) inset !important;
+          transition: background-color 5000s ease-in-out 0s;
+          caret-color: rgb(241, 245, 249) !important;
+        }
+      `}</style>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * /v2/admin/users — Firebase Auth user directory + Owner-only password reset.
+ * /v2/admin/users — Firebase Auth user directory + Owner/Admin password reset.
  *
  * Hard gates
  *   • Page render        : sensitive_user_access.view_user_directory
@@ -9,7 +9,8 @@
  *
  * The page is intentionally read-mostly. No invite / role-change controls
  * live here — those stay in /v2/admin/rbac. This screen exists so an Owner
- * can locate a real auth user and reset their password in one place.
+ * or designated Admin can locate a real auth user and reset their password
+ * in one place.
  *
  * Reset workflow
  *   1. Open row menu → "Reset password…" → modal.
@@ -84,7 +85,7 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <AdminLayout title="Users" subtitle="Firebase Auth directory · Owner-only password reset" fullBleed>
+    <AdminLayout title="Users" subtitle="Firebase Auth directory · Owner/Admin password reset (permission-gated)" fullBleed>
       <Head><title>Users · Admin</title></Head>
       <UsersDirectory canReset={canReset} currentUser={user} />
     </AdminLayout>

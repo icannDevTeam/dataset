@@ -1,5 +1,5 @@
 /**
- * /api/v2/admin/users/[uid]/reset-password — Owner-only admin password reset.
+ * /api/v2/admin/users/[uid]/reset-password — Owner/Admin password reset.
  *
  * SECURITY MODEL
  *   - withApi: enforces auth + CSRF + sensitive_user_access.reset_user_password

@@ -44,6 +44,10 @@ const inviteLinks = require('../../../../lib/onboarding-invites');
 const MAX_CHAPERONES = 5;
 const MAX_STUDENTS = 10;
 const FIRST_FORM_SEQ = 0;
+const STUDENT_ID_RE = /^\d{10}$/;
+const STUDENT_NAME_RE = /^[A-Za-z ]+$/;
+const STUDENT_GRADE_RE = /^\d{1,2}$/;
+const STUDENT_CLASS_RE = /^[A-Z]$/;
 
 function clientIpHdr(req) {
   return clientIp(req);
@@ -91,6 +95,56 @@ function formNumberFor(seq) {
   return `PKP-${year}-${String(seq).padStart(5, '0')}`;
 }
 
+function sanitizeStudentName(raw) {
+  return String(raw || '')
+    .replace(/[^A-Za-z ]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+function sanitizeGrade(raw) {
+  return String(raw || '').trim().replace(/\D/g, '').slice(0, 2);
+}
+
+function sanitizeClassName(raw) {
+  return String(raw || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
+}
+
+function validateStudent(raw, idx) {
+  const studentId = String(raw?.studentId || '').trim().replace(/\D/g, '').slice(0, 10);
+  if (!STUDENT_ID_RE.test(studentId)) {
+    return { ok: false, field: 'studentId', message: `Student #${idx + 1}: Student ID must be exactly 10 digits.` };
+  }
+
+  const name = sanitizeStudentName(raw?.name);
+  if (!name || !STUDENT_NAME_RE.test(name)) {
+    return { ok: false, field: 'name', message: `Student #${idx + 1}: Name must use letters and spaces only.` };
+  }
+
+  const className = sanitizeClassName(raw?.className);
+  if (!STUDENT_CLASS_RE.test(className)) {
+    return { ok: false, field: 'className', message: `Student #${idx + 1}: Class must be one uppercase letter (A-Z).` };
+  }
+
+  const grade = sanitizeGrade(raw?.grade);
+  if (!STUDENT_GRADE_RE.test(grade)) {
+    return { ok: false, field: 'grade', message: `Student #${idx + 1}: Grade must be numeric.` };
+  }
+
+  return {
+    ok: true,
+    student: {
+      id: studentId,
+      studentId,
+      name,
+      grade,
+      className,
+      homeroom: `${grade}${className}`,
+    },
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -127,26 +181,29 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `chaperones: 1–${MAX_CHAPERONES} required` });
   }
 
-  const cleanStudents = students.map((s, idx) => {
-    const grade = s.grade ? String(s.grade).trim().slice(0, 8) : null;
-    const className = s.className ? String(s.className).trim().toUpperCase().slice(0, 8) : null;
-    const homeroom = s.homeroom
-      ? String(s.homeroom).trim().slice(0, 32)
-      : (grade && className ? `${grade}${className}` : null);
-    const studentId = String(s.studentId || '').trim().slice(0, 32);
-    return {
-      id: studentId,
-      studentId,
-      name: String(s.name || '').trim().slice(0, 120),
-      grade,
-      className,
-      homeroom,
-    };
-  }).filter((s) => s.name);
+  const cleanStudents = [];
+  for (let i = 0; i < students.length; i += 1) {
+    const checked = validateStudent(students[i], i);
+    if (!checked.ok) {
+      return res.status(400).json({
+        error: 'invalid-student',
+        field: checked.field,
+        index: i,
+        message: checked.message,
+      });
+    }
+    cleanStudents.push(checked.student);
+  }
 
-  if (cleanStudents.length === 0) return res.status(400).json({ error: 'no valid students' });
-  if (cleanStudents.some((s) => !s.studentId)) {
-    return res.status(400).json({ error: 'studentId required for every student' });
+  const seenStudentIds = new Set();
+  for (const s of cleanStudents) {
+    if (seenStudentIds.has(s.studentId)) {
+      return res.status(400).json({
+        error: 'duplicate-student-id',
+        message: `Student ID ${s.studentId} appears more than once in this form.`,
+      });
+    }
+    seenStudentIds.add(s.studentId);
   }
 
   const validStudentIds = new Set(cleanStudents.map((s) => s.id));

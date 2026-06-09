@@ -19,6 +19,7 @@ export default function SettingsPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
+  const [showInvitePassword, setShowInvitePassword] = useState(false);
   const [inviteRole, setInviteRole] = useState('viewer');
   const [inviteClassScopes, setInviteClassScopes] = useState('');
   const [inviteError, setInviteError] = useState('');
@@ -118,6 +119,7 @@ export default function SettingsPage() {
         setInviteEmail('');
         setInviteName('');
         setInvitePassword('');
+        setShowInvitePassword(false);
         setInviteRole('viewer');
         setInviteClassScopes('');
         fetchUsers();
@@ -593,8 +595,17 @@ export default function SettingsPage() {
                               className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
                           </div>
                           <div>
-                            <label className="text-xs text-slate-400 block mb-1">Password</label>
-                            <input type="password" value={invitePassword} onChange={e => setInvitePassword(e.target.value)}
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-xs text-slate-400 block">Password</label>
+                              <button
+                                type="button"
+                                onClick={() => setShowInvitePassword((s) => !s)}
+                                className="text-[11px] text-slate-500 hover:text-slate-200"
+                              >
+                                {showInvitePassword ? 'Hide' : 'Show'}
+                              </button>
+                            </div>
+                            <input type={showInvitePassword ? 'text' : 'password'} value={invitePassword} onChange={e => setInvitePassword(e.target.value)}
                               placeholder="Min. 6 characters" required minLength={6}
                               className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
                           </div>
@@ -621,7 +632,7 @@ export default function SettingsPage() {
                               className="px-5 py-2 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold transition-all disabled:opacity-50">
                               {inviteLoading ? 'Adding...' : 'Add User'}
                             </button>
-                            <button type="button" onClick={() => { setShowInvite(false); setInviteError(''); }}
+                            <button type="button" onClick={() => { setShowInvite(false); setInviteError(''); setShowInvitePassword(false); }}
                               className="px-4 py-2 text-slate-400 hover:text-white text-sm transition-colors">Cancel</button>
                           </div>
                         </form>

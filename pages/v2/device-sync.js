@@ -31,6 +31,7 @@ function getDaysArray(start, end) {
 export default function DeviceSyncPage() {
   // Connection
   const [device, setDevice] = useState({ ip: '', username: 'admin', password: '' });
+  const [showDevicePassword, setShowDevicePassword] = useState(false);
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState(null);
@@ -208,9 +209,18 @@ export default function DeviceSyncPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">Password</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-medium text-slate-400">Password</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowDevicePassword((s) => !s)}
+                    className="text-[11px] text-slate-500 hover:text-slate-200"
+                  >
+                    {showDevicePassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
                 <input
-                  type="password"
+                  type={showDevicePassword ? 'text' : 'password'}
                   value={device.password}
                   onChange={(e) => setDevice({ ...device, password: e.target.value })}
                   className="w-full px-3 py-2.5 bg-slate-900/50 border border-slate-700 rounded-lg text-white text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-400 outline-none"

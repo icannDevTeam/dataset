@@ -19,6 +19,7 @@ export default function ReauthModal({
 }) {
   const { user } = useAuth();
   const [pw, setPw] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const inputRef = useRef(null);
@@ -26,6 +27,7 @@ export default function ReauthModal({
   useEffect(() => {
     if (open) {
       setPw('');
+      setShowPw(false);
       setErr(null);
       setBusy(false);
       const t = setTimeout(() => inputRef.current?.focus(), 60);
@@ -82,17 +84,29 @@ export default function ReauthModal({
             <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1" htmlFor="reauth-pw">
               Password
             </label>
-            <input
-              ref={inputRef}
-              id="reauth-pw"
-              type="password"
-              autoComplete="current-password"
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              disabled={busy}
-              className="w-full text-sm bg-slate-950 border border-slate-700 focus:border-amber-500 focus:outline-none rounded-lg px-3 py-2 text-white"
-              placeholder="••••••••"
-            />
+            <div className="relative">
+              <input
+                ref={inputRef}
+                id="reauth-pw"
+                type={showPw ? 'text' : 'password'}
+                autoComplete="current-password"
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                disabled={busy}
+                className="w-full text-sm bg-slate-950 border border-slate-700 focus:border-amber-500 focus:outline-none rounded-lg px-3 py-2 pr-10 text-white"
+                placeholder="••••••••"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw((s) => !s)}
+                disabled={busy}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 disabled:opacity-50"
+                aria-label={showPw ? 'Hide password' : 'Show password'}
+                tabIndex={-1}
+              >
+                <i className={`ph ${showPw ? 'ph-eye-slash' : 'ph-eye'} text-base`} />
+              </button>
+            </div>
           </div>
           {err && (
             <div className="text-xs rounded px-2 py-1.5 bg-rose-500/10 text-rose-300 border border-rose-500/30 flex items-start gap-1.5">

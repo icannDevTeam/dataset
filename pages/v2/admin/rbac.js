@@ -81,6 +81,13 @@ const ROLE_TONE = {
   viewer: 'bg-slate-500/10 text-slate-300 border-slate-500/30',
 };
 
+const INVITE_TEMPLATE_OPTIONS = [
+  { key: 'operations', label: 'Operations Template', role: 'viewer' },
+  { key: 'acop', label: 'ACOP Template', role: 'admin' },
+  { key: 'it', label: 'IT Template', role: 'owner' },
+  { key: 'individual', label: 'Individual Access', role: null },
+];
+
 const RISK_META = {
   read:        { label: 'Read', color: 'emerald', icon: 'ph-eye' },
   write:       { label: 'Write', color: 'amber',  icon: 'ph-pencil-simple' },
@@ -137,11 +144,26 @@ export default function AdminRbacPage() {
   const [actionConfirm, setActionConfirm] = useState(null); // { email, action }
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [toast, setToast] = useState(null);
+  const [resetPwdOpen, setResetPwdOpen] = useState(false);
+  const [resetPwdEmail, setResetPwdEmail] = useState('');
+  const [resetPwdValue, setResetPwdValue] = useState('');
+  const [resetPwdConfirm, setResetPwdConfirm] = useState('');
+  const [showResetPasswords, setShowResetPasswords] = useState(false);
+  const [resetPwdError, setResetPwdError] = useState('');
+  const [resetPwdLoading, setResetPwdLoading] = useState(false);
 
   // Invite form
-  const [inv, setInv] = useState({ email: '', name: '', password: '', role: 'viewer', classScopes: '', sendInviteEmail: true });
+  const [inv, setInv] = useState({
+    email: '',
+    name: '',
+    password: '',
+    role: 'viewer',
+    classScopes: '',
+    template: 'operations',
+  });
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [showInvitePassword, setShowInvitePassword] = useState(false);
 
   // Bulk import
   const [bulkRows, setBulkRows] = useState([]);
@@ -214,8 +236,8 @@ export default function AdminRbacPage() {
       setInviteError('Email is required.');
       return;
     }
-    if (!inv.sendInviteEmail && (!inv.password || inv.password.length < 6)) {
-      setInviteError('Password (min 6 chars) required when not emailing an invite.');
+    if (!inv.password || inv.password.length < 6) {
+      setInviteError('Password must be at least 6 characters.');
       return;
     }
     setInviteLoading(true);
@@ -226,11 +248,10 @@ export default function AdminRbacPage() {
       const body = {
         email: inv.email.trim(),
         name: inv.name.trim(),
+        password: inv.password,
         role: inv.role,
         classScopes,
-        sendInviteEmail: !!inv.sendInviteEmail,
       };
-      if (!inv.sendInviteEmail) body.password = inv.password;
       const res = await fetch('/api/auth/users', {
         method: 'POST',
         headers,
@@ -239,9 +260,17 @@ export default function AdminRbacPage() {
       const data = await res.json();
       if (res.ok) {
         setShowInvite(false);
-        setInv({ email: '', name: '', password: '', role: 'viewer', classScopes: '', sendInviteEmail: true });
+        setShowInvitePassword(false);
+        setInv({
+          email: '',
+          name: '',
+          password: '',
+          role: 'viewer',
+          classScopes: '',
+          template: 'operations',
+        });
         fetchUsers();
-        showToast(data.invited ? 'User added — invite emailed.' : 'User added.');
+        showToast('User added.');
       } else setInviteError(data.error || data.message || 'Failed to add user.');
     } catch { setInviteError('Network error.'); }
     setInviteLoading(false);
@@ -261,6 +290,58 @@ export default function AdminRbacPage() {
       const res = await fetch('/api/auth/users', { method: 'PATCH', headers, body: JSON.stringify({ email, action }) });
       if (res.ok) { setActionConfirm(null); fetchUsers(); showToast(`Action: ${action}`); }
     } catch {}
+  }
+
+  function openResetPassword(email) {
+    setResetPwdEmail(email);
+    setResetPwdValue('');
+    setResetPwdConfirm('');
+    setShowResetPasswords(false);
+    setResetPwdError('');
+    setResetPwdOpen(true);
+  }
+
+  async function submitResetPassword() {
+    if (!resetPwdEmail) return;
+    if (!resetPwdValue || resetPwdValue.length < 6) {
+      setResetPwdError('New password must be at least 6 characters.');
+      return;
+    }
+    if (resetPwdValue !== resetPwdConfirm) {
+      setResetPwdError('Passwords do not match.');
+      return;
+    }
+
+    setResetPwdLoading(true);
+    setResetPwdError('');
+    try {
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/auth/users', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({
+          email: resetPwdEmail,
+          action: 'reset-password',
+          newPassword: resetPwdValue,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setResetPwdError(data.error || data.message || 'Failed to reset password.');
+        return;
+      }
+
+      setResetPwdOpen(false);
+      setResetPwdEmail('');
+      setResetPwdValue('');
+      setResetPwdConfirm('');
+      fetchUsers();
+      showToast('Password reset successful.');
+    } catch {
+      setResetPwdError('Network error while resetting password.');
+    } finally {
+      setResetPwdLoading(false);
+    }
   }
 
   // Re-issue OTP: rotate password + email a fresh one. Requires step-up
@@ -485,7 +566,7 @@ export default function AdminRbacPage() {
             </div>
             <div className="flex gap-1.5 text-[10px]">
               <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
-                className="flex-1 bg-slate-900/60 border border-slate-700/60 rounded px-2 py-1 text-slate-300">
+                className="ui-select-dark flex-1 rounded px-2 py-1 text-slate-100">
                 <option value="all">All roles</option>
                 <option value="owner">Owner</option>
                 <option value="admin">Admin</option>
@@ -493,7 +574,7 @@ export default function AdminRbacPage() {
                 <option value="viewer">Viewer</option>
               </select>
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-                className="flex-1 bg-slate-900/60 border border-slate-700/60 rounded px-2 py-1 text-slate-300">
+                className="ui-select-dark flex-1 rounded px-2 py-1 text-slate-100">
                 <option value="all">All status</option>
                 <option value="active">Active</option>
                 <option value="invited">Invited</option>
@@ -604,7 +685,7 @@ export default function AdminRbacPage() {
               onAction={handleUserAction}
               onDelete={handleDelete}
               onEditPerms={() => openPermEditor(selectedUser)}
-              onReissueOtp={handleReissueOtp}
+              onOpenResetPassword={openResetPassword}
             />
           )}
         </section>
@@ -612,7 +693,7 @@ export default function AdminRbacPage() {
 
       {/* ── Invite modal ────────────────────────────────────────────── */}
       {showInvite && (
-        <Modal title="Add authorized user" onClose={() => { setShowInvite(false); setInviteError(''); }}>
+        <Modal title="Add authorized user" onClose={() => { setShowInvite(false); setInviteError(''); setShowInvitePassword(false); }}>
           <form onSubmit={handleInvite} className="space-y-3">
             {inviteError && (
               <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-xs">{inviteError}</div>
@@ -622,39 +703,63 @@ export default function AdminRbacPage() {
                 onChange={e => setInv(i => ({ ...i, email: e.target.value }))}
                 className="modal-input" placeholder="user@binus.edu" />
             </Field>
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-slate-800/40 border border-slate-700">
-              <input id="send-invite" type="checkbox" checked={!!inv.sendInviteEmail}
-                onChange={e => setInv(i => ({ ...i, sendInviteEmail: e.target.checked }))}
-                className="mt-1" />
-              <label htmlFor="send-invite" className="text-xs text-slate-300 leading-snug cursor-pointer">
-                <strong>Email a one-time password to the user</strong>
-                <div className="text-slate-500 mt-0.5">
-                  Recommended. They’ll be required to set a new password on first login. Uncheck to set a password manually below.
+            <Field label="Password (min 6)">
+              <div className="space-y-1">
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowInvitePassword((s) => !s)}
+                    className="text-[11px] text-slate-500 hover:text-slate-200"
+                  >
+                    {showInvitePassword ? 'Hide' : 'Show'}
+                  </button>
                 </div>
-              </label>
-            </div>
-            {!inv.sendInviteEmail && (
-              <Field label="Password (min 6)">
-                <input type="password" required minLength={6} value={inv.password}
+                <input type={showInvitePassword ? 'text' : 'password'} required minLength={6} value={inv.password}
                   onChange={e => setInv(i => ({ ...i, password: e.target.value }))}
                   className="modal-input" />
-              </Field>
-            )}
-            <div className="grid grid-cols-2 gap-3">
+              </div>
+            </Field>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Field label="Display name">
                 <input type="text" value={inv.name}
                   onChange={e => setInv(i => ({ ...i, name: e.target.value }))}
                   className="modal-input" placeholder="John Doe" />
               </Field>
+              <Field label="User type template">
+                <select
+                  value={inv.template}
+                  onChange={e => {
+                    const nextTemplate = e.target.value;
+                    const option = INVITE_TEMPLATE_OPTIONS.find((t) => t.key === nextTemplate);
+                    setInv((i) => ({
+                      ...i,
+                      template: nextTemplate,
+                      role: option?.role ? option.role : i.role,
+                    }));
+                  }}
+                  className="modal-input ui-select-dark"
+                >
+                  {INVITE_TEMPLATE_OPTIONS
+                    .filter((opt) => opt.key !== 'it' || myRole === 'owner')
+                    .map((opt) => (
+                      <option key={opt.key} value={opt.key}>{opt.label}</option>
+                    ))}
+                </select>
+              </Field>
               <Field label="Role">
                 <select value={inv.role}
                   onChange={e => setInv(i => ({ ...i, role: e.target.value }))}
-                  className="modal-input">
+                  className="modal-input ui-select-dark">
                   <option value="viewer">Viewer</option>
                   <option value="guard">Guard (pickup)</option>
                   <option value="admin">Admin</option>
                   {myRole === 'owner' && <option value="owner">Owner</option>}
                 </select>
+                {inv.template !== 'individual' && (
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    Auto-suggested from selected template. You can still adjust role manually.
+                  </div>
+                )}
               </Field>
             </div>
             <Field label="Class scopes (comma-separated, optional)">
@@ -667,7 +772,7 @@ export default function AdminRbacPage() {
                 className="px-4 py-2 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold disabled:opacity-50">
                 {inviteLoading ? 'Adding…' : 'Add user'}
               </button>
-              <button type="button" onClick={() => { setShowInvite(false); setInviteError(''); }}
+              <button type="button" onClick={() => { setShowInvite(false); setInviteError(''); setShowInvitePassword(false); }}
                 className="px-3 py-2 text-slate-400 hover:text-white text-sm">Cancel</button>
             </div>
           </form>
@@ -739,6 +844,72 @@ export default function AdminRbacPage() {
         />
       )}
 
+      {resetPwdOpen && (
+        <Modal
+          title={`Reset password — ${resetPwdEmail}`}
+          onClose={() => {
+            setResetPwdOpen(false);
+            setResetPwdError('');
+          }}
+        >
+          <div className="space-y-3">
+            {resetPwdError && (
+              <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
+                {resetPwdError}
+              </div>
+            )}
+            <Field label="New password (min 6)">
+              <div className="flex items-center justify-end mb-1">
+                <button
+                  type="button"
+                  onClick={() => setShowResetPasswords((s) => !s)}
+                  className="text-[11px] text-slate-500 hover:text-slate-200"
+                >
+                  {showResetPasswords ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <input
+                type={showResetPasswords ? 'text' : 'password'}
+                minLength={6}
+                value={resetPwdValue}
+                onChange={(e) => setResetPwdValue(e.target.value)}
+                className="modal-input"
+              />
+            </Field>
+            <Field label="Confirm password">
+              <input
+                type={showResetPasswords ? 'text' : 'password'}
+                minLength={6}
+                value={resetPwdConfirm}
+                onChange={(e) => setResetPwdConfirm(e.target.value)}
+                className="modal-input"
+              />
+            </Field>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={submitResetPassword}
+                disabled={resetPwdLoading}
+                className="px-4 py-2 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold disabled:opacity-50"
+              >
+                {resetPwdLoading ? 'Resetting...' : 'Reset password'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetPwdOpen(false);
+                  setResetPwdError('');
+                  setShowResetPasswords(false);
+                }}
+                className="px-3 py-2 text-slate-400 hover:text-white text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {/* Toast */}
       {toast && (
         <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-2xl border z-[60] text-sm ${
@@ -752,6 +923,27 @@ export default function AdminRbacPage() {
       )}
 
       <style jsx global>{`
+        .ui-select-dark {
+          background: rgba(15, 23, 42, 0.92);
+          border: 1px solid rgb(51, 65, 85);
+          color: rgb(241, 245, 249);
+          outline: none;
+          appearance: none;
+          -webkit-appearance: none;
+          -moz-appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none'%3E%3Cpath d='M3 5.5L7 9.5L11 5.5' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 0.45rem center;
+          padding-right: 1.6rem;
+        }
+        .ui-select-dark:focus {
+          border-color: rgb(34, 211, 238);
+          box-shadow: 0 0 0 1px rgb(34, 211, 238);
+        }
+        .ui-select-dark option {
+          background: rgb(2, 6, 23);
+          color: rgb(241, 245, 249);
+        }
         .modal-input {
           width: 100%;
           background: rgba(2, 6, 23, 0.5);
@@ -766,6 +958,10 @@ export default function AdminRbacPage() {
           border-color: rgb(34, 211, 238);
           box-shadow: 0 0 0 1px rgb(34, 211, 238);
         }
+        .modal-input option {
+          background: rgb(2, 6, 23);
+          color: rgb(241, 245, 249);
+        }
       `}</style>
       {reauthModal}
     </AdminLayout>
@@ -774,7 +970,7 @@ export default function AdminRbacPage() {
 
 // ── Detail panel ───────────────────────────────────────────────────────────
 
-function UserDetailPanel({ user, myEmail, isAdmin, actionConfirm, setActionConfirm, deleteConfirm, setDeleteConfirm, onAction, onDelete, onEditPerms, onReissueOtp }) {
+function UserDetailPanel({ user, myEmail, isAdmin, actionConfirm, setActionConfirm, deleteConfirm, setDeleteConfirm, onAction, onDelete, onEditPerms, onOpenResetPassword }) {
   const isMe = user.email === myEmail;
   const canManage = isAdmin && !isMe && !user.superAdmin;
 
@@ -867,27 +1063,10 @@ function UserDetailPanel({ user, myEmail, isAdmin, actionConfirm, setActionConfi
             </button>
           )}
 
-          {/* Reset password */}
-          {actionConfirm?.email === user.email && actionConfirm?.action === 'reset-password' ? (
-            <ConfirmCluster
-              tone="indigo"
-              onConfirm={() => onAction(user.email, 'reset-password')}
-              onCancel={() => setActionConfirm(null)}
-            />
-          ) : (
-            <button onClick={() => setActionConfirm({ email: user.email, action: 'reset-password' })}
-              className="action-btn action-btn-indigo">
-              <i className="ph ph-key" /> Reset password
-            </button>
-          )}
-
-          {/* Re-issue OTP & email */}
-          {onReissueOtp && (
-            <button onClick={() => onReissueOtp(user.email)}
-              className="action-btn action-btn-indigo">
-              <i className="ph ph-envelope-simple" /> Email new OTP
-            </button>
-          )}
+          <button onClick={() => onOpenResetPassword(user.email)}
+            className="action-btn action-btn-indigo">
+            <i className="ph ph-key" /> Reset password
+          </button>
 
           {/* Revoke */}
           {actionConfirm?.email === user.email && actionConfirm?.action === 'revoke' ? (
@@ -1181,7 +1360,7 @@ function PermissionDrawer({ state, setState, onCancel, onSave, saving, ownerCanG
             <p className="text-[11px] text-slate-500 truncate">{state.email} · changes apply on next request after Save</p>
           </div>
           <select value={state.role} onChange={e => changeRole(e.target.value)}
-            className="bg-slate-900 border border-slate-700 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-brand-500">
+            className="ui-select-dark rounded-lg py-1.5 px-3 text-xs text-white">
             <option value="viewer">Viewer (defaults)</option>
             <option value="guard">Guard (defaults)</option>
             <option value="admin">Admin (defaults)</option>

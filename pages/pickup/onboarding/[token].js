@@ -48,6 +48,18 @@ const FONT_STACK =
   '"Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, ' +
   '"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
+const STUDENT_ID_RE = /^\d{10}$/;
+const STUDENT_NAME_RE = /^[A-Za-z ]+$/;
+const STUDENT_GRADE_RE = /^\d{1,2}$/;
+const STUDENT_CLASS_RE = /^[A-Z]$/;
+
+function normalizeStudentName(value) {
+  return String(value || '')
+    .replace(/[^A-Za-z ]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 // ─── Style helpers ───────────────────────────────────────────────────
 function uid() {
   return 'tmp-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -853,7 +865,7 @@ export default function PickupOnboardingPage() {
 
   function addStudent() {
     const studentId = studentInputId.trim();
-    const name = studentInputName.trim();
+    const name = normalizeStudentName(studentInputName);
     const grade = studentInputGrade.trim();
     const cls = studentInputClass.trim().toUpperCase();
 
@@ -861,24 +873,24 @@ export default function PickupOnboardingPage() {
       setStudentError('Student ID is required.');
       return;
     }
-    if (!/^[A-Za-z0-9_-]{4,32}$/.test(studentId)) {
-      setStudentError('Student ID looks invalid (4–32 letters or digits).');
+    if (!STUDENT_ID_RE.test(studentId)) {
+      setStudentError('Student ID must be exactly 10 digits (numbers only).');
       return;
     }
     if (students.some((s) => s.studentId === studentId)) {
       setStudentError('That Student ID is already added.');
       return;
     }
-    if (!name) {
-      setStudentError('Student name is required.');
+    if (!name || !STUDENT_NAME_RE.test(name)) {
+      setStudentError('Student name must use letters and spaces only.');
       return;
     }
-    if (!grade || !/^\d{1,2}$/.test(grade)) {
-      setStudentError('Grade must be a number, for example 4.');
+    if (!cls || !STUDENT_CLASS_RE.test(cls)) {
+      setStudentError('Class must be one letter A-Z (example: C).');
       return;
     }
-    if (!cls || !/^[A-Z0-9]{1,3}$/.test(cls)) {
-      setStudentError('Class is required, for example C.');
+    if (!grade || !STUDENT_GRADE_RE.test(grade)) {
+      setStudentError('Grade must be numeric (example: 4).');
       return;
     }
 
@@ -1047,7 +1059,14 @@ export default function PickupOnboardingPage() {
     }
     if (students.length === 0) return 'Add at least one student.';
     for (const s of students) {
-      if (!String(s.studentId || '').trim()) return 'Student ID is required for every student.';
+      const sid = String(s.studentId || '').trim();
+      if (!STUDENT_ID_RE.test(sid)) return 'Each Student ID must be exactly 10 digits.';
+      const studentName = normalizeStudentName(String(s.name || ''));
+      if (!studentName || !STUDENT_NAME_RE.test(studentName)) return 'Each student name must contain letters and spaces only.';
+      const cls = String(s.className || '').trim().toUpperCase();
+      if (!STUDENT_CLASS_RE.test(cls)) return 'Each class must be one letter A-Z.';
+      const grade = String(s.grade || '').trim();
+      if (!STUDENT_GRADE_RE.test(grade)) return 'Each grade must be numeric.';
     }
     if (chaperones.length === 0) return 'Add at least one chaperone.';
     const unsaved = chaperones.findIndex((c) => !c.confirmed);
@@ -1625,7 +1644,7 @@ export default function PickupOnboardingPage() {
 
                 <div style={card()}>
                   {sectionHeading(2, 'Your child(ren)',
-                    'Enter student details manually: name, grade, and class.')}
+                    'Enter student details manually. EY tip: fill Class first, then Grade.')}
 
                   {students.length === 0 ? (
                     <div style={{
@@ -1651,7 +1670,7 @@ export default function PickupOnboardingPage() {
                             </div>
                             <div style={{ fontSize: 12, color: BRAND.textSubtle, marginTop: 2 }}>
                               Student ID {s.studentId || '—'} ·
-                              Grade {s.grade || '—'} · Class {s.className || '—'}{s.homeroom ? ` · ${s.homeroom}` : ''}
+                              Class {s.className || '—'} · Grade {s.grade || '—'}{s.homeroom ? ` · ${s.homeroom}` : ''}
                               {s.studentId === primarySid && (
                                 <span style={{
                                   marginLeft: 8, background: BRAND.orange, color: '#fff',
@@ -1678,36 +1697,54 @@ export default function PickupOnboardingPage() {
                     <div className="pog-grid-2" style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 0.6fr 0.6fr auto', gap: 8 }}>
                       <input
                         style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
-                        placeholder="Student ID *"
+                        placeholder="Student ID (10 digits) *"
                         value={studentInputId}
-                        onChange={(e) => { setStudentInputId(e.target.value); if (studentError) setStudentError(null); }}
+                        inputMode="numeric"
+                        maxLength={10}
+                        onChange={(e) => {
+                          setStudentInputId(e.target.value.replace(/\D/g, '').slice(0, 10));
+                          if (studentError) setStudentError(null);
+                        }}
                       />
                       <input
                         style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
-                        placeholder="Student name"
+                        placeholder="Student name (letters only)"
                         value={studentInputName}
-                        onChange={(e) => { setStudentInputName(e.target.value); if (studentError) setStudentError(null); }}
+                        onChange={(e) => {
+                          setStudentInputName(e.target.value.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' '));
+                          if (studentError) setStudentError(null);
+                        }}
                       />
                       <input
                         style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
-                        placeholder="Grade (e.g. 4)"
-                        value={studentInputGrade}
-                        onChange={(e) => { setStudentInputGrade(e.target.value.replace(/[^0-9]/g, '')); if (studentError) setStudentError(null); }}
-                      />
-                      <input
-                        style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
-                        placeholder="Class (e.g. C)"
+                        placeholder="Class (A-Z)"
                         value={studentInputClass}
-                        onChange={(e) => { setStudentInputClass(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')); if (studentError) setStudentError(null); }}
+                        maxLength={1}
+                        onChange={(e) => {
+                          setStudentInputClass(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1));
+                          if (studentError) setStudentError(null);
+                        }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }}
+                      />
+                      <input
+                        style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
+                        placeholder="Grade (number)"
+                        value={studentInputGrade}
+                        inputMode="numeric"
+                        maxLength={2}
+                        onChange={(e) => {
+                          setStudentInputGrade(e.target.value.replace(/\D/g, '').slice(0, 2));
+                          if (studentError) setStudentError(null);
+                        }}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }}
                       />
                       <button type="button" style={btn()}
-                        onClick={() => addStudent()} disabled={!studentInputId.trim() || !studentInputName.trim() || !studentInputGrade.trim() || !studentInputClass.trim()}>
+                        onClick={() => addStudent()} disabled={!studentInputId.trim() || !studentInputName.trim() || !studentInputClass.trim() || !studentInputGrade.trim()}>
                         Add
                       </button>
                     </div>
 
-                    {/* Inline lookup error — sits right under the input
+                    {/* Inline student-input error — sits right under the input
                         so the parent doesn't have to scroll. */}
                     {studentError && (
                       <div role="alert" style={{

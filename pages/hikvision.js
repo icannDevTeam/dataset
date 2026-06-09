@@ -25,6 +25,7 @@ export default function HikvisionPortal() {
     username: '',
     password: '',
   });
+  const [showDevicePassword, setShowDevicePassword] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [enrolledUsers, setEnrolledUsers] = useState([]);
@@ -299,9 +300,18 @@ export default function HikvisionPortal() {
                 />
               </div>
               <div className={styles.formGroup}>
-                <label>Password</label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label>Password</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowDevicePassword((s) => !s)}
+                    style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}
+                  >
+                    {showDevicePassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
                 <input
-                  type="password"
+                  type={showDevicePassword ? 'text' : 'password'}
                   value={device.password}
                   onChange={(e) => setDevice({ ...device, password: e.target.value })}
                   placeholder="password"

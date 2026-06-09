@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../lib/AuthContext';
+import rbac from '../../lib/rbac';
 import { filterNavForRole } from '../../lib/permissions';
 import { useTheme } from '../../lib/theme';
 
@@ -291,7 +292,7 @@ export default function V2Layout({ children }) {
               // Sensitive user-access gating — hide entirely (never disable)
               // when the caller lacks the named sensitive_user_access action.
               if (item.sensitivePerm) {
-                const allowed = !!permissions?.sensitive_user_access?.[item.sensitivePerm];
+                const allowed = rbac.can(permissions, `sensitive_user_access.${item.sensitivePerm}`);
                 if (!allowed) return null;
               }
               // Legacy: adminOnly items need user_management view OR security_audit view

@@ -42,6 +42,7 @@ export default function Dashboard() {
   const [lastFetch, setLastFetch] = useState(null);
   const [deviceConnected, setDeviceConnected] = useState(null);
   const [credentials, setCredentials] = useState({ ip: '', username: '', password: '' });
+  const [showDevicePassword, setShowDevicePassword] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const prevRecordCount = useRef(0);
@@ -342,12 +343,19 @@ export default function Dashboard() {
                   className="bg-slate-950/50 border border-slate-700 rounded-lg py-2 px-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all w-36"
                 />
                 <input
-                  type="password"
+                  type={showDevicePassword ? 'text' : 'password'}
                   placeholder="Password"
                   value={credentials.password}
                   onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
                   className="bg-slate-950/50 border border-slate-700 rounded-lg py-2 px-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all w-36"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowDevicePassword((s) => !s)}
+                  className="px-2 py-2 text-xs text-slate-400 hover:text-white"
+                >
+                  {showDevicePassword ? 'Hide' : 'Show'}
+                </button>
                 <button
                   onClick={saveCredentials}
                   className="px-4 py-2 bg-brand-500 hover:bg-brand-400 text-slate-950 rounded-lg text-sm font-semibold transition-all shadow-[0_0_20px_rgba(6,182,212,0.3)] active:scale-95"
