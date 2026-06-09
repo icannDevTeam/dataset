@@ -122,6 +122,21 @@ function displayStudentName(student) {
   return composeStudentName(student?.firstName || '', student?.nickname || '') || student?.name || '—';
 }
 
+async function readApiJsonSafe(response, fallbackMessage) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    const htmlLike = /^\s*</.test(text);
+    return {
+      error: fallbackMessage || (htmlLike
+        ? 'Server returned an HTML error page. Please refresh and try again.'
+        : `Unexpected server response (${response.status}).`),
+    };
+  }
+}
+
 function liveStudentInputError({ firstName, nickname, gradeSelection, rawFirstName, rawNickname }) {
   if (typeof rawFirstName === 'string' && /[^A-Za-z ]/.test(rawFirstName)) {
     return 'First name accepts letters and spaces only.';
@@ -524,8 +539,9 @@ function ChaperoneFaceCapture({ tempId, token, onPhotos, disabled }) {
         token, tempId, photoIndex: photos.length, imageBase64: dataUrl,
       }),
     });
-    const j = await r.json();
+    const j = await readApiJsonSafe(r, 'Could not upload face photo. Please try again.');
     if (!r.ok) throw new Error(j.error || 'upload failed');
+    if (!j.path) throw new Error('Upload completed but no file path was returned. Please try again.');
     return j.path;
   }
 
@@ -1074,7 +1090,7 @@ export default function PickupOnboardingPage() {
           consentSignature: signature,
         }),
       });
-      const j = await r.json();
+      const j = await readApiJsonSafe(r, 'Could not submit the form. Please refresh and try again.');
       if (r.status === 409 && j.error === 'student-already-registered') {
         setConflict(j);
         setShowPreview(false);
