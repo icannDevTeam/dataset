@@ -16,8 +16,8 @@
  *
  * Valid `card` ids (must stay in sync with the SECTIONS array below):
  *   attendance · chaperone-roster · pickup-events · onboarding-forms
- *   students-roster · terminals · system-health · security-incidents
- *   access-logs · audit-log
+ *   students-roster · students-by-class · class-directory · terminals
+ *   system-health · security-incidents · access-logs · audit-log
  * ───────────────────────────────────────────────────────────────────
  */
 import Head from 'next/head';
@@ -197,6 +197,30 @@ const SECTIONS = [
         anyPermission: ['download_operational', 'download_directory'],
         tags: ['directory', 'students'],
         formats: ['csv', 'xlsx'],
+      },
+      {
+        id: 'students-by-class',
+        endpoint: '/api/downloads/students-by-class',
+        icon: 'ph-list-bullets',
+        title: 'Students By Class',
+        blurb: 'Roster grouped and sorted for class operations, cleanup, and homeroom review.',
+        tone: 'sky',
+        needsRange: false,
+        anyPermission: ['download_operational', 'download_directory'],
+        tags: ['directory', 'students', 'class'],
+        formats: ['csv', 'xlsx', 'pdf'],
+      },
+      {
+        id: 'class-directory',
+        endpoint: '/api/downloads/class-directory',
+        icon: 'ph-buildings',
+        title: 'Class Directory',
+        blurb: 'Class-level summary with counts, readiness, and managed metadata.',
+        tone: 'indigo',
+        needsRange: false,
+        anyPermission: ['download_operational', 'download_directory'],
+        tags: ['directory', 'class', 'summary'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'terminals',
@@ -386,6 +410,8 @@ const RETENTION_BY_CARD = {
   'device-sync': 90,
   // Directory & Devices
   'students-roster': 730,
+  'students-by-class': 730,
+  'class-directory': 730,
   terminals: 365,
   'system-health': 90,
   // Security & Compliance

@@ -46,8 +46,7 @@ const MAX_STUDENTS = 10;
 const FIRST_FORM_SEQ = 0;
 const STUDENT_ID_RE = /^\d{10}$/;
 const STUDENT_NAME_RE = /^[A-Za-z ]+$/;
-const STUDENT_GRADE_RE = /^\d{1,2}$/;
-const STUDENT_CLASS_RE = /^[A-Z]$/;
+const EY_LEVELS = new Set(['EY1', 'EY2', 'EY3']);
 
 function clientIpHdr(req) {
   return clientIp(req);
@@ -103,16 +102,12 @@ function sanitizeStudentName(raw) {
     .slice(0, 120);
 }
 
-function sanitizeGrade(raw) {
-  return String(raw || '').trim().replace(/\D/g, '').slice(0, 2);
-}
-
-function sanitizeClassName(raw) {
-  return String(raw || '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
+function sanitizeEyLevel(raw) {
+  return String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
 }
 
 function validateStudent(raw, idx) {
-  const studentId = String(raw?.studentId || '').trim().replace(/\D/g, '').slice(0, 10);
+  const studentId = String(raw?.studentId || raw?.id || '').trim().replace(/\D/g, '').slice(0, 10);
   if (!STUDENT_ID_RE.test(studentId)) {
     return { ok: false, field: 'studentId', message: `Student #${idx + 1}: Student ID must be exactly 10 digits.` };
   }
@@ -122,14 +117,14 @@ function validateStudent(raw, idx) {
     return { ok: false, field: 'name', message: `Student #${idx + 1}: Name must use letters and spaces only.` };
   }
 
-  const className = sanitizeClassName(raw?.className);
-  if (!STUDENT_CLASS_RE.test(className)) {
-    return { ok: false, field: 'className', message: `Student #${idx + 1}: Class must be one uppercase letter (A-Z).` };
+  const eyLevel = sanitizeEyLevel(raw?.className || raw?.homeroom);
+  if (!EY_LEVELS.has(eyLevel)) {
+    return { ok: false, field: 'className', message: `Student #${idx + 1}: EY level must be EY1, EY2, or EY3.` };
   }
 
-  const grade = sanitizeGrade(raw?.grade);
-  if (!STUDENT_GRADE_RE.test(grade)) {
-    return { ok: false, field: 'grade', message: `Student #${idx + 1}: Grade must be numeric.` };
+  const grade = String(raw?.grade || '').trim().toUpperCase();
+  if (grade && grade !== 'EY') {
+    return { ok: false, field: 'grade', message: `Student #${idx + 1}: Grade must be EY for this trial.` };
   }
 
   return {
@@ -138,9 +133,9 @@ function validateStudent(raw, idx) {
       id: studentId,
       studentId,
       name,
-      grade,
-      className,
-      homeroom: `${grade}${className}`,
+      grade: 'EY',
+      className: eyLevel,
+      homeroom: eyLevel,
     },
   };
 }

@@ -50,14 +50,33 @@ const FONT_STACK =
 
 const STUDENT_ID_RE = /^\d{10}$/;
 const STUDENT_NAME_RE = /^[A-Za-z ]+$/;
-const STUDENT_GRADE_RE = /^\d{1,2}$/;
-const STUDENT_CLASS_RE = /^[A-Z]$/;
+const EY_LEVEL_OPTIONS = ['EY1', 'EY2', 'EY3'];
+const EY_LEVEL_SET = new Set(EY_LEVEL_OPTIONS);
 
 function normalizeStudentName(value) {
   return String(value || '')
     .replace(/[^A-Za-z ]/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+function liveStudentInputError({ studentId, name, eyLevel, rawId, rawName }) {
+  if (typeof rawId === 'string' && /[^0-9]/.test(rawId)) {
+    return 'Student ID accepts numbers only.';
+  }
+  if (typeof rawName === 'string' && /[^A-Za-z ]/.test(rawName)) {
+    return 'Student name accepts letters and spaces only.';
+  }
+  if (studentId && studentId.length > 0 && studentId.length < 10) {
+    return 'Student ID must be exactly 10 digits.';
+  }
+  if (name && !STUDENT_NAME_RE.test(name)) {
+    return 'Student name accepts letters and spaces only.';
+  }
+  if (eyLevel && !EY_LEVEL_SET.has(eyLevel)) {
+    return 'EY level must be EY1, EY2, or EY3.';
+  }
+  return null;
 }
 
 // ─── Style helpers ───────────────────────────────────────────────────
@@ -774,12 +793,11 @@ export default function PickupOnboardingPage() {
   const [guardianPhone, setGuardianPhone] = useState('');
 
   const [studentInputName, setStudentInputName] = useState('');
-  const [studentInputGrade, setStudentInputGrade] = useState('');
   const [studentInputClass, setStudentInputClass] = useState('');
   const [studentInputId, setStudentInputId] = useState('');
   const [students, setStudents] = useState([]);
   // Inline error for the Student section only — keeps validation errors
-  // (missing/invalid Student ID, grade, class, etc.) next to the input so
+  // (missing/invalid Student ID, name, or EY level) next to the input so
   // the parent doesn't have to scroll to the bottom of the form to see
   // what went wrong.
   const [studentError, setStudentError] = useState(null);
@@ -866,8 +884,7 @@ export default function PickupOnboardingPage() {
   function addStudent() {
     const studentId = studentInputId.trim();
     const name = normalizeStudentName(studentInputName);
-    const grade = studentInputGrade.trim();
-    const cls = studentInputClass.trim().toUpperCase();
+    const eyLevel = studentInputClass.trim().toUpperCase();
 
     if (!studentId) {
       setStudentError('Student ID is required.');
@@ -885,23 +902,18 @@ export default function PickupOnboardingPage() {
       setStudentError('Student name must use letters and spaces only.');
       return;
     }
-    if (!cls || !STUDENT_CLASS_RE.test(cls)) {
-      setStudentError('Class must be one letter A-Z (example: C).');
-      return;
-    }
-    if (!grade || !STUDENT_GRADE_RE.test(grade)) {
-      setStudentError('Grade must be numeric (example: 4).');
+    if (!eyLevel || !EY_LEVEL_SET.has(eyLevel)) {
+      setStudentError('EY level must be EY1, EY2, or EY3.');
       return;
     }
 
-    const homeroom = `${grade}${cls}`;
     const student = {
       id: studentId,
       studentId,
       name,
-      grade,
-      className: cls,
-      homeroom,
+      grade: 'EY',
+      className: eyLevel,
+      homeroom: eyLevel,
     };
 
     setStudents((prev) => [...prev, student]);
@@ -911,7 +923,6 @@ export default function PickupOnboardingPage() {
       authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), student.id])),
     })));
     setStudentInputName('');
-    setStudentInputGrade('');
     setStudentInputClass('');
     setStudentInputId('');
     setStudentError(null);
@@ -1063,10 +1074,10 @@ export default function PickupOnboardingPage() {
       if (!STUDENT_ID_RE.test(sid)) return 'Each Student ID must be exactly 10 digits.';
       const studentName = normalizeStudentName(String(s.name || ''));
       if (!studentName || !STUDENT_NAME_RE.test(studentName)) return 'Each student name must contain letters and spaces only.';
-      const cls = String(s.className || '').trim().toUpperCase();
-      if (!STUDENT_CLASS_RE.test(cls)) return 'Each class must be one letter A-Z.';
-      const grade = String(s.grade || '').trim();
-      if (!STUDENT_GRADE_RE.test(grade)) return 'Each grade must be numeric.';
+      const eyLevel = String(s.className || s.homeroom || '').trim().toUpperCase();
+      if (!EY_LEVEL_SET.has(eyLevel)) return 'Each student must have EY level EY1, EY2, or EY3.';
+      const grade = String(s.grade || '').trim().toUpperCase();
+      if (grade !== 'EY') return 'Each student grade must be EY.';
     }
     if (chaperones.length === 0) return 'Add at least one chaperone.';
     const unsaved = chaperones.findIndex((c) => !c.confirmed);
@@ -1243,9 +1254,8 @@ export default function PickupOnboardingPage() {
                         </div>
                         <div style={{ color: BRAND.textSubtle, fontSize: 12.5, marginTop: 2 }}>
                           Student ID {s.studentId || '—'}
-                          {s.grade && <> · Grade {s.grade}</>}
-                          {s.className && <> · Class {s.className}</>}
-                          {s.homeroom && <> · {s.homeroom}</>}
+                          {s.className && <> · EY Level {s.className}</>}
+                          <> · Programme EY</>
                         </div>
                       </div>
                     ))}
@@ -1644,7 +1654,7 @@ export default function PickupOnboardingPage() {
 
                 <div style={card()}>
                   {sectionHeading(2, 'Your child(ren)',
-                    'Enter student details manually. EY tip: fill Class first, then Grade.')}
+                    'Enter student details manually. For this trial, select EY1, EY2, or EY3.')}
 
                   {students.length === 0 ? (
                     <div style={{
@@ -1670,7 +1680,7 @@ export default function PickupOnboardingPage() {
                             </div>
                             <div style={{ fontSize: 12, color: BRAND.textSubtle, marginTop: 2 }}>
                               Student ID {s.studentId || '—'} ·
-                              Class {s.className || '—'} · Grade {s.grade || '—'}{s.homeroom ? ` · ${s.homeroom}` : ''}
+                              EY Level {s.className || s.homeroom || '—'} · Programme EY
                               {s.studentId === primarySid && (
                                 <span style={{
                                   marginLeft: 8, background: BRAND.orange, color: '#fff',
@@ -1693,8 +1703,8 @@ export default function PickupOnboardingPage() {
                     padding: 14, border: `1px solid ${BRAND.border}`,
                     borderRadius: 10, background: BRAND.surfaceAlt,
                   }}>
-                    <label style={label()}>Student details *</label>
-                    <div className="pog-grid-2" style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 0.6fr 0.6fr auto', gap: 8 }}>
+                    <label style={label()}>Student details (EY trial) *</label>
+                    <div className="pog-grid-2" style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 0.9fr auto', gap: 8 }}>
                       <input
                         style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
                         placeholder="Student ID (10 digits) *"
@@ -1702,8 +1712,15 @@ export default function PickupOnboardingPage() {
                         inputMode="numeric"
                         maxLength={10}
                         onChange={(e) => {
-                          setStudentInputId(e.target.value.replace(/\D/g, '').slice(0, 10));
-                          if (studentError) setStudentError(null);
+                          const rawId = e.target.value;
+                          const nextId = rawId.replace(/\D/g, '').slice(0, 10);
+                          setStudentInputId(nextId);
+                          setStudentError(liveStudentInputError({
+                            studentId: nextId,
+                            name: studentInputName,
+                            eyLevel: studentInputClass,
+                            rawId,
+                          }));
                         }}
                       />
                       <input
@@ -1711,35 +1728,38 @@ export default function PickupOnboardingPage() {
                         placeholder="Student name (letters only)"
                         value={studentInputName}
                         onChange={(e) => {
-                          setStudentInputName(e.target.value.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' '));
-                          if (studentError) setStudentError(null);
+                          const rawName = e.target.value;
+                          const nextName = rawName.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' ');
+                          setStudentInputName(nextName);
+                          setStudentError(liveStudentInputError({
+                            studentId: studentInputId,
+                            name: nextName,
+                            eyLevel: studentInputClass,
+                            rawName,
+                          }));
                         }}
                       />
-                      <input
+                      <select
                         style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
-                        placeholder="Class (A-Z)"
                         value={studentInputClass}
-                        maxLength={1}
                         onChange={(e) => {
-                          setStudentInputClass(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1));
-                          if (studentError) setStudentError(null);
+                          const nextLevel = String(e.target.value || '').toUpperCase();
+                          setStudentInputClass(nextLevel);
+                          setStudentError(liveStudentInputError({
+                            studentId: studentInputId,
+                            name: studentInputName,
+                            eyLevel: nextLevel,
+                          }));
                         }}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }}
-                      />
-                      <input
-                        style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
-                        placeholder="Grade (number)"
-                        value={studentInputGrade}
-                        inputMode="numeric"
-                        maxLength={2}
-                        onChange={(e) => {
-                          setStudentInputGrade(e.target.value.replace(/\D/g, '').slice(0, 2));
-                          if (studentError) setStudentError(null);
-                        }}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }}
-                      />
+                      >
+                        <option value="">EY level *</option>
+                        {EY_LEVEL_OPTIONS.map((lvl) => (
+                          <option key={lvl} value={lvl}>{lvl}</option>
+                        ))}
+                      </select>
                       <button type="button" style={btn()}
-                        onClick={() => addStudent()} disabled={!studentInputId.trim() || !studentInputName.trim() || !studentInputClass.trim() || !studentInputGrade.trim()}>
+                        onClick={() => addStudent()} disabled={!studentInputId.trim() || !studentInputName.trim() || !studentInputClass.trim()}>
                         Add
                       </button>
                     </div>

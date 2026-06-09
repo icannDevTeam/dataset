@@ -40,6 +40,7 @@ const NAV_SECTIONS = [
     items: [
       { href: '/v2/pickup-admin', icon: 'ph-hand-waving', label: 'Onboarding Review', badgeKey: 'pickupPending' },
       { href: '/v2/pickup-admin?view=invites', icon: 'ph-link-simple', label: 'Invite Links' },
+      { href: '/v2/student-class-management', icon: 'ph-student', label: 'Student & Class Management' },
       { href: '/v2/pickup-enroll', icon: 'ph-fingerprint', label: 'Chaperone Enrolment' },
       { href: '/v2/terminals', icon: 'ph-fingerprint', label: 'Terminals' },
       { href: '/v2/release-groups', icon: 'ph-device-tablet-speaker', label: 'Release Groups (iPads)' },
