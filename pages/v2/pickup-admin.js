@@ -78,7 +78,10 @@ function derivePathwayFromStudent(student) {
   const gradeSelection = deriveGradeSelectionFromStudent(student);
   if (!gradeSelection || EY_GRADE_SET.has(gradeSelection)) return '';
   const className = String(student?.className || '').trim().toUpperCase();
-  if (className && !EY_GRADE_SET.has(className)) return className;
+  if (className && !EY_GRADE_SET.has(className)) {
+    if (className.startsWith(gradeSelection)) return className.slice(gradeSelection.length);
+    return className.replace(/^[1-5]/, '');
+  }
   const homeroom = String(student?.homeroom || '').trim().toUpperCase();
   const m = homeroom.match(/^[1-5](.+)$/);
   return m ? m[1] : '';
@@ -602,8 +605,9 @@ export default function PickupAdminPage() {
   // ─── Single-record actions ──────────────────────────────────────────────
   async function approve(rec) {
     if (!confirm(`Approve submission from ${rec.guardian?.name}?\n\n` +
-      `Allocates ${rec.chaperones.length} chaperone employeeNo(s) (9XXXXXXXXX). ` +
-      `Push to Hikvision terminals separately on the Enrolment page.`)) return;
+      `This only approves and allocates ${rec.chaperones.length} chaperone employeeNo(s) (9XXXXXXXXX).\n` +
+      `It does not push to terminals automatically.\n\n` +
+      `Next step: use Chaperone Enrolment to push chaperones to terminals.`)) return;
     setWorking((w) => ({ ...w, [rec.id]: 'approve' }));
     try {
       const r = await fetch('/api/pickup/admin/approve', {
@@ -616,7 +620,7 @@ export default function PickupAdminPage() {
       const allocated = (j.allocated || []).length;
       pushToast(
         'success',
-        `Allocated ${allocated} chaperone(s). Go to Enrolment to push them onto the terminals.`,
+        `Approved and allocated ${allocated} chaperone(s). Next: open Chaperone Enrolment to push them to terminals.`,
         `Approved: ${rec.guardian?.name}`,
       );
       await reload();
@@ -2099,11 +2103,14 @@ function DetailDrawer(props) {
                     <button
                       onClick={onApprove}
                       disabled={!!busy}
-                      title="Approve & enrol"
+                      title="Approve submission"
                       className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50"
                     >
-                      {busy === 'approve' ? 'Approving…' : <><i className="ph ph-check mr-1"></i>Approve & enrol</>}
+                      {busy === 'approve' ? 'Approving…' : <><i className="ph ph-check mr-1"></i>Approve</>}
                     </button>
+                    <div className="w-full text-[11px] text-amber-300/90 mt-1">
+                      After approval, use Chaperone Enrolment to push chaperones to terminals.
+                    </div>
                   </div>
                 )
               ) : (
@@ -2168,7 +2175,7 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
     if ((editForm.firstName || '').trim() !== (s.firstName || '')) patch.firstName = (editForm.firstName || '').trim();
     if ((editForm.nickname || '').trim() !== (s.nickname || '')) patch.nickname = (editForm.nickname || '').trim();
     if ((editForm.gradeSelection || '').trim() !== deriveGradeSelectionFromStudent(s)) patch.gradeSelection = (editForm.gradeSelection || '').trim();
-    if ((editForm.pathway || '').trim().toUpperCase() !== derivePathwayFromStudent(s)) patch.className = (editForm.pathway || '').trim().toUpperCase();
+    if ((editForm.pathway || '').trim().toUpperCase() !== derivePathwayFromStudent(s)) patch.homeroom = (editForm.pathway || '').trim().toUpperCase();
     if (Object.keys(patch).length === 0) { setEditOpen(false); return; }
     setSavingEdit(true);
     try {
@@ -2237,20 +2244,18 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
             </label>
             <label className="block">
-              <div className="text-[10px] text-slate-500 mb-0.5">Academic year grade</div>
-              <select value={editForm.gradeSelection} onChange={(e) => setEditForm((f) => ({ ...f, gradeSelection: e.target.value, pathway: EY_GRADE_SET.has(e.target.value) ? '' : f.pathway }))}
-                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white">
-                <option value="">Select grade</option>
-                {GRADE_SELECTION_OPTIONS.map((grade) => (
-                  <option key={grade} value={grade}>{grade}</option>
-                ))}
-              </select>
+              <div className="text-[10px] text-slate-500 mb-0.5">Class (from form)</div>
+              <input
+                value={formatStudentGradeBadge(s)}
+                readOnly
+                className="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300"
+              />
             </label>
             <label className="block">
-              <div className="text-[10px] text-slate-500 mb-0.5">Final class pathway</div>
-              <input value={editForm.pathway} onChange={(e) => setEditForm((f) => ({ ...f, pathway: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
+              <div className="text-[10px] text-slate-500 mb-0.5">Homeroom</div>
+              <input value={editForm.pathway} onChange={(e) => setEditForm((f) => ({ ...f, pathway: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') }))}
                 disabled={EY_GRADE_SET.has(editForm.gradeSelection)}
-                placeholder={EY_GRADE_SET.has(editForm.gradeSelection) ? 'Not needed for EY' : 'A, B, C, D'}
+                placeholder={EY_GRADE_SET.has(editForm.gradeSelection) ? 'Not needed for EY' : 'A, B, C'}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
             </label>
           </div>
@@ -3109,7 +3114,7 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
                 <th className="text-left p-2 border border-slate-300">First name</th>
                 <th className="text-left p-2 border border-slate-300">Nickname</th>
                 <th className="text-left p-2 border border-slate-300">BINUS ID</th>
-                <th className="text-left p-2 border border-slate-300">Academic year grade</th>
+                <th className="text-left p-2 border border-slate-300">Grade</th>
                 <th className="text-left p-2 border border-slate-300">Final class</th>
               </tr>
             </thead>
