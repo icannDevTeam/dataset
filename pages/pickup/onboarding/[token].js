@@ -336,7 +336,7 @@ function buildReceiptHtml({
 
 <h2>Students (${(students || []).length})</h2>
 <table>
-  <thead><tr><th>First Name</th><th>Nickname</th><th>Academic Year Grade</th><th>Final Class</th></tr></thead>
+  <thead><tr><th>First Name</th><th>Nickname</th><th>Grade</th><th>Final Class</th></tr></thead>
   <tbody>${studentRows || '<tr><td colspan="4">—</td></tr>'}</tbody>
 </table>
 
@@ -1751,7 +1751,7 @@ export default function PickupOnboardingPage() {
                     padding: 14, border: `1px solid ${BRAND.border}`,
                     borderRadius: 10, background: BRAND.surfaceAlt,
                   }}>
-                    <label style={label()}>{`Student details for Academic Year ${ACADEMIC_YEAR_LABEL} *`}</label>
+                    <label style={label()}>Student details *</label>
                     <div className="pog-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.9fr auto', gap: 8 }}>
                       <input
                         style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
@@ -1799,7 +1799,7 @@ export default function PickupOnboardingPage() {
                         }}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }}
                       >
-                        <option value="">Academic year grade *</option>
+                        <option value="">Grade *</option>
                         {GRADE_SELECTION_OPTIONS.map((grade) => (
                           <option key={grade} value={grade}>{grade}</option>
                         ))}

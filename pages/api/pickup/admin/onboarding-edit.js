@@ -55,6 +55,14 @@ function sanitizePathway(raw) {
   return String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
 }
 
+function extractPathway(raw, gradeSelection) {
+  const cleaned = sanitizePathway(raw);
+  if (!cleaned) return '';
+  if (!gradeSelection) return cleaned;
+  if (cleaned.startsWith(gradeSelection)) return cleaned.slice(gradeSelection.length);
+  return cleaned.replace(/^[1-5]/, '');
+}
+
 function composeStudentName(firstName, nickname, fallbackName) {
   if (firstName && nickname) return `${firstName} (${nickname})`;
   return firstName || nickname || fallbackName || '';
@@ -85,7 +93,10 @@ function normalizeStudentGradeFields(source, original) {
     };
   }
   if (!NUMERIC_GRADE_OPTIONS.has(gradeSelection)) return null;
-  const pathway = sanitizePathway(source.className ?? original.className);
+  const pathway = extractPathway(
+    source.homeroom ?? source.className ?? original.homeroom ?? original.className,
+    gradeSelection
+  );
   return {
     gradeSelection,
     grade: gradeSelection,
