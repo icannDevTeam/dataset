@@ -697,7 +697,7 @@ export default function AdminRbacPage() {
 
       {/* ── Invite modal ────────────────────────────────────────────── */}
       {showInvite && (
-        <Modal title="Add authorized user" onClose={() => { setShowInvite(false); setInviteError(''); setShowInvitePassword(false); }}>
+        <Modal title="Add authorized user" wide onClose={() => { setShowInvite(false); setInviteError(''); setShowInvitePassword(false); }}>
           <form onSubmit={handleInvite} className="space-y-3">
             {inviteError && (
               <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-xs">{inviteError}</div>
@@ -723,7 +723,7 @@ export default function AdminRbacPage() {
                   className="modal-input" />
               </div>
             </Field>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Display name">
                 <input type="text" value={inv.name}
                   onChange={e => setInv(i => ({ ...i, name: e.target.value }))}
@@ -750,22 +750,22 @@ export default function AdminRbacPage() {
                     ))}
                 </select>
               </Field>
-              <Field label="Role">
-                <select value={inv.role}
-                  onChange={e => setInv(i => ({ ...i, role: e.target.value }))}
-                  className="modal-input ui-select-dark">
-                  <option value="viewer">Viewer</option>
-                  <option value="guard">Guard (pickup)</option>
-                  <option value="admin">Admin</option>
-                  {myRole === 'owner' && <option value="owner">Owner</option>}
-                </select>
-                {inv.template !== 'individual' && (
-                  <div className="text-[11px] text-slate-500 mt-1">
-                    Auto-suggested from selected template. You can still adjust role manually.
-                  </div>
-                )}
-              </Field>
             </div>
+            <Field label="Role">
+              <select value={inv.role}
+                onChange={e => setInv(i => ({ ...i, role: e.target.value }))}
+                className="modal-input ui-select-dark">
+                <option value="viewer">Viewer</option>
+                <option value="guard">Guard (pickup)</option>
+                <option value="admin">Admin</option>
+                {myRole === 'owner' && <option value="owner">Owner</option>}
+              </select>
+              {inv.template !== 'individual' && (
+                <div className="text-[11px] text-slate-500 mt-1">
+                  Auto-suggested from selected template. You can still adjust role manually.
+                </div>
+              )}
+            </Field>
             <Field label="Class scopes (comma-separated, optional)">
               <input value={inv.classScopes}
                 onChange={e => setInv(i => ({ ...i, classScopes: e.target.value }))}
