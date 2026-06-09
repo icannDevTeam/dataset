@@ -11,7 +11,7 @@
  *  { recordId, target:'chaperone', tempId, action:'delete-face', facePath }
  *  { recordId, target:'chaperone', tempId, action:'add-face', imageBase64 }
  *  { recordId, target:'record',                action:'add-chaperone', chaperone:{name,phone,email,idNumber,relation,authorizedStudentIds} }
- *  { recordId, target:'student',   id,     action:'update', patch:{id,name,grade,className,homeroom} }
+ *  { recordId, target:'student',   id,     action:'update', patch:{id,studentId?,firstName?,nickname?,name?,gradeSelection?,className?} }
  *  { recordId, target:'student',   id,     action:'delete' }
  *
  * All edits are audited via lib/audit-log.
@@ -26,7 +26,7 @@ const { logAudit } = require('../../../../lib/audit-log');
 const ALLOWED_CHAP_FIELDS = new Set([
   'name', 'phone', 'email', 'idNumber', 'relation', 'authorizedStudentIds',
 ]);
-const ALLOWED_STUDENT_FIELDS = new Set(['id', 'name', 'grade', 'className', 'homeroom', 'studentId']);
+const ALLOWED_STUDENT_FIELDS = new Set(['id', 'studentId', 'name', 'firstName', 'nickname', 'gradeSelection', 'grade', 'className', 'homeroom']);
 const MAX_FACES_PER_CHAP = 2;
 const MAX_FACE_BYTES = 800 * 1024;
 const FACE_MIME = { jpeg: 'jpg', jpg: 'jpg', png: 'png', webp: 'webp' };
@@ -36,6 +36,63 @@ const ALLOWED_RELATIONS = new Set([
   'grandparent', 'sibling', 'emergency', 'other',
 ]);
 const FIRST_CHAPERONE_NO = 9000000000;
+const EY_GRADE_OPTIONS = new Set(['EY1', 'EY2', 'EY3']);
+const NUMERIC_GRADE_OPTIONS = new Set(['1', '2', '3', '4', '5']);
+
+function sanitizeStudentText(raw) {
+  return String(raw || '')
+    .replace(/[^A-Za-z ]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+function sanitizeGradeSelection(raw) {
+  return String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
+}
+
+function sanitizePathway(raw) {
+  return String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+}
+
+function composeStudentName(firstName, nickname, fallbackName) {
+  if (firstName && nickname) return `${firstName} (${nickname})`;
+  return firstName || nickname || fallbackName || '';
+}
+
+function deriveGradeSelection(student) {
+  const explicit = sanitizeGradeSelection(student?.gradeSelection);
+  if (explicit) return explicit;
+  const className = sanitizeGradeSelection(student?.className);
+  const homeroom = sanitizeGradeSelection(student?.homeroom);
+  const grade = sanitizeGradeSelection(student?.grade);
+  if (grade === 'EY' && EY_GRADE_OPTIONS.has(className)) return className;
+  if (EY_GRADE_OPTIONS.has(homeroom)) return homeroom;
+  if (NUMERIC_GRADE_OPTIONS.has(grade)) return grade;
+  const m = homeroom.match(/^([1-5])/);
+  return m ? m[1] : '';
+}
+
+function normalizeStudentGradeFields(source, original) {
+  const gradeSelection = sanitizeGradeSelection(source.gradeSelection || deriveGradeSelection(original));
+  if (!gradeSelection) return null;
+  if (EY_GRADE_OPTIONS.has(gradeSelection)) {
+    return {
+      gradeSelection,
+      grade: 'EY',
+      className: gradeSelection,
+      homeroom: gradeSelection,
+    };
+  }
+  if (!NUMERIC_GRADE_OPTIONS.has(gradeSelection)) return null;
+  const pathway = sanitizePathway(source.className ?? original.className);
+  return {
+    gradeSelection,
+    grade: gradeSelection,
+    className: pathway || '',
+    homeroom: `${gradeSelection}${pathway || ''}`,
+  };
+}
 
 function gradeFromHomeroom(hr) {
   if (!hr) return null;
@@ -434,12 +491,41 @@ async function handler(req, res) {
             return res.status(409).json({ error: 'student id already exists on this form' });
           }
         }
-        if (cleaned.grade) cleaned.grade = String(cleaned.grade).trim().slice(0, 8);
-        if (cleaned.className) cleaned.className = String(cleaned.className).trim().toUpperCase().slice(0, 8);
-        if (!cleaned.homeroom && (cleaned.grade || cleaned.className)) {
-          const g = cleaned.grade || original.grade;
-          const c = cleaned.className || original.className;
-          if (g && c) cleaned.homeroom = `${g}${c}`;
+        if (Object.prototype.hasOwnProperty.call(cleaned, 'firstName')) {
+          cleaned.firstName = sanitizeStudentText(cleaned.firstName);
+          if (!cleaned.firstName) return res.status(400).json({ error: 'first name required' });
+        }
+        if (Object.prototype.hasOwnProperty.call(cleaned, 'nickname')) {
+          cleaned.nickname = sanitizeStudentText(cleaned.nickname);
+          if (!cleaned.nickname) return res.status(400).json({ error: 'nickname required' });
+        }
+        if (cleaned.studentId) cleaned.studentId = String(cleaned.studentId).trim();
+
+        if (
+          Object.prototype.hasOwnProperty.call(cleaned, 'firstName') ||
+          Object.prototype.hasOwnProperty.call(cleaned, 'nickname') ||
+          Object.prototype.hasOwnProperty.call(cleaned, 'name')
+        ) {
+          const nextFirstName = Object.prototype.hasOwnProperty.call(cleaned, 'firstName') ? cleaned.firstName : (original.firstName || '');
+          const nextNickname = Object.prototype.hasOwnProperty.call(cleaned, 'nickname') ? cleaned.nickname : (original.nickname || '');
+          cleaned.name = composeStudentName(nextFirstName, nextNickname, cleaned.name || original.name);
+        }
+
+        if (
+          Object.prototype.hasOwnProperty.call(cleaned, 'gradeSelection') ||
+          Object.prototype.hasOwnProperty.call(cleaned, 'grade') ||
+          Object.prototype.hasOwnProperty.call(cleaned, 'className') ||
+          Object.prototype.hasOwnProperty.call(cleaned, 'homeroom')
+        ) {
+          const normalizedGrade = normalizeStudentGradeFields(cleaned, original);
+          if (!normalizedGrade) {
+            return res.status(400).json({ error: 'invalid grade selection' });
+          }
+          Object.assign(cleaned, normalizedGrade);
+        }
+
+        if (cleaned.id && !cleaned.studentId) {
+          cleaned.studentId = cleaned.id;
         }
         if (Object.keys(cleaned).length === 0) {
           return res.status(400).json({ error: 'no editable fields supplied' });

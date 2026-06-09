@@ -15,17 +15,17 @@
  * Body:
  *   {
  *     token,
- *     guardianName, guardianEmail, guardianPhone,
- *     students: [{ id, studentId?, name, grade?, className?, homeroom? }],
+ *     guardianName, guardianEmail,
+ *     students: [{ id?, studentId?, firstName, nickname, name?, gradeSelection?, grade?, className?, homeroom? }],
  *     chaperones: [{
  *        tempId,         // ties to /face uploads
  *        name,
  *        relation,       // any short string (canonical or custom)
- *        phone, idNumber?, email?,
+ *        email?, idNumber?,
  *        authorizedStudentIds: [...],
  *        facePaths: [storage paths from /face]   // ≥1 required
  *     }],
- *     consentSignature   // typed name = guardianName
+ *     consentSignature   // required typed consent field
  *   }
  *
  * Returns: { ok, recordId, formNumber }
@@ -45,8 +45,11 @@ const MAX_CHAPERONES = 5;
 const MAX_STUDENTS = 10;
 const FIRST_FORM_SEQ = 0;
 const STUDENT_ID_RE = /^\d{10}$/;
-const STUDENT_NAME_RE = /^[A-Za-z ]+$/;
-const EY_LEVELS = new Set(['EY1', 'EY2', 'EY3']);
+const STUDENT_TEXT_RE = /^[A-Za-z ]+$/;
+const EY_GRADE_OPTIONS = ['EY1', 'EY2', 'EY3'];
+const NUMERIC_GRADE_OPTIONS = ['1', '2', '3', '4', '5'];
+const GRADE_SELECTION_SET = new Set([...EY_GRADE_OPTIONS, ...NUMERIC_GRADE_OPTIONS]);
+const EY_GRADE_SET = new Set(EY_GRADE_OPTIONS);
 
 function clientIpHdr(req) {
   return clientIp(req);
@@ -63,11 +66,9 @@ function sanitizeRelation(raw) {
 function sanitizeChaperone(c, validStudentIds) {
   if (!c || typeof c !== 'object') return null;
   const name = String(c.name || '').trim();
-  const phone = String(c.phone || '').trim();
   const relation = sanitizeRelation(c.relation);
   if (relation === null) return null;
   if (!name || name.length < 2 || name.length > 80) return null;
-  if (!phone || phone.length > 24) return null;
   const auth = Array.isArray(c.authorizedStudentIds)
     ? c.authorizedStudentIds.filter((s) => validStudentIds.has(String(s)))
     : [];
@@ -81,7 +82,7 @@ function sanitizeChaperone(c, validStudentIds) {
     tempId: String(c.tempId || '').slice(0, 64) || null,
     name,
     relation,
-    phone,
+    phone: c.phone ? String(c.phone).trim().slice(0, 24) : null,
     idNumber: c.idNumber ? String(c.idNumber).trim().slice(0, 32) : null,
     email: c.email ? String(c.email).trim().toLowerCase().slice(0, 128) : null,
     authorizedStudentIds: auth,
@@ -102,42 +103,74 @@ function sanitizeStudentName(raw) {
     .slice(0, 120);
 }
 
-function sanitizeEyLevel(raw) {
+function sanitizeGradeSelection(raw) {
   return String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
 }
 
-function validateStudent(raw, idx) {
-  const studentId = String(raw?.studentId || raw?.id || '').trim().replace(/\D/g, '').slice(0, 10);
-  if (!STUDENT_ID_RE.test(studentId)) {
+function composeStudentName(firstName, nickname) {
+  if (firstName && nickname) return `${firstName} (${nickname})`;
+  return firstName || nickname || '';
+}
+
+function normalizeStudentRecord(raw, idx) {
+  const studentIdRaw = String(raw?.studentId || '').trim().replace(/\D/g, '').slice(0, 10);
+  if (studentIdRaw && !STUDENT_ID_RE.test(studentIdRaw)) {
     return { ok: false, field: 'studentId', message: `Student #${idx + 1}: Student ID must be exactly 10 digits.` };
   }
 
-  const name = sanitizeStudentName(raw?.name);
-  if (!name || !STUDENT_NAME_RE.test(name)) {
-    return { ok: false, field: 'name', message: `Student #${idx + 1}: Name must use letters and spaces only.` };
+  const firstName = sanitizeStudentName(raw?.firstName || raw?.name || '');
+  if (!firstName || !STUDENT_TEXT_RE.test(firstName)) {
+    return { ok: false, field: 'firstName', message: `Student #${idx + 1}: First name must use letters and spaces only.` };
   }
 
-  const eyLevel = sanitizeEyLevel(raw?.className || raw?.homeroom);
-  if (!EY_LEVELS.has(eyLevel)) {
-    return { ok: false, field: 'className', message: `Student #${idx + 1}: EY level must be EY1, EY2, or EY3.` };
+  const nickname = sanitizeStudentName(raw?.nickname);
+  if (!nickname || !STUDENT_TEXT_RE.test(nickname)) {
+    return { ok: false, field: 'nickname', message: `Student #${idx + 1}: Nickname must use letters and spaces only.` };
   }
 
-  const grade = String(raw?.grade || '').trim().toUpperCase();
-  if (grade && grade !== 'EY') {
-    return { ok: false, field: 'grade', message: `Student #${idx + 1}: Grade must be EY for this trial.` };
+  const gradeSelection = sanitizeGradeSelection(raw?.gradeSelection || raw?.className || raw?.homeroom || raw?.grade);
+  if (!GRADE_SELECTION_SET.has(gradeSelection)) {
+    return { ok: false, field: 'gradeSelection', message: `Student #${idx + 1}: Academic year grade must be EY1, EY2, EY3, or 1–5.` };
+  }
+
+  const resolvedId = String(raw?.id || '').trim() || `tmp-${crypto.randomBytes(6).toString('hex')}`;
+  const name = composeStudentName(firstName, nickname);
+
+  if (EY_GRADE_SET.has(gradeSelection)) {
+    return {
+      ok: true,
+      student: {
+        id: resolvedId,
+        studentId: studentIdRaw || null,
+        firstName,
+        nickname,
+        name,
+        gradeSelection,
+        grade: 'EY',
+        className: gradeSelection,
+        homeroom: gradeSelection,
+      },
+    };
   }
 
   return {
     ok: true,
     student: {
-      id: studentId,
-      studentId,
+      id: resolvedId,
+      studentId: studentIdRaw || null,
+      firstName,
+      nickname,
       name,
-      grade: 'EY',
-      className: eyLevel,
-      homeroom: eyLevel,
+      gradeSelection,
+      grade: gradeSelection,
+      className: '',
+      homeroom: gradeSelection,
     },
   };
+}
+
+function validateStudent(raw, idx) {
+  return normalizeStudentRecord(raw, idx);
 }
 
 export default async function handler(req, res) {
@@ -156,7 +189,7 @@ export default async function handler(req, res) {
 
   const guardianName = String(body.guardianName || '').trim();
   const guardianEmail = String(body.guardianEmail || '').trim().toLowerCase();
-  const guardianPhone = String(body.guardianPhone || '').trim();
+  const guardianPhone = String(body.guardianPhone || '').trim() || null;
   const consentSignature = String(body.consentSignature || '').trim();
   const students = Array.isArray(body.students) ? body.students : [];
   const chaperones = Array.isArray(body.chaperones) ? body.chaperones : [];
@@ -165,10 +198,7 @@ export default async function handler(req, res) {
   if (!guardianEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(guardianEmail)) {
     return res.status(400).json({ error: 'guardianEmail invalid' });
   }
-  if (!guardianPhone) return res.status(400).json({ error: 'guardianPhone required' });
-  if (consentSignature.toLowerCase() !== guardianName.toLowerCase()) {
-    return res.status(400).json({ error: 'typed signature must match guardian name' });
-  }
+  if (!consentSignature) return res.status(400).json({ error: 'consentSignature required' });
   if (students.length === 0 || students.length > MAX_STUDENTS) {
     return res.status(400).json({ error: `students: 1–${MAX_STUDENTS} required` });
   }
@@ -192,6 +222,7 @@ export default async function handler(req, res) {
 
   const seenStudentIds = new Set();
   for (const s of cleanStudents) {
+    if (!s.studentId) continue;
     if (seenStudentIds.has(s.studentId)) {
       return res.status(400).json({
         error: 'duplicate-student-id',
@@ -202,10 +233,11 @@ export default async function handler(req, res) {
   }
 
   const validStudentIds = new Set(cleanStudents.map((s) => s.id));
+  const hasRealStudentIds = cleanStudents.some((s) => !!s.studentId);
   const hasClaimSid = claims.sid && cleanStudents.some((s) =>
     s.studentId === String(claims.sid) || s.id === String(claims.sid)
   );
-  if (claims.sid && !hasClaimSid) {
+  if (claims.sid && hasRealStudentIds && !hasClaimSid) {
     return res.status(400).json({
       error: 'token-bound-student-missing',
       message: `This invite link was issued for student ${claims.sid}. That student must be included in the submission.`,
@@ -217,7 +249,7 @@ export default async function handler(req, res) {
     .map((c) => sanitizeChaperone(c, validStudentIds))
     .filter(Boolean);
   if (cleanChaperones.length === 0) {
-    return res.status(400).json({ error: 'at least one valid chaperone with ≥1 face photo required' });
+    return res.status(400).json({ error: 'at least one valid chaperone required' });
   }
 
   const studentNames = cleanStudents.map((s) => s.name).filter(Boolean);
@@ -238,7 +270,9 @@ export default async function handler(req, res) {
     const recordId = crypto.randomBytes(12).toString('hex');
     const recRef = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
     const counterRef = db.doc(tenancy.idAllocationsDoc('pickup-form-counter', tid));
-    const lockCandidates = cleanStudents.map((s) => ({ sid: s.studentId, student: s }));
+    const lockCandidates = cleanStudents
+      .filter((s) => !!s.studentId)
+      .map((s) => ({ sid: s.studentId, student: s }));
     const lockRefs = lockCandidates.map(({ sid }) => db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${sid}`));
 
     const txOut = await db.runTransaction(async (tx) => {

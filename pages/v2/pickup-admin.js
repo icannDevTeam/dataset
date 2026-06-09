@@ -43,6 +43,68 @@ const SORT_OPTIONS = [
   { key: 'name-az', label: 'Guardian A → Z' },
 ];
 
+const ACADEMIC_YEAR_LABEL = '2026/2027';
+const EY_GRADE_OPTIONS = ['EY1', 'EY2', 'EY3'];
+const NUMERIC_GRADE_OPTIONS = ['1', '2', '3', '4', '5'];
+const GRADE_SELECTION_OPTIONS = [...EY_GRADE_OPTIONS, ...NUMERIC_GRADE_OPTIONS];
+const EY_GRADE_SET = new Set(EY_GRADE_OPTIONS);
+const NUMERIC_GRADE_SET = new Set(NUMERIC_GRADE_OPTIONS);
+
+function isTemporaryStudentId(value) {
+  return String(value || '').startsWith('tmp-');
+}
+
+function getStoredStudentId(student) {
+  const studentId = String(student?.studentId || '').trim();
+  if (studentId) return studentId;
+  const id = String(student?.id || '').trim();
+  return isTemporaryStudentId(id) ? '' : id;
+}
+
+function deriveGradeSelectionFromStudent(student) {
+  const explicit = String(student?.gradeSelection || '').trim().toUpperCase();
+  if (explicit) return explicit;
+  const className = String(student?.className || '').trim().toUpperCase();
+  const homeroom = String(student?.homeroom || '').trim().toUpperCase();
+  const grade = String(student?.grade || '').trim().toUpperCase();
+  if (grade === 'EY' && EY_GRADE_SET.has(className)) return className;
+  if (EY_GRADE_SET.has(homeroom)) return homeroom;
+  if (NUMERIC_GRADE_SET.has(grade)) return grade;
+  const m = homeroom.match(/^([1-5])/);
+  return m ? m[1] : '';
+}
+
+function derivePathwayFromStudent(student) {
+  const gradeSelection = deriveGradeSelectionFromStudent(student);
+  if (!gradeSelection || EY_GRADE_SET.has(gradeSelection)) return '';
+  const className = String(student?.className || '').trim().toUpperCase();
+  if (className && !EY_GRADE_SET.has(className)) return className;
+  const homeroom = String(student?.homeroom || '').trim().toUpperCase();
+  const m = homeroom.match(/^[1-5](.+)$/);
+  return m ? m[1] : '';
+}
+
+function buildStudentDisplayName(student) {
+  const firstName = String(student?.firstName || '').trim();
+  const nickname = String(student?.nickname || '').trim();
+  if (firstName && nickname) return `${firstName} (${nickname})`;
+  return firstName || nickname || student?.name || '—';
+}
+
+function formatStudentGradeBadge(student) {
+  const selection = deriveGradeSelectionFromStudent(student);
+  if (!selection) return '—';
+  return EY_GRADE_SET.has(selection) ? selection : `Grade ${selection}`;
+}
+
+function formatStudentFinalClass(student) {
+  const selection = deriveGradeSelectionFromStudent(student);
+  if (!selection) return null;
+  if (EY_GRADE_SET.has(selection)) return selection;
+  const pathway = derivePathwayFromStudent(student);
+  return pathway ? `${selection}${pathway}` : null;
+}
+
 function fmtTime(iso) {
   if (!iso) return '—';
   try {
@@ -492,7 +554,7 @@ export default function PickupAdminPage() {
       list = list.filter((r) => {
         const hay = [
           r.guardian?.name, r.guardian?.email, r.guardian?.phone,
-          ...(r.students || []).flatMap((s) => [s.name, s.dbName, s.id, s.homeroom]),
+          ...(r.students || []).flatMap((s) => [s.name, s.firstName, s.nickname, s.dbName, s.id, s.studentId, s.homeroom, deriveGradeSelectionFromStudent(s), formatStudentFinalClass(s)]),
           ...(r.chaperones || []).flatMap((c) => [c.name, c.phone, c.email, c.idNumber]),
         ].filter(Boolean).join(' ').toLowerCase();
         return hay.includes(q);
@@ -2086,22 +2148,27 @@ function DetailDrawer(props) {
 function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
-    id: s.id || '',
-    name: s.name || '',
-    grade: s.grade || '',
-    className: s.className || '',
-    homeroom: s.homeroom || '',
+    id: getStoredStudentId(s),
+    firstName: s.firstName || '',
+    nickname: s.nickname || '',
+    gradeSelection: deriveGradeSelectionFromStudent(s),
+    pathway: derivePathwayFromStudent(s),
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
   const submitEdit = async () => {
     if (!onEdit) return;
     const patch = {};
-    if ((editForm.id || '').trim() !== (s.id || '')) patch.id = (editForm.id || '').trim();
-    if (editForm.name.trim() && editForm.name.trim() !== s.name) patch.name = editForm.name.trim();
-    if ((editForm.grade || '').trim() !== (s.grade || '')) patch.grade = (editForm.grade || '').trim();
-    if ((editForm.className || '').trim().toUpperCase() !== (s.className || '')) patch.className = (editForm.className || '').trim().toUpperCase();
-    if ((editForm.homeroom || '').trim() !== (s.homeroom || '')) patch.homeroom = editForm.homeroom.trim();
+    const nextId = (editForm.id || '').trim();
+    const currentId = getStoredStudentId(s);
+    if (nextId && nextId !== currentId) {
+      patch.id = nextId;
+      patch.studentId = nextId;
+    }
+    if ((editForm.firstName || '').trim() !== (s.firstName || '')) patch.firstName = (editForm.firstName || '').trim();
+    if ((editForm.nickname || '').trim() !== (s.nickname || '')) patch.nickname = (editForm.nickname || '').trim();
+    if ((editForm.gradeSelection || '').trim() !== deriveGradeSelectionFromStudent(s)) patch.gradeSelection = (editForm.gradeSelection || '').trim();
+    if ((editForm.pathway || '').trim().toUpperCase() !== derivePathwayFromStudent(s)) patch.className = (editForm.pathway || '').trim().toUpperCase();
     if (Object.keys(patch).length === 0) { setEditOpen(false); return; }
     setSavingEdit(true);
     try {
@@ -2156,26 +2223,34 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
             <label className="block">
               <div className="text-[10px] text-slate-500 mb-0.5">BINUS Student ID</div>
               <input value={editForm.id} onChange={(e) => setEditForm((f) => ({ ...f, id: e.target.value }))}
+                placeholder={isTemporaryStudentId(s.id) ? 'Enter BINUS Student ID' : ''}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white font-mono" />
             </label>
             <label className="block">
-              <div className="text-[10px] text-slate-500 mb-0.5">Name</div>
-              <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+              <div className="text-[10px] text-slate-500 mb-0.5">First name</div>
+              <input value={editForm.firstName} onChange={(e) => setEditForm((f) => ({ ...f, firstName: e.target.value }))}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
             </label>
             <label className="block">
-              <div className="text-[10px] text-slate-500 mb-0.5">Grade</div>
-              <input value={editForm.grade} onChange={(e) => setEditForm((f) => ({ ...f, grade: e.target.value.replace(/[^0-9]/g, '') }))}
+              <div className="text-[10px] text-slate-500 mb-0.5">Nickname</div>
+              <input value={editForm.nickname} onChange={(e) => setEditForm((f) => ({ ...f, nickname: e.target.value }))}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
             </label>
             <label className="block">
-              <div className="text-[10px] text-slate-500 mb-0.5">Class</div>
-              <input value={editForm.className} onChange={(e) => setEditForm((f) => ({ ...f, className: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
-                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
+              <div className="text-[10px] text-slate-500 mb-0.5">Academic year grade</div>
+              <select value={editForm.gradeSelection} onChange={(e) => setEditForm((f) => ({ ...f, gradeSelection: e.target.value, pathway: EY_GRADE_SET.has(e.target.value) ? '' : f.pathway }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white">
+                <option value="">Select grade</option>
+                {GRADE_SELECTION_OPTIONS.map((grade) => (
+                  <option key={grade} value={grade}>{grade}</option>
+                ))}
+              </select>
             </label>
             <label className="block">
-              <div className="text-[10px] text-slate-500 mb-0.5">Homeroom</div>
-              <input value={editForm.homeroom} onChange={(e) => setEditForm((f) => ({ ...f, homeroom: e.target.value }))}
+              <div className="text-[10px] text-slate-500 mb-0.5">Final class pathway</div>
+              <input value={editForm.pathway} onChange={(e) => setEditForm((f) => ({ ...f, pathway: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') }))}
+                disabled={EY_GRADE_SET.has(editForm.gradeSelection)}
+                placeholder={EY_GRADE_SET.has(editForm.gradeSelection) ? 'Not needed for EY' : 'A, B, C, D'}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
             </label>
           </div>
@@ -2183,11 +2258,11 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
             <button onClick={() => {
               setEditOpen(false);
               setEditForm({
-                id: s.id || '',
-                name: s.name || '',
-                grade: s.grade || '',
-                className: s.className || '',
-                homeroom: s.homeroom || '',
+                id: getStoredStudentId(s),
+                firstName: s.firstName || '',
+                nickname: s.nickname || '',
+                gradeSelection: deriveGradeSelectionFromStudent(s),
+                pathway: derivePathwayFromStudent(s),
               });
             }}
               className="text-[11px] px-2 py-1 rounded bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">Cancel</button>
@@ -2200,8 +2275,8 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
       )}
 
       <div className="p-4 flex flex-col gap-1.5">
-        <div className="text-base font-bold text-white leading-tight truncate" title={s.name}>
-          {s.name || '—'}
+        <div className="text-base font-bold text-white leading-tight truncate" title={buildStudentDisplayName(s)}>
+          {buildStudentDisplayName(s)}
         </div>
 
         {s.dbName && s.dbName !== s.name && (
@@ -2216,34 +2291,35 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
             title="BINUS Student ID"
           >
             <i className="ph ph-identification-card text-slate-500"></i>
-            {s.id}
+            {getStoredStudentId(s) || 'BINUS ID pending'}
           </span>
-          {s.grade ? (
+          {s.nickname ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/60 border border-slate-700 text-[10px] text-slate-300">
+              <i className="ph ph-smiley text-slate-500"></i>
+              Nickname {s.nickname}
+            </span>
+          ) : null}
+          {deriveGradeSelectionFromStudent(s) ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/60 border border-slate-700 text-[10px] text-slate-300">
               <i className="ph ph-number-circle-four text-slate-500"></i>
-              Grade {s.grade}
+              {formatStudentGradeBadge(s)}
             </span>
           ) : null}
-          {s.className ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/60 border border-slate-700 text-[10px] text-slate-300">
-              <i className="ph ph-columns text-slate-500"></i>
-              Class {s.className}
-            </span>
-          ) : null}
-          {s.homeroom ? (
+          {formatStudentFinalClass(s) ? (
             <span
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand-500/15 border border-brand-500/30 text-[10px] font-bold text-brand-200"
               title="Homeroom class"
             >
               <i className="ph ph-chalkboard-teacher"></i>
-              {s.homeroom}
+              Final class {formatStudentFinalClass(s)}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/40 border border-slate-700/50 text-[10px] text-slate-500 italic">
-              no class
+              pathway pending
             </span>
           )}
         </div>
+        <div className="text-[10px] text-slate-500 mt-0.5">Academic Year {ACADEMIC_YEAR_LABEL}</div>
       </div>
 
       {/* Drag overlay (kept hidden – no upload) */}
@@ -3018,9 +3094,9 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
 
         {/* Section 1 — Guardian */}
         <Section title="1. Guardian / Submitter">
-          <Field label="Full name"  value={rec.guardian?.name} />
+          <Field label="Parent's name"  value={rec.guardian?.name} />
           <Field label="Email"      value={rec.guardian?.email} />
-          <Field label="Phone"      value={rec.guardian?.phone} />
+          {rec.guardian?.phone ? <Field label="Phone" value={rec.guardian?.phone} /> : null}
         </Section>
 
         {/* Section 2 — Students */}
@@ -3030,9 +3106,11 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
               <tr>
                 <th className="text-left p-2 border border-slate-300">#</th>
                 <th className="text-left p-2 border border-slate-300">Photo</th>
-                <th className="text-left p-2 border border-slate-300">Name</th>
-                <th className="text-left p-2 border border-slate-300">Student ID</th>
-                <th className="text-left p-2 border border-slate-300">Class</th>
+                <th className="text-left p-2 border border-slate-300">First name</th>
+                <th className="text-left p-2 border border-slate-300">Nickname</th>
+                <th className="text-left p-2 border border-slate-300">BINUS ID</th>
+                <th className="text-left p-2 border border-slate-300">Academic year grade</th>
+                <th className="text-left p-2 border border-slate-300">Final class</th>
               </tr>
             </thead>
             <tbody>
@@ -3044,9 +3122,11 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
                       ? <img src={s.photoUrl} alt="" className="w-12 h-12 object-cover rounded" />
                       : <span className="text-slate-400 text-xs">—</span>}
                   </td>
-                  <td className="p-2 border border-slate-300 align-top font-semibold">{s.name}</td>
-                  <td className="p-2 border border-slate-300 align-top font-mono text-xs">{s.id}</td>
-                  <td className="p-2 border border-slate-300 align-top">{s.homeroom || '—'}</td>
+                  <td className="p-2 border border-slate-300 align-top font-semibold">{s.firstName || s.name || '—'}</td>
+                  <td className="p-2 border border-slate-300 align-top">{s.nickname || '—'}</td>
+                  <td className="p-2 border border-slate-300 align-top font-mono text-xs">{getStoredStudentId(s) || 'Pending'}</td>
+                  <td className="p-2 border border-slate-300 align-top">{formatStudentGradeBadge(s)}</td>
+                  <td className="p-2 border border-slate-300 align-top">{formatStudentFinalClass(s) || 'Pending ACOP assignment'}</td>
                 </tr>
               ))}
             </tbody>

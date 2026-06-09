@@ -48,33 +48,95 @@ const FONT_STACK =
   '"Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, ' +
   '"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
-const STUDENT_ID_RE = /^\d{10}$/;
-const STUDENT_NAME_RE = /^[A-Za-z ]+$/;
-const EY_LEVEL_OPTIONS = ['EY1', 'EY2', 'EY3'];
-const EY_LEVEL_SET = new Set(EY_LEVEL_OPTIONS);
+const ACADEMIC_YEAR_LABEL = '2026/2027';
+const STUDENT_TEXT_RE = /^[A-Za-z ]+$/;
+const EY_GRADE_OPTIONS = ['EY1', 'EY2', 'EY3'];
+const NUMERIC_GRADE_OPTIONS = ['1', '2', '3', '4', '5'];
+const GRADE_SELECTION_OPTIONS = [...EY_GRADE_OPTIONS, ...NUMERIC_GRADE_OPTIONS];
+const GRADE_SELECTION_SET = new Set(GRADE_SELECTION_OPTIONS);
+const EY_GRADE_SET = new Set(EY_GRADE_OPTIONS);
 
-function normalizeStudentName(value) {
+function normalizeStudentText(value) {
   return String(value || '')
     .replace(/[^A-Za-z ]/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
-function liveStudentInputError({ studentId, name, eyLevel, rawId, rawName }) {
-  if (typeof rawId === 'string' && /[^0-9]/.test(rawId)) {
-    return 'Student ID accepts numbers only.';
+function normalizeGradeSelection(value) {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+}
+
+function composeStudentName(firstName, nickname) {
+  if (firstName && nickname) return `${firstName} (${nickname})`;
+  return firstName || nickname || '';
+}
+
+function buildStudentRecord({ firstName, nickname, gradeSelection, id }) {
+  const normalizedGrade = normalizeGradeSelection(gradeSelection);
+  if (!GRADE_SELECTION_SET.has(normalizedGrade)) return null;
+  const safeFirstName = normalizeStudentText(firstName);
+  const safeNickname = normalizeStudentText(nickname);
+  const name = composeStudentName(safeFirstName, safeNickname);
+  if (!safeFirstName || !safeNickname || !name) return null;
+  if (EY_GRADE_SET.has(normalizedGrade)) {
+    return {
+      id: id || uid(),
+      studentId: null,
+      firstName: safeFirstName,
+      nickname: safeNickname,
+      name,
+      gradeSelection: normalizedGrade,
+      grade: 'EY',
+      className: normalizedGrade,
+      homeroom: normalizedGrade,
+    };
   }
-  if (typeof rawName === 'string' && /[^A-Za-z ]/.test(rawName)) {
-    return 'Student name accepts letters and spaces only.';
+  return {
+    id: id || uid(),
+    studentId: null,
+    firstName: safeFirstName,
+    nickname: safeNickname,
+    name,
+    gradeSelection: normalizedGrade,
+    grade: normalizedGrade,
+    className: '',
+    homeroom: normalizedGrade,
+  };
+}
+
+function formatStudentGradeLabel(student) {
+  const selection = normalizeGradeSelection(student?.gradeSelection || (student?.grade === 'EY' ? student?.className : student?.grade));
+  if (!selection) return '—';
+  return EY_GRADE_SET.has(selection) ? selection : `Grade ${selection}`;
+}
+
+function formatStudentFinalClass(student) {
+  if (!student) return null;
+  if (student.grade === 'EY') return student.homeroom || student.className || null;
+  if (student.className) return `${student.grade || ''}${student.className}`;
+  return null;
+}
+
+function displayStudentName(student) {
+  return composeStudentName(student?.firstName || '', student?.nickname || '') || student?.name || '—';
+}
+
+function liveStudentInputError({ firstName, nickname, gradeSelection, rawFirstName, rawNickname }) {
+  if (typeof rawFirstName === 'string' && /[^A-Za-z ]/.test(rawFirstName)) {
+    return 'First name accepts letters and spaces only.';
   }
-  if (studentId && studentId.length > 0 && studentId.length < 10) {
-    return 'Student ID must be exactly 10 digits.';
+  if (typeof rawNickname === 'string' && /[^A-Za-z ]/.test(rawNickname)) {
+    return 'Nickname accepts letters and spaces only.';
   }
-  if (name && !STUDENT_NAME_RE.test(name)) {
-    return 'Student name accepts letters and spaces only.';
+  if (firstName && !STUDENT_TEXT_RE.test(firstName)) {
+    return 'First name accepts letters and spaces only.';
   }
-  if (eyLevel && !EY_LEVEL_SET.has(eyLevel)) {
-    return 'EY level must be EY1, EY2, or EY3.';
+  if (nickname && !STUDENT_TEXT_RE.test(nickname)) {
+    return 'Nickname accepts letters and spaces only.';
+  }
+  if (gradeSelection && !GRADE_SELECTION_SET.has(normalizeGradeSelection(gradeSelection))) {
+    return 'Select EY1, EY2, EY3, or Grades 1 to 5.';
   }
   return null;
 }
@@ -176,7 +238,7 @@ function escapeHtml(s) {
 
 function buildReceiptHtml({
   formNumber, submittedAt,
-  guardianName, guardianEmail, guardianPhone,
+  guardianName, guardianEmail,
   students, chaperones, signature,
 }) {
   const E = escapeHtml;
@@ -188,21 +250,21 @@ function buildReceiptHtml({
     : '';
   const studentRows = (students || []).map((s) => `
     <tr>
-      <td>${E(s.name || '—')}</td>
-      <td>${E(s.grade || '—')}</td>
-      <td>${E(s.className || '—')}</td>
-      <td>${E(s.studentId || '')}</td>
+      <td>${E(s.firstName || '—')}</td>
+      <td>${E(s.nickname || '—')}</td>
+      <td>${E(formatStudentGradeLabel(s))}</td>
+      <td>${E(formatStudentFinalClass(s) || 'Pending ACOP assignment')}</td>
     </tr>`).join('');
   const chapRows = (chaperones || []).map((c, i) => {
     const auth = (c.authorizedStudentIds || [])
-      .map((sid) => ((students || []).find((s) => s.id === sid) || {}).name || sid)
+      .map((sid) => displayStudentName((students || []).find((s) => s.id === sid)) || sid)
       .join(', ');
     return `
       <tr>
         <td>${i + 1}</td>
         <td>${E(c.name || '—')}</td>
         <td>${E(c.relation || '')}</td>
-        <td>${E(c.phone || '')}</td>
+        <td>${E(c.email || '—')}</td>
         <td>${E(auth)}</td>
         <td>${(c.facePaths || []).length} photo(s)</td>
       </tr>`;
@@ -242,7 +304,7 @@ function buildReceiptHtml({
 </style></head><body>
 <header>
   <h1>BINUS School Simprug · Pickup Authorization</h1>
-  <div class="sub">Receipt of submitted pickup-authorization form</div>
+  <div class="sub">Academic Year ${E(ACADEMIC_YEAR_LABEL)} · Receipt of submitted pickup-authorization form</div>
 </header>
 
 <div class="form-num">
@@ -253,20 +315,19 @@ function buildReceiptHtml({
 
 <h2>Parent / Guardian</h2>
 <div class="kv">
-  <div class="b"><small>Name</small><span>${E(guardianName || '—')}</span></div>
+  <div class="b"><small>Parent's Name</small><span>${E(guardianName || '—')}</span></div>
   <div class="b"><small>Email</small><span>${E(guardianEmail || '—')}</span></div>
-  <div class="b"><small>Phone</small><span>${E(guardianPhone || '—')}</span></div>
 </div>
 
 <h2>Students (${(students || []).length})</h2>
 <table>
-  <thead><tr><th>Name</th><th>Grade</th><th>Class</th><th>Student ID (if assigned)</th></tr></thead>
+  <thead><tr><th>First Name</th><th>Nickname</th><th>Academic Year Grade</th><th>Final Class</th></tr></thead>
   <tbody>${studentRows || '<tr><td colspan="4">—</td></tr>'}</tbody>
 </table>
 
 <h2>Authorized pickup people (${(chaperones || []).length})</h2>
 <table>
-  <thead><tr><th>#</th><th>Name</th><th>Relation</th><th>Phone</th><th>Authorized for</th><th>Photos</th></tr></thead>
+  <thead><tr><th>#</th><th>Name</th><th>Relation</th><th>Email</th><th>Authorized for</th><th>Photos</th></tr></thead>
   <tbody>${chapRows || '<tr><td colspan="6">—</td></tr>'}</tbody>
 </table>
 
@@ -785,21 +846,15 @@ export default function PickupOnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [tokenOk, setTokenOk] = useState(false);
   const [tenantId, setTenantId] = useState(null);
-  const [primarySid, setPrimarySid] = useState(null);
   const [error, setError] = useState(null);
 
   const [guardianName, setGuardianName] = useState('');
   const [guardianEmail, setGuardianEmail] = useState('');
-  const [guardianPhone, setGuardianPhone] = useState('');
 
-  const [studentInputName, setStudentInputName] = useState('');
-  const [studentInputClass, setStudentInputClass] = useState('');
-  const [studentInputId, setStudentInputId] = useState('');
+  const [studentInputFirstName, setStudentInputFirstName] = useState('');
+  const [studentInputNickname, setStudentInputNickname] = useState('');
+  const [studentInputGrade, setStudentInputGrade] = useState('');
   const [students, setStudents] = useState([]);
-  // Inline error for the Student section only — keeps validation errors
-  // (missing/invalid Student ID, name, or EY level) next to the input so
-  // the parent doesn't have to scroll to the bottom of the form to see
-  // what went wrong.
   const [studentError, setStudentError] = useState(null);
 
   const [chaperones, setChaperones] = useState([]);
@@ -848,10 +903,6 @@ export default function PickupOnboardingPage() {
           const json = JSON.parse(atob(padded.replace(/-/g, '+').replace(/_/g, '/')));
           if (cancel) return;
           setTenantId(json.tid || null);
-          setPrimarySid(json.sid || null);
-          if (json.sid) {
-            setStudentInputId(String(json.sid));
-          }
         } catch { /* ignore */ }
         if (!cancel) {
           setTokenOk(true);
@@ -882,58 +933,51 @@ export default function PickupOnboardingPage() {
   }, [token]);
 
   function addStudent() {
-    const studentId = studentInputId.trim();
-    const name = normalizeStudentName(studentInputName);
-    const eyLevel = studentInputClass.trim().toUpperCase();
+    const firstName = normalizeStudentText(studentInputFirstName);
+    const nickname = normalizeStudentText(studentInputNickname);
+    const gradeSelection = normalizeGradeSelection(studentInputGrade);
 
-    if (!studentId) {
-      setStudentError('Student ID is required.');
+    if (!firstName || !STUDENT_TEXT_RE.test(firstName)) {
+      setStudentError('First name must use letters and spaces only.');
       return;
     }
-    if (!STUDENT_ID_RE.test(studentId)) {
-      setStudentError('Student ID must be exactly 10 digits (numbers only).');
+    if (!nickname || !STUDENT_TEXT_RE.test(nickname)) {
+      setStudentError('Nickname must use letters and spaces only.');
       return;
     }
-    if (students.some((s) => s.studentId === studentId)) {
-      setStudentError('That Student ID is already added.');
-      return;
-    }
-    if (!name || !STUDENT_NAME_RE.test(name)) {
-      setStudentError('Student name must use letters and spaces only.');
-      return;
-    }
-    if (!eyLevel || !EY_LEVEL_SET.has(eyLevel)) {
-      setStudentError('EY level must be EY1, EY2, or EY3.');
+    if (!gradeSelection || !GRADE_SELECTION_SET.has(gradeSelection)) {
+      setStudentError('Select EY1, EY2, EY3, or Grades 1 to 5.');
       return;
     }
 
-    const student = {
-      id: studentId,
-      studentId,
-      name,
-      grade: 'EY',
-      className: eyLevel,
-      homeroom: eyLevel,
-    };
+    const duplicate = students.some((s) =>
+      normalizeStudentText(s.firstName || '') === firstName &&
+      normalizeStudentText(s.nickname || '') === nickname &&
+      normalizeGradeSelection(s.gradeSelection || '') === gradeSelection
+    );
+    if (duplicate) {
+      setStudentError('That student is already added for this academic year grade.');
+      return;
+    }
+
+    const student = buildStudentRecord({ firstName, nickname, gradeSelection });
+    if (!student) {
+      setStudentError('Please complete first name, nickname, and academic year grade.');
+      return;
+    }
 
     setStudents((prev) => [...prev, student]);
-    // Auto-include the new student in every chaperone's authorization list
     setChaperones((prev) => prev.map((c) => ({
       ...c,
       authorizedStudentIds: Array.from(new Set([...(c.authorizedStudentIds || []), student.id])),
     })));
-    setStudentInputName('');
-    setStudentInputClass('');
-    setStudentInputId('');
+    setStudentInputFirstName('');
+    setStudentInputNickname('');
+    setStudentInputGrade('');
     setStudentError(null);
   }
 
   function removeStudent(id) {
-    const student = students.find((s) => s.id === id);
-    if (student?.studentId === primarySid) {
-      setError('The primary student from your link cannot be removed.');
-      return;
-    }
     setStudents((prev) => prev.filter((s) => s.id !== id));
     setChaperones((prev) => prev.map((c) => ({
       ...c,
@@ -944,7 +988,7 @@ export default function PickupOnboardingPage() {
   function addChaperone() {
     setChaperones((prev) => [...prev, {
       tempId: uid(),
-      name: '', relation: 'mother', phone: '', email: '', idNumber: '',
+      name: '', relation: 'mother', email: '', idNumber: '',
       authorizedStudentIds: students.map((s) => s.id),
       facePaths: [],
       confirmed: false,
@@ -963,28 +1007,13 @@ export default function PickupOnboardingPage() {
     setError(null);
     const c = chaperones[idx];
     if (!c) return;
-    // Mirror the server-side rules (submit.js sanitizeChaperone) so the
-    // parent gets an immediate, specific error per field instead of being
-    // told only at final submit. Name & phone min lengths match the API.
     const name = (c.name || '').trim();
-    const phone = (c.phone || '').trim();
     if (!name) {
       setError(`Person #${idx + 1}: name is required.`);
       return;
     }
     if (name.length < 2) {
       setError(`Person #${idx + 1}: name must be at least 2 letters — please type the chaperone’s full name.`);
-      return;
-    }
-    if (!phone) {
-      setError(`Person #${idx + 1}: phone number is required.`);
-      return;
-    }
-    // Strip spaces, dashes and parentheses for the digit count check so
-    // a typical "+62 812-3456-7890" still passes.
-    const phoneDigits = phone.replace(/[^0-9]/g, '');
-    if (phoneDigits.length < 8) {
-      setError(`Person #${idx + 1}: phone number looks too short (need at least 8 digits).`);
       return;
     }
     if (!c.relation || !String(c.relation).trim()) {
@@ -1040,7 +1069,7 @@ export default function PickupOnboardingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token,
-          guardianName, guardianEmail, guardianPhone,
+          guardianName, guardianEmail,
           students, chaperones,
           consentSignature: signature,
         }),
@@ -1064,20 +1093,16 @@ export default function PickupOnboardingPage() {
   // open with invalid data and the user sees the same error in both flows.
   function validateBeforeSubmit() {
     if (chaperones.length > 5) return 'Maximum 5 authorized people.';
-    if (!guardianName.trim()) return 'Your full name is required.';
-    if (signature.trim().toLowerCase() !== guardianName.trim().toLowerCase()) {
-      return 'Type your full name exactly as the signature.';
-    }
+    if (!guardianName.trim()) return 'Parent\'s name is required.';
+    if (!signature.trim()) return 'Type Parent\'s Name to sign.';
     if (students.length === 0) return 'Add at least one student.';
     for (const s of students) {
-      const sid = String(s.studentId || '').trim();
-      if (!STUDENT_ID_RE.test(sid)) return 'Each Student ID must be exactly 10 digits.';
-      const studentName = normalizeStudentName(String(s.name || ''));
-      if (!studentName || !STUDENT_NAME_RE.test(studentName)) return 'Each student name must contain letters and spaces only.';
-      const eyLevel = String(s.className || s.homeroom || '').trim().toUpperCase();
-      if (!EY_LEVEL_SET.has(eyLevel)) return 'Each student must have EY level EY1, EY2, or EY3.';
-      const grade = String(s.grade || '').trim().toUpperCase();
-      if (grade !== 'EY') return 'Each student grade must be EY.';
+      const firstName = normalizeStudentText(String(s.firstName || ''));
+      const nickname = normalizeStudentText(String(s.nickname || ''));
+      if (!firstName || !STUDENT_TEXT_RE.test(firstName)) return 'Each student first name must contain letters and spaces only.';
+      if (!nickname || !STUDENT_TEXT_RE.test(nickname)) return 'Each student nickname must contain letters and spaces only.';
+      const gradeSelection = normalizeGradeSelection(s.gradeSelection || '');
+      if (!GRADE_SELECTION_SET.has(gradeSelection)) return 'Each student must have EY1, EY2, EY3, or Grades 1 to 5 selected.';
     }
     if (chaperones.length === 0) return 'Add at least one chaperone.';
     const unsaved = chaperones.findIndex((c) => !c.confirmed);
@@ -1086,12 +1111,7 @@ export default function PickupOnboardingPage() {
     }
     for (const c of chaperones) {
       if (!c.name.trim() || c.name.trim().length < 2) return 'Every chaperone needs a full name (at least 2 letters).';
-      if (!c.phone.trim()) return `Phone number missing for ${c.name || 'a chaperone'}.`;
       if (c.authorizedStudentIds.length === 0) return `${c.name} must be authorized for at least one student.`;
-      // Mandatory at the parent-form layer — see confirmChaperone() for the
-      // same gate. Even though the API tolerates zero photos, we never
-      // want a parent-submitted form without one because the office would
-      // have to chase them again.
       const faceCount = Array.isArray(c.facePaths) ? c.facePaths.length : 0;
       if (faceCount === 0) return `${c.name || 'A chaperone'} needs at least one face photo before submitting.`;
     }
@@ -1107,9 +1127,9 @@ export default function PickupOnboardingPage() {
 
   // Step indicator state
   const stepDone = {
-    1: !!(guardianName.trim() && guardianEmail.trim() && guardianPhone.trim()),
+    1: !!(guardianName.trim() && guardianEmail.trim()),
     2: students.length > 0,
-    3: chaperones.length > 0 && chaperones.every((c) => c.confirmed && c.name.trim() && c.phone.trim() && c.authorizedStudentIds.length > 0),
+    3: chaperones.length > 0 && chaperones.every((c) => c.confirmed && c.name.trim() && c.authorizedStudentIds.length > 0),
     4: !!done,
   };
 
@@ -1162,9 +1182,23 @@ export default function PickupOnboardingPage() {
               <h2 style={{ margin: 0, fontSize: 20, color: BRAND.text }}>
                 Before you start — please read
               </h2>
+              <div style={{
+                marginTop: 14,
+                padding: '12px 14px',
+                borderRadius: 12,
+                background: `${BRAND.navy}08`,
+                border: `1px solid ${BRAND.navy}22`,
+              }}>
+                <div style={{ fontSize: 10.5, letterSpacing: 1, textTransform: 'uppercase', fontWeight: 800, color: BRAND.orange }}>
+                  Academic Year
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: BRAND.navy, lineHeight: 1.1, marginTop: 2 }}>
+                  {ACADEMIC_YEAR_LABEL}
+                </div>
+              </div>
               <div style={{ marginTop: 12, color: BRAND.textMuted, fontSize: 14, lineHeight: 1.65 }}>
                 <p style={{ margin: '0 0 10px' }}>
-                  This pickup-authorization form can be submitted for <strong>multiple students</strong>.
+                  This pickup-authorization form for <strong>Academic Year {ACADEMIC_YEAR_LABEL}</strong> can be submitted for <strong>multiple students</strong>.
                   After submission you cannot edit it through this link.
                 </p>
                 <p style={{ margin: 0 }}>
@@ -1235,9 +1269,8 @@ export default function PickupOnboardingPage() {
                 <div style={{ marginBottom: 22 }}>
                   <div style={previewSectionTitle}>Parent / Guardian</div>
                   <div style={previewKvGrid}>
-                    {previewKv('Full name', guardianName)}
+                    {previewKv('Parent\'s name', guardianName)}
                     {previewKv('Email', guardianEmail)}
-                    {previewKv('Phone', guardianPhone)}
                   </div>
                 </div>
 
@@ -1250,12 +1283,13 @@ export default function PickupOnboardingPage() {
                     {students.map((s) => (
                       <div key={s.id} style={previewItemBox}>
                         <div style={{ fontWeight: 700, color: BRAND.text, fontSize: 14 }}>
-                          {s.name || '—'}
+                          {displayStudentName(s)}
                         </div>
                         <div style={{ color: BRAND.textSubtle, fontSize: 12.5, marginTop: 2 }}>
-                          Student ID {s.studentId || '—'}
-                          {s.className && <> · EY Level {s.className}</>}
-                          <> · Programme EY</>
+                          {s.firstName || '—'} · Nickname {s.nickname || '—'}
+                          <> · {formatStudentGradeLabel(s)}</>
+                          <> · Academic Year {ACADEMIC_YEAR_LABEL}</>
+                          {formatStudentFinalClass(s) && <> · Final class {formatStudentFinalClass(s)}</>}
                         </div>
                       </div>
                     ))}
@@ -1281,7 +1315,7 @@ export default function PickupOnboardingPage() {
                                 {i + 1}. {c.name || '—'}
                               </div>
                               <div style={{ color: BRAND.textSubtle, fontSize: 12.5, marginTop: 2 }}>
-                                {relLabel} · {c.phone || 'no phone'}
+                                {relLabel}
                                 {c.email && <> · {c.email}</>}
                               </div>
                               <div style={{ color: BRAND.textMuted, fontSize: 12.5, marginTop: 6 }}>
@@ -1442,6 +1476,18 @@ export default function PickupOnboardingPage() {
               <div className="pog-header-sub" style={{ fontSize: 13, opacity: 0.85, marginTop: 2 }}>
                 Pickup System · Authorized Pickup Registration
               </div>
+              <div style={{ marginTop: 8 }}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  padding: '6px 12px', borderRadius: 999,
+                  background: 'rgba(255,255,255,0.16)',
+                  border: '1px solid rgba(255,255,255,0.24)',
+                  fontSize: 12, fontWeight: 800, letterSpacing: 0.6, textTransform: 'uppercase',
+                }}>
+                  <span style={{ color: BRAND.orangeLight }}>Academic Year</span>
+                  <span>{ACADEMIC_YEAR_LABEL}</span>
+                </span>
+              </div>
             </div>
           </div>
         </header>
@@ -1519,7 +1565,7 @@ export default function PickupOnboardingPage() {
                   onClick={() => downloadReceipt({
                     formNumber: done.formNumber,
                     submittedAt: done.at,
-                    guardianName, guardianEmail, guardianPhone,
+                    guardianName, guardianEmail,
                     students, chaperones, signature,
                   })}>
                   Download receipt
@@ -1529,7 +1575,7 @@ export default function PickupOnboardingPage() {
                   onClick={() => printReceipt({
                     formNumber: done.formNumber,
                     submittedAt: done.at,
-                    guardianName, guardianEmail, guardianPhone,
+                    guardianName, guardianEmail,
                     students, chaperones, signature,
                   })}>
                   Print / Save as PDF
@@ -1599,7 +1645,7 @@ export default function PickupOnboardingPage() {
                 border: `1px solid ${BRAND.border}`,
               }}>
                 {[
-                  { n: 1, l: 'Guardian' },
+                  { n: 1, l: 'Parent' },
                   { n: 2, l: 'Students' },
                   { n: 3, l: 'Chaperones' },
                   { n: 4, l: 'Confirm' },
@@ -1635,16 +1681,11 @@ export default function PickupOnboardingPage() {
                     display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14,
                   }}>
                     <div>
-                      <label style={label()}>Full name *</label>
+                      <label style={label()}>Parent's name *</label>
                       <input style={input()} value={guardianName}
                         onChange={(e) => setGuardianName(e.target.value)} required />
                     </div>
                     <div>
-                      <label style={label()}>Phone *</label>
-                      <input style={input()} value={guardianPhone}
-                        onChange={(e) => setGuardianPhone(e.target.value)} required />
-                    </div>
-                    <div style={{ gridColumn: '1 / -1' }}>
                       <label style={label()}>Email *</label>
                       <input style={input()} type="email" value={guardianEmail}
                         onChange={(e) => setGuardianEmail(e.target.value)} required />
@@ -1654,7 +1695,7 @@ export default function PickupOnboardingPage() {
 
                 <div style={card()}>
                   {sectionHeading(2, 'Your child(ren)',
-                    'Enter student details manually. For this trial, select EY1, EY2, or EY3.')}
+                    `Academic Year ${ACADEMIC_YEAR_LABEL}. Add first name, nickname, and choose EY1, EY2, EY3, or Grades 1 to 5.`)}
 
                   {students.length === 0 ? (
                     <div style={{
@@ -1676,24 +1717,15 @@ export default function PickupOnboardingPage() {
                         }}>
                           <div>
                             <div style={{ fontWeight: 600, color: BRAND.text }}>
-                              {s.name || '—'}
+                              {displayStudentName(s)}
                             </div>
                             <div style={{ fontSize: 12, color: BRAND.textSubtle, marginTop: 2 }}>
-                              Student ID {s.studentId || '—'} ·
-                              EY Level {s.className || s.homeroom || '—'} · Programme EY
-                              {s.studentId === primarySid && (
-                                <span style={{
-                                  marginLeft: 8, background: BRAND.orange, color: '#fff',
-                                  padding: '2px 8px', borderRadius: 10, fontSize: 10,
-                                  fontWeight: 700, letterSpacing: 0.3,
-                                }}>PRIMARY</span>
-                              )}
+                              First name {s.firstName || '—'} · Nickname {s.nickname || '—'} · {formatStudentGradeLabel(s)}
+                              {formatStudentFinalClass(s) && <> · Final class {formatStudentFinalClass(s)}</>}
                             </div>
                           </div>
-                          {s.studentId !== primarySid && (
-                            <button type="button" style={btnDanger()}
-                              onClick={() => removeStudent(s.id)}>Remove</button>
-                          )}
+                          <button type="button" style={btnDanger()}
+                            onClick={() => removeStudent(s.id)}>Remove</button>
                         </div>
                       ))}
                     </div>
@@ -1703,69 +1735,65 @@ export default function PickupOnboardingPage() {
                     padding: 14, border: `1px solid ${BRAND.border}`,
                     borderRadius: 10, background: BRAND.surfaceAlt,
                   }}>
-                    <label style={label()}>Student details (EY trial) *</label>
-                    <div className="pog-grid-2" style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 0.9fr auto', gap: 8 }}>
+                    <label style={label()}>{`Student details for Academic Year ${ACADEMIC_YEAR_LABEL} *`}</label>
+                    <div className="pog-grid-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 0.9fr auto', gap: 8 }}>
                       <input
                         style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
-                        placeholder="Student ID (10 digits) *"
-                        value={studentInputId}
-                        inputMode="numeric"
-                        maxLength={10}
+                        placeholder="First name *"
+                        value={studentInputFirstName}
                         onChange={(e) => {
-                          const rawId = e.target.value;
-                          const nextId = rawId.replace(/\D/g, '').slice(0, 10);
-                          setStudentInputId(nextId);
+                          const rawFirstName = e.target.value;
+                          const nextFirstName = rawFirstName.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' ');
+                          setStudentInputFirstName(nextFirstName);
                           setStudentError(liveStudentInputError({
-                            studentId: nextId,
-                            name: studentInputName,
-                            eyLevel: studentInputClass,
-                            rawId,
+                            firstName: nextFirstName,
+                            nickname: studentInputNickname,
+                            gradeSelection: studentInputGrade,
+                            rawFirstName,
                           }));
                         }}
                       />
                       <input
                         style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
-                        placeholder="Student name (letters only)"
-                        value={studentInputName}
+                        placeholder="Nickname *"
+                        value={studentInputNickname}
                         onChange={(e) => {
-                          const rawName = e.target.value;
-                          const nextName = rawName.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' ');
-                          setStudentInputName(nextName);
+                          const rawNickname = e.target.value;
+                          const nextNickname = rawNickname.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' ');
+                          setStudentInputNickname(nextNickname);
                           setStudentError(liveStudentInputError({
-                            studentId: studentInputId,
-                            name: nextName,
-                            eyLevel: studentInputClass,
-                            rawName,
+                            firstName: studentInputFirstName,
+                            nickname: nextNickname,
+                            gradeSelection: studentInputGrade,
+                            rawNickname,
                           }));
                         }}
                       />
                       <select
                         style={{ ...input(), ...(studentError ? { borderColor: BRAND.danger } : {}) }}
-                        value={studentInputClass}
+                        value={studentInputGrade}
                         onChange={(e) => {
-                          const nextLevel = String(e.target.value || '').toUpperCase();
-                          setStudentInputClass(nextLevel);
+                          const nextGrade = normalizeGradeSelection(e.target.value);
+                          setStudentInputGrade(nextGrade);
                           setStudentError(liveStudentInputError({
-                            studentId: studentInputId,
-                            name: studentInputName,
-                            eyLevel: nextLevel,
+                            firstName: studentInputFirstName,
+                            nickname: studentInputNickname,
+                            gradeSelection: nextGrade,
                           }));
                         }}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addStudent(); } }}
                       >
-                        <option value="">EY level *</option>
-                        {EY_LEVEL_OPTIONS.map((lvl) => (
-                          <option key={lvl} value={lvl}>{lvl}</option>
+                        <option value="">Academic year grade *</option>
+                        {GRADE_SELECTION_OPTIONS.map((grade) => (
+                          <option key={grade} value={grade}>{grade}</option>
                         ))}
                       </select>
                       <button type="button" style={btn()}
-                        onClick={() => addStudent()} disabled={!studentInputId.trim() || !studentInputName.trim() || !studentInputClass.trim()}>
+                        onClick={() => addStudent()} disabled={!studentInputFirstName.trim() || !studentInputNickname.trim() || !studentInputGrade.trim()}>
                         Add
                       </button>
                     </div>
 
-                    {/* Inline student-input error — sits right under the input
-                        so the parent doesn't have to scroll. */}
                     {studentError && (
                       <div role="alert" style={{
                         marginTop: 8, padding: '8px 12px',
@@ -1816,7 +1844,8 @@ export default function PickupOnboardingPage() {
                             </strong>
                             {c.confirmed && (
                               <div style={{ color: BRAND.textSubtle, fontSize: 12, marginTop: 2 }}>
-                                {c.relation || 'pickup'} · {c.phone}
+                                {c.relation || 'pickup'}
+                                {c.email && <> · {c.email}</>}
                                 {c.authorizedStudentIds.length > 0 && (
                                   <> · authorized for {c.authorizedStudentIds.length} student{c.authorizedStudentIds.length === 1 ? '' : 's'}</>
                                 )}
@@ -1869,11 +1898,6 @@ export default function PickupOnboardingPage() {
                               onChange={(e) => updateChaperone(idx, { relation: e.target.value })} />
                           )}
                         </div>
-                        <div>
-                          <label style={label()}>Phone *</label>
-                          <input style={input()} value={c.phone}
-                            onChange={(e) => updateChaperone(idx, { phone: e.target.value })} />
-                        </div>
                         <div style={{ gridColumn: '1 / -1' }}>
                           <label style={label()}>Email (optional)</label>
                           <input style={input()} type="email" value={c.email}
@@ -1905,7 +1929,7 @@ export default function PickupOnboardingPage() {
                                   <input type="checkbox" checked={checked}
                                     onChange={() => toggleChaperoneStudent(idx, s.id)}
                                     style={{ marginRight: 6 }} />
-                                  {s.name}
+                                  {displayStudentName(s)}
                                 </label>
                               );
                             })}
@@ -1970,7 +1994,7 @@ export default function PickupOnboardingPage() {
 
                 <div style={card()}>
                   {sectionHeading(4, 'Review and sign',
-                    'Read the consent statement, then type your name to sign.')}
+                    'Read the consent statement, then type Parent\'s Name to sign.')}
 
                   <div style={{
                     background: BRAND.surfaceAlt, border: `1px solid ${BRAND.border}`,
@@ -1991,10 +2015,10 @@ export default function PickupOnboardingPage() {
                     </ul>
                   </div>
 
-                  <label style={label()}>Type your full name to sign *</label>
+                  <label style={label()}>Type Parent's Name *</label>
                   <input style={input()} value={signature}
                     onChange={(e) => setSignature(e.target.value)}
-                    placeholder={guardianName || 'Your full name'} />
+                    placeholder={guardianName || "Parent's Name"} />
 
                   {error && (
                     <div style={{
