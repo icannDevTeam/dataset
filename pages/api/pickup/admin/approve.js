@@ -25,6 +25,60 @@ const tenancy = require('../../../../lib/tenancy');
 const { logAudit } = require('../../../../lib/audit-log');
 
 const FIRST_CHAPERONE_NO = 9000000000;
+const TEMPLATE_PICKUP_ONBOARDING_APPROVED = 'pickup_onboarding_approved';
+
+function queueJobId(tid, recordId, templateType) {
+  const safe = `${tid}-${recordId}-${templateType}`.replace(/[^A-Za-z0-9_-]/g, '_');
+  return safe.slice(0, 180);
+}
+
+async function enqueueApprovalNotification(db, tid, recordId, rec, reviewer, approvedAt, allocated) {
+  const to = String(rec?.guardian?.email || '').trim().toLowerCase();
+  if (!to) return;
+
+  const studentNameById = Object.fromEntries(
+    (Array.isArray(rec?.students) ? rec.students : []).map((s) => [s.id, s.name]).filter((x) => x[0])
+  );
+
+  const jobId = queueJobId(tid, recordId, TEMPLATE_PICKUP_ONBOARDING_APPROVED);
+  const queueRef = db.doc(`email_queue/${jobId}`);
+  const existing = await queueRef.get();
+  if (existing.exists) return;
+
+  await queueRef.set({
+    status: 'pending',
+    templateType: TEMPLATE_PICKUP_ONBOARDING_APPROVED,
+    tenantId: tid,
+    recordId,
+    formNumber: rec?.formNumber || null,
+    to,
+    templateData: {
+      guardianName: rec?.guardian?.name || null,
+      guardianEmail: rec?.guardian?.email || null,
+      formNumber: rec?.formNumber || null,
+      approvedAt,
+      approvedBy: reviewer,
+      students: (rec?.students || []).map((s) => ({
+        name: s?.name || null,
+        gradeSelection: s?.gradeSelection || null,
+        homeroom: s?.homeroom || null,
+      })),
+      chaperones: (rec?.chaperones || []).map((c) => ({
+        name: c?.name || null,
+        relation: c?.relation || null,
+        authorizedStudentNames: (c?.authorizedStudentIds || [])
+          .map((sid) => studentNameById[sid])
+          .filter(Boolean),
+      })),
+      allocatedChaperones: Array.isArray(allocated) ? allocated : [],
+    },
+    retryCount: 0,
+    maxRetries: 3,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    source: 'pickup_admin_approve',
+  }, { merge: false });
+}
 
 // Extract grade ('1'…'12') from a homeroom string like '4A', '12-IB', etc.
 function gradeFromHomeroom(hr) {
@@ -241,6 +295,12 @@ async function handler(req, res) {
         }, { merge: true });
       }));
     } catch (e) { console.error('[approve] lock update', e.message); }
+
+    try {
+      await enqueueApprovalNotification(db, tid, recordId, rec, req.headers['x-admin-user'] || 'api-key', now, created);
+    } catch (e) {
+      console.error('[approve] approval notification enqueue failed', e.message);
+    }
 
     // Hikvision device enrolment is intentionally DECOUPLED from approval.
     // Admins go to /v2/pickup-enroll once photos are uploaded to push the

@@ -32,6 +32,98 @@ import { enrollChaperones } from '../../../../lib/chaperone-enroll';
 const tenancy = require('../../../../lib/tenancy');
 const { can } = require('../../../../lib/rbac');
 const FIRST_CHAPERONE_NO = 9000000000;
+const TEMPLATE_PICKUP_ONBOARDING_APPROVED = 'pickup_onboarding_approved';
+const TEMPLATE_PICKUP_ONBOARDING_REJECTED = 'pickup_onboarding_rejected';
+
+function queueJobId(tid, recordId, templateType) {
+  const safe = `${tid}-${recordId}-${templateType}`.replace(/[^A-Za-z0-9_-]/g, '_');
+  return safe.slice(0, 180);
+}
+
+async function enqueueApprovalNotification(db, tid, recordId, rec, reviewer, approvedAt, allocated) {
+  const to = String(rec?.guardian?.email || '').trim().toLowerCase();
+  if (!to) return;
+
+  const studentNameById = Object.fromEntries(
+    (Array.isArray(rec?.students) ? rec.students : []).map((s) => [s.id, s.name]).filter((x) => x[0])
+  );
+
+  const jobId = queueJobId(tid, recordId, TEMPLATE_PICKUP_ONBOARDING_APPROVED);
+  const queueRef = db.doc(`email_queue/${jobId}`);
+  const existing = await queueRef.get();
+  if (existing.exists) return;
+
+  await queueRef.set({
+    status: 'pending',
+    templateType: TEMPLATE_PICKUP_ONBOARDING_APPROVED,
+    tenantId: tid,
+    recordId,
+    formNumber: rec?.formNumber || null,
+    to,
+    templateData: {
+      guardianName: rec?.guardian?.name || null,
+      guardianEmail: rec?.guardian?.email || null,
+      formNumber: rec?.formNumber || null,
+      approvedAt,
+      approvedBy: reviewer,
+      students: (rec?.students || []).map((s) => ({
+        name: s?.name || null,
+        gradeSelection: s?.gradeSelection || null,
+        homeroom: s?.homeroom || null,
+      })),
+      chaperones: (rec?.chaperones || []).map((c) => ({
+        name: c?.name || null,
+        relation: c?.relation || null,
+        authorizedStudentNames: (c?.authorizedStudentIds || [])
+          .map((sid) => studentNameById[sid])
+          .filter(Boolean),
+      })),
+      allocatedChaperones: Array.isArray(allocated) ? allocated : [],
+    },
+    retryCount: 0,
+    maxRetries: 3,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    source: 'pickup_admin_bulk_approve',
+  }, { merge: false });
+}
+
+async function enqueueRejectionNotification(db, tid, recordId, rec, reviewer, rejectedAt, reason) {
+  const to = String(rec?.guardian?.email || '').trim().toLowerCase();
+  if (!to) return;
+
+  const jobId = queueJobId(tid, recordId, TEMPLATE_PICKUP_ONBOARDING_REJECTED);
+  const queueRef = db.doc(`email_queue/${jobId}`);
+  const existing = await queueRef.get();
+  if (existing.exists) return;
+
+  await queueRef.set({
+    status: 'pending',
+    templateType: TEMPLATE_PICKUP_ONBOARDING_REJECTED,
+    tenantId: tid,
+    recordId,
+    formNumber: rec?.formNumber || null,
+    to,
+    templateData: {
+      guardianName: rec?.guardian?.name || null,
+      guardianEmail: rec?.guardian?.email || null,
+      formNumber: rec?.formNumber || null,
+      rejectedAt,
+      rejectedBy: reviewer,
+      rejectionReason: reason,
+      students: (rec?.students || []).map((s) => ({
+        name: s?.name || null,
+        gradeSelection: s?.gradeSelection || null,
+        homeroom: s?.homeroom || null,
+      })),
+    },
+    retryCount: 0,
+    maxRetries: 3,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    source: 'pickup_admin_bulk_reject',
+  }, { merge: false });
+}
 
 async function allocateEmployeeNo(db, tid) {
   const ref = db.doc(tenancy.idAllocationsDoc('chaperone-counter', tid));
@@ -156,6 +248,12 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
   }
   await recRef.set({ enrollment }, { merge: true });
 
+  try {
+    await enqueueApprovalNotification(db, tid, recordId, rec, reviewer, now, created);
+  } catch (e) {
+    console.error('[bulk-approve] approval notification enqueue failed', e.message);
+  }
+
   return { allocated: created, enrollment };
 }
 
@@ -165,11 +263,13 @@ async function rejectOne(db, tid, recordId, reason, reviewer) {
   if (!recSnap.exists) throw new Error('record not found');
   const rec = recSnap.data();
   if (rec.status !== 'pending') throw new Error(`status=${rec.status}, not pending`);
+  const trimmedReason = reason.trim();
+  const rejectedAt = new Date().toISOString();
   await recRef.set({
     status: 'rejected',
-    reviewedAt: new Date().toISOString(),
+    reviewedAt: rejectedAt,
     reviewedBy: reviewer,
-    rejectionReason: reason.trim(),
+    rejectionReason: trimmedReason,
   }, { merge: true });
   // Phase 3: release per-student locks (best-effort).
   try {
@@ -177,11 +277,17 @@ async function rejectOne(db, tid, recordId, reason, reviewer) {
       if (!s || !s.id) return null;
       return db.doc(`${tenancy.pickupStudentLocksPath(tid)}/${s.id}`).set({
         status: 'rejected',
-        rejectedAt: new Date().toISOString(),
-        rejectionReason: reason.trim(),
+        rejectedAt,
+        rejectionReason: trimmedReason,
       }, { merge: true });
     }));
   } catch (e) { console.error('[bulk-reject] lock update', e.message); }
+
+  try {
+    await enqueueRejectionNotification(db, tid, recordId, rec, reviewer, rejectedAt, trimmedReason);
+  } catch (e) {
+    console.error('[bulk-reject] rejection notification enqueue failed', e.message);
+  }
 }
 
 // ── Archive: soft-flip status — keeps all data, hides from default views.
