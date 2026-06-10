@@ -1495,7 +1495,7 @@ export default function PickupOnboardingPage() {
                       <div key={i} style={{ fontSize: 13, marginBottom: i < conflict.conflicts.length - 1 ? 8 : 0 }}>
                         <div style={{ fontWeight: 700, color: BRAND.text }}>{c.studentName}</div>
                         <div style={{ color: BRAND.textSubtle, fontSize: 12, marginTop: 2 }}>
-                          Binusian ID {c.studentId}
+                          Student ID {c.studentId}
                           {c.formNumber && (
                             <> · Existing form{' '}
                               <code style={{
@@ -1773,7 +1773,7 @@ export default function PickupOnboardingPage() {
                 </div>
 
                 <div style={card()}>
-                  {sectionHeading(2, 'Your child(ren)',
+                  {sectionHeading(2, 'Your Child',
                     `Academic Year ${ACADEMIC_YEAR_LABEL}. Add first name, nickname, and choose EY1, EY2, EY3, or Grades 1 to 5.`)}
 
                   {students.length === 0 ? (
