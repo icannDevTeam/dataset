@@ -2016,6 +2016,20 @@ export default function PickupOnboardingPage() {
                           onPhotos={(paths) => updateChaperone(idx, { facePaths: paths })}
                           disabled={submitting}
                         />
+
+                        {chaperoneErrors[c.tempId] && (
+                          <div style={{
+                            marginTop: 10, padding: '10px 12px',
+                            background: BRAND.dangerBg, color: BRAND.danger,
+                            fontSize: 13, lineHeight: 1.45, borderRadius: 8,
+                            border: `1px solid ${BRAND.danger}33`,
+                          }}>
+                            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                              Why this person can't be saved yet:
+                            </div>
+                            {chaperoneErrors[c.tempId]}
+                          </div>
+                        )}
                       </div>
 
                       {/* Save this person — locks the card so the parent
@@ -2037,19 +2051,6 @@ export default function PickupOnboardingPage() {
                         </button>
                       </div>
 
-                      {chaperoneErrors[c.tempId] && (
-                        <div style={{
-                          marginTop: 10, padding: '10px 12px',
-                          background: BRAND.dangerBg, color: BRAND.danger,
-                          fontSize: 13, lineHeight: 1.45, borderRadius: 8,
-                          border: `1px solid ${BRAND.danger}33`,
-                        }}>
-                          <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                            Why this person can't be saved yet:
-                          </div>
-                          {chaperoneErrors[c.tempId]}
-                        </div>
-                      )}
                         </>
                       )}
                     </div>
