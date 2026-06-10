@@ -95,6 +95,11 @@ function formNumberFor(seq) {
   return `PKP-${year}-${String(seq).padStart(5, '0')}`;
 }
 
+function queueJobId(tid, recordId, templateType) {
+  const safe = `${tid}-${recordId}-${templateType}`.replace(/[^A-Za-z0-9_-]/g, '_');
+  return safe.slice(0, 180);
+}
+
 function sanitizeStudentName(raw) {
   return String(raw || '')
     .replace(/[^A-Za-z ]/g, '')
@@ -367,6 +372,46 @@ export default async function handler(req, res) {
       // Best-effort analytics — never block the success response.
       inviteLinks.recordUse(db, tid, claims.lid).catch(() => {});
     }
+
+    // Durable email queue: enqueue job for Cloud Function worker. This avoids
+    // Vercel post-response promise drops and provides audit visibility.
+    if (guardianEmail) {
+      const templateType = 'pickup_onboarding_confirmation';
+      const jobId = queueJobId(tid, recordId, templateType);
+      const queueRef = db.doc(`email_queue/${jobId}`);
+      try {
+        const existing = await queueRef.get();
+        if (!existing.exists) {
+          await queueRef.set({
+            status: 'pending',
+            templateType,
+            tenantId: tid,
+            recordId,
+            formNumber: txOut.formNumber,
+            to: guardianEmail,
+            templateData: {
+              guardianName,
+              formNumber: txOut.formNumber,
+              submittedAt: new Date().toISOString(),
+              studentNames,
+            },
+            retryCount: 0,
+            maxRetries: 3,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            source: 'pickup_onboarding_submit',
+          }, { merge: false });
+        }
+      } catch (queueErr) {
+        console.error('[pickup/onboarding/submit] email queue enqueue failed:', queueErr?.message, {
+          tenantId: tid,
+          recordId,
+          formNumber: txOut.formNumber,
+          queueJobId: jobId,
+        });
+      }
+    }
+
     return res.status(200).json({ ok: true, recordId, formNumber: txOut.formNumber });
   } catch (err) {
     console.error('[pickup/onboarding/submit]', err.message, err.stack);
