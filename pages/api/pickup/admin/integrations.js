@@ -6,6 +6,7 @@
  *   GET  ?action=contacts           → list contacts (?channel=email|whatsapp&group=)
  *   POST ?action=contacts    body   → upsert single contact
  *   POST ?action=import      body   → bulk import (paste / CSV text)
+ *   POST ?action=campaign-email body→ enqueue bulk email campaign via email_queue
  *   DELETE ?action=contacts&id=…    → remove contact
  *
  * Settings shape (tenants/{tid}/settings/pickup_integrations):
@@ -42,6 +43,7 @@ const DEFAULTS = {
     '{url}\n\nThe form closes on {closeDate}.\n\nThank you,\nBINUS School Simprug',
   defaultGroups: [],
 };
+const TEMPLATE_PICKUP_BULK_CAMPAIGN = 'pickup_bulk_campaign';
 
 function normEmail(s) {
   if (!s) return null;
@@ -75,6 +77,11 @@ function shapeContact(doc) {
     createdAt: tsMs(d.createdAt),
     updatedAt: tsMs(d.updatedAt),
   };
+}
+
+function queueJobId(campaignId, contactId) {
+  const safe = `${campaignId}-${contactId}`.replace(/[^A-Za-z0-9_-]/g, '_');
+  return `campaign-${safe}`.slice(0, 180);
 }
 
 async function handler(req, res) {
@@ -249,6 +256,93 @@ async function handler(req, res) {
     }
     if (pending > 0) await batch.commit();
     return res.status(200).json({ ok: true, ...results });
+  }
+
+  // ─── bulk email campaign (server-side queue) ───────────────────
+  // Enqueues one email_queue job per selected contact. This keeps delivery
+  // retries and status tracking centralized in processEmailQueue.
+  if (action === 'campaign-email') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const body = req.body || {};
+    const subject = String(body.subject || '').trim().slice(0, 200);
+    const message = String(body.message || '').trim().slice(0, 4000);
+    const campaignName = String(body.campaignName || '').trim().slice(0, 120) || 'Pickup campaign';
+    const selectedIds = Array.isArray(body.contactIds) ? body.contactIds.map((x) => String(x)) : [];
+    const group = body.group ? String(body.group).trim() : null;
+
+    if (!subject) return res.status(400).json({ error: 'subject required' });
+    if (!message) return res.status(400).json({ error: 'message required' });
+    if (selectedIds.length > 1000) return res.status(400).json({ error: 'max 1000 contacts per request' });
+
+    const useSelected = selectedIds.length > 0;
+    const selectedSet = new Set(selectedIds);
+    const snap = await contactsCol.get();
+    let contacts = snap.docs.map(shapeContact).filter((c) => c.email);
+    if (group) contacts = contacts.filter((c) => (c.group || '') === group);
+    if (useSelected) contacts = contacts.filter((c) => selectedSet.has(c.id));
+    if (contacts.length === 0) return res.status(400).json({ error: 'no eligible email contacts found' });
+
+    const campaignId = `${tid}-${Date.now()}`;
+    let queued = 0;
+    let skipped = 0;
+    const errors = [];
+
+    let batch = db.batch();
+    let pending = 0;
+    for (const c of contacts) {
+      if (!c.email) { skipped++; continue; }
+      const jobId = queueJobId(campaignId, c.id);
+      const ref = db.doc(`email_queue/${jobId}`);
+      batch.set(ref, {
+        status: 'pending',
+        templateType: TEMPLATE_PICKUP_BULK_CAMPAIGN,
+        tenantId: tid,
+        recordId: null,
+        campaignId,
+        campaignName,
+        to: c.email,
+        templateData: {
+          subject,
+          message,
+          recipientName: c.name || null,
+          studentName: c.studentName || null,
+          group: c.group || null,
+        },
+        retryCount: 0,
+        maxRetries: 3,
+        source: 'pickup_admin_campaign_email',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdBy: actor,
+      }, { merge: false });
+      queued++; pending++;
+      if (pending >= 400) {
+        try { await batch.commit(); }
+        catch (e) { errors.push(e.message || 'batch commit failed'); }
+        batch = db.batch();
+        pending = 0;
+      }
+    }
+    if (pending > 0) {
+      try { await batch.commit(); }
+      catch (e) { errors.push(e.message || 'batch commit failed'); }
+    }
+
+    await db.collection(`${tenancy.tenantDoc(tid)}/pickup_campaign_logs`).doc(campaignId).set({
+      campaignId,
+      campaignName,
+      channel: 'email',
+      subject,
+      message,
+      recipientCount: contacts.length,
+      queued,
+      skipped,
+      group: group || null,
+      createdBy: actor,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: false }).catch(() => null);
+
+    return res.status(200).json({ ok: true, campaignId, queued, skipped, errors });
   }
 
   return res.status(400).json({ error: 'unknown action' });

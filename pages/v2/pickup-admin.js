@@ -4470,6 +4470,30 @@ function SendInviteModal({ invite, qr, onClose, onCopy, pushToast }) {
     pushToast('success', `Opening your mail app with ${targets.length} BCC recipient${targets.length===1?'':'s'}.`, 'Email');
   }
 
+  async function sendEmailQueued() {
+    const targets = selectedContacts.filter((c) => c.email);
+    if (!targets.length) { pushToast('error', 'Select at least one contact with an email.', 'No recipients'); return; }
+
+    try {
+      const r = await fetch('/api/pickup/admin/integrations?action=campaign-email', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignName: `Invite ${invite.name || invite.id}`,
+          contactIds: targets.map((c) => c.id),
+          subject,
+          message: body,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || 'queue enqueue failed');
+      pushToast('success', `Queued ${j.queued || targets.length} email${(j.queued || targets.length) === 1 ? '' : 's'} for delivery.`, 'Campaign queued');
+    } catch (e) {
+      pushToast('error', e.message || 'Failed to enqueue campaign', 'Queue failed');
+    }
+  }
+
   // ── WhatsApp send (per-contact tab opener) ────────────────────────
   function sendWhatsApp() {
     const targets = selectedContacts.filter((c) => c.phone);
@@ -4679,10 +4703,18 @@ function SendInviteModal({ invite, qr, onClose, onCopy, pushToast }) {
                   <i className="ph ph-copy mr-1.5"></i>Copy message
                 </button>
                 {tab === 'email' && (
-                  <button onClick={sendEmail} disabled={!selected.size}
-                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40">
-                    <i className="ph ph-paper-plane-tilt mr-1.5"></i>Open in mail app ({selected.size})
-                  </button>
+                  <>
+                    <button onClick={sendEmailQueued} disabled={!selected.size}
+                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40"
+                      title="Send through server queue with delivery tracking">
+                      <i className="ph ph-envelope-simple-open mr-1.5"></i>Queue email send ({selected.size})
+                    </button>
+                    <button onClick={sendEmail} disabled={!selected.size}
+                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-40"
+                      title="Opens your local mail app with BCC list">
+                      <i className="ph ph-paper-plane-tilt mr-1.5"></i>Open in mail app ({selected.size})
+                    </button>
+                  </>
                 )}
                 {tab === 'whatsapp' && (
                   <button onClick={sendWhatsApp} disabled={!selected.size}
