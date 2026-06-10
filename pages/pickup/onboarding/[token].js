@@ -1773,7 +1773,7 @@ export default function PickupOnboardingPage() {
                 </div>
 
                 <div style={card()}>
-                  {sectionHeading(2, 'Your Child',
+                  {sectionHeading(2, 'Your child/children',
                     `Academic Year ${ACADEMIC_YEAR_LABEL}. Add first name, nickname, and choose EY1, EY2, EY3, or Grades 1 to 5.`)}
 
                   {students.length === 0 ? (
