@@ -1495,16 +1495,16 @@ export default function PickupOnboardingPage() {
                       <div key={i} style={{ fontSize: 13, marginBottom: i < conflict.conflicts.length - 1 ? 8 : 0 }}>
                         <div style={{ fontWeight: 700, color: BRAND.text }}>{c.studentName}</div>
                         <div style={{ color: BRAND.textSubtle, fontSize: 12, marginTop: 2 }}>
-                          Student ID {c.studentId}
                           {c.formNumber && (
-                            <> · Existing form{' '}
+                            <>Existing form{' '}
                               <code style={{
                                 background: '#fff', padding: '1px 6px', borderRadius: 4,
                                 fontWeight: 700, color: BRAND.navy,
                               }}>{c.formNumber}</code>
                             </>
                           )}
-                          {c.status && <> · {c.status}</>}
+                          {c.status && <>{c.formNumber ? ' · ' : ''}{c.status}</>}
+                          {!c.formNumber && !c.status && 'Already registered'}
                         </div>
                       </div>
                     ))}
