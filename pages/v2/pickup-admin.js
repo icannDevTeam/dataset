@@ -35,6 +35,12 @@ const REL_LABEL = {
   emergency: 'Emergency contact', other: 'Other',
 };
 
+const REL_INITIALS = {
+  mother: 'M', father: 'F', guardian: 'G', driver: 'D',
+};
+
+const VALID_RELATIONS = Object.keys(REL_INITIALS);
+
 const SORT_OPTIONS = [
   { key: 'newest', label: 'Newest first' },
   { key: 'oldest', label: 'Oldest first' },
@@ -2462,7 +2468,7 @@ function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingC
           <div className="text-[10px] text-slate-500 mb-0.5">Relation *</div>
           <select value={form.relation} onChange={(e) => setForm((f) => ({ ...f, relation: e.target.value }))}
             className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white">
-            {Object.entries(REL_LABEL).map(([k, v]) => (<option key={k} value={k}>{v}</option>))}
+              {VALID_RELATIONS.map((k) => (<option key={k} value={k}>{REL_INITIALS[k]} - {REL_LABEL[k]}</option>))}
           </select>
         </label>
         <label className="block">
@@ -2629,9 +2635,14 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-bold text-white truncate">{c.name}</span>
-              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                {REL_LABEL[c.relation] || c.relation}
-              </span>
+              {VALID_RELATIONS.includes(c.relation) && (
+                <span 
+                  className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-200 border border-blue-500/40 inline-flex items-center justify-center min-w-7"
+                  title={`${REL_LABEL[c.relation]}`}
+                >
+                  {REL_INITIALS[c.relation]}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -2693,7 +2704,7 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
               <div className="text-[10px] text-slate-500 mb-0.5">Relation</div>
               <select value={editForm.relation} onChange={(e) => setEditForm((f) => ({ ...f, relation: e.target.value }))}
                 className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white">
-                {Object.entries(REL_LABEL).map(([k, v]) => (<option key={k} value={k}>{v}</option>))}
+                    {VALID_RELATIONS.map((k) => (<option key={k} value={k}>{REL_INITIALS[k]} - {REL_LABEL[k]}</option>))}
               </select>
             </label>
             <label className="block">
@@ -3146,9 +3157,11 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
                 <div className="text-sm">
                   <div className="font-bold text-base">
                     {i + 1}. {c.name}
-                    <span className="ml-2 text-xs uppercase tracking-wider text-orange-700">
-                      ({REL_LABEL[c.relation] || c.relation})
-                    </span>
+                    {VALID_RELATIONS.includes(c.relation) && (
+                      <span className="ml-2 text-xs font-mono font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-300">
+                        {REL_INITIALS[c.relation]} ({REL_LABEL[c.relation]})
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-slate-700 mt-1 space-y-0.5">
                     <div>Phone: <span className="font-mono">{c.phone}</span></div>
