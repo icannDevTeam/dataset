@@ -258,6 +258,7 @@ export default async function handler(req, res) {
   }
 
   const studentNames = cleanStudents.map((s) => s.name).filter(Boolean);
+  const studentNameById = Object.fromEntries(cleanStudents.map((s) => [s.id, s.name]));
 
   try {
     initializeFirebase();
@@ -391,9 +392,28 @@ export default async function handler(req, res) {
             to: guardianEmail,
             templateData: {
               guardianName,
+              guardianEmail,
+              guardianPhone,
+              consentSignature,
               formNumber: txOut.formNumber,
               submittedAt: new Date().toISOString(),
               studentNames,
+              students: cleanStudents.map((s) => ({
+                name: s.name,
+                firstName: s.firstName,
+                nickname: s.nickname,
+                gradeSelection: s.gradeSelection,
+                homeroom: s.homeroom || null,
+              })),
+              chaperones: cleanChaperones.map((c) => ({
+                name: c.name,
+                relation: c.relation,
+                email: c.email || null,
+                phone: c.phone || null,
+                authorizedStudentNames: c.authorizedStudentIds
+                  .map((sid) => studentNameById[sid])
+                  .filter(Boolean),
+              })),
             },
             retryCount: 0,
             maxRetries: 3,
