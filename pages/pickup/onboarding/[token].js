@@ -57,7 +57,8 @@ function normalizeStudentText(value) {
   return String(value || '')
     .replace(/[^A-Za-z ]/g, '')
     .replace(/\s{2,}/g, ' ')
-    .trim();
+    .trim()
+    .toUpperCase();
 }
 
 function normalizeGradeSelection(value) {
@@ -476,7 +477,6 @@ function PhotoGuidelines() {
           <li>• Even, bright lighting (no backlight)</li>
           <li>• Neutral expression, eyes open</li>
           <li>• No sunglasses, hats, or face coverings</li>
-          <li>• 1–3 photos from slightly different angles</li>
           <li>• Recent photo (within 12 months)</li>
         </ul>
       </div>
@@ -713,7 +713,7 @@ function ChaperoneFaceCapture({ tempId, token, initialPaths = [], onPhotos, disa
                     <button type="button" style={btnAccent()}
                       onClick={captureFromCamera}
                       disabled={busy || disabled || photos.length >= MAX_PHOTOS}>
-                      {busy ? 'Uploading…' : `📸 Capture (${photos.length}/${MAX_PHOTOS})`}
+                      {busy ? 'Uploading…' : '📸 Capture'}
                     </button>
                     <button type="button" style={{ ...btnGhost(), marginLeft: 8 }} onClick={stopCam}>
                       Stop
@@ -721,8 +721,7 @@ function ChaperoneFaceCapture({ tempId, token, initialPaths = [], onPhotos, disa
                   </>
                 )}
                 <p style={{ fontSize: 12, color: BRAND.textSubtle, marginTop: 12, lineHeight: 1.6 }}>
-                  Position your face inside the orange oval. Take 1–3 photos with
-                  slight head turns left and right.
+                  Position your face inside the orange oval, then tap Capture.
                 </p>
               </div>
             </div>
@@ -772,7 +771,7 @@ function ChaperoneFaceCapture({ tempId, token, initialPaths = [], onPhotos, disa
           {photos.length > 0 && (
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 12, color: BRAND.textMuted, fontWeight: 600, marginBottom: 8 }}>
-                Uploaded photos ({photos.length}/{MAX_PHOTOS})
+                Uploaded photos
               </div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {photos.map((p, i) => (
@@ -1726,12 +1725,12 @@ export default function PickupOnboardingPage() {
                     <div>
                       <label style={label()}>Parent's name *</label>
                       <input style={input()} value={guardianName}
-                        onChange={(e) => setGuardianName(e.target.value)} required />
+                        onChange={(e) => setGuardianName(String(e.target.value || '').toUpperCase())} required />
                     </div>
                     <div>
                       <label style={label()}>Email *</label>
                       <input style={input()} type="email" value={guardianEmail}
-                        onChange={(e) => setGuardianEmail(e.target.value)} required />
+                        onChange={(e) => setGuardianEmail(String(e.target.value || '').toUpperCase())} required />
                     </div>
                   </div>
                 </div>
@@ -1786,7 +1785,7 @@ export default function PickupOnboardingPage() {
                         value={studentInputFirstName}
                         onChange={(e) => {
                           const rawFirstName = e.target.value;
-                          const nextFirstName = rawFirstName.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' ');
+                          const nextFirstName = rawFirstName.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' ').toUpperCase();
                           setStudentInputFirstName(nextFirstName);
                           setStudentError(liveStudentInputError({
                             firstName: nextFirstName,
@@ -1802,7 +1801,7 @@ export default function PickupOnboardingPage() {
                         value={studentInputNickname}
                         onChange={(e) => {
                           const rawNickname = e.target.value;
-                          const nextNickname = rawNickname.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' ');
+                          const nextNickname = rawNickname.replace(/[^A-Za-z ]/g, '').replace(/\s{2,}/g, ' ').toUpperCase();
                           setStudentInputNickname(nextNickname);
                           setStudentError(liveStudentInputError({
                             firstName: studentInputFirstName,
@@ -1850,7 +1849,7 @@ export default function PickupOnboardingPage() {
 
                 <div style={card()}>
                   {sectionHeading(3, 'Authorized pickup people',
-                    'Yourself, your spouse, the family driver, nanny, etc. Each person needs a face photo.')}
+                    'Mother, father, guardian, or driver. Each person needs a face photo.')}
 
                   {chaperones.length === 0 && (
                     <div style={{
@@ -1917,7 +1916,7 @@ export default function PickupOnboardingPage() {
                         <div>
                           <label style={label()}>Full name *</label>
                           <input style={input()} value={c.name}
-                            onChange={(e) => updateChaperone(idx, { name: e.target.value })} />
+                            onChange={(e) => updateChaperone(idx, { name: String(e.target.value || '').toUpperCase() })} />
                         </div>
                         <div>
                           <label style={label()}>Relation *</label>
@@ -1930,7 +1929,7 @@ export default function PickupOnboardingPage() {
                         <div style={{ gridColumn: '1 / -1' }}>
                           <label style={label()}>Email (optional)</label>
                           <input style={input()} type="email" value={c.email}
-                            onChange={(e) => updateChaperone(idx, { email: e.target.value })} />
+                            onChange={(e) => updateChaperone(idx, { email: String(e.target.value || '').toUpperCase() })} />
                         </div>
                       </div>
 
@@ -2047,7 +2046,7 @@ export default function PickupOnboardingPage() {
 
                   <label style={label()}>Type Parent's Name *</label>
                   <input style={input()} value={signature}
-                    onChange={(e) => setSignature(e.target.value)}
+                    onChange={(e) => setSignature(String(e.target.value || '').toUpperCase())}
                     placeholder={guardianName || "Parent's Name"} />
 
                   {error && (
