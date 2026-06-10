@@ -899,6 +899,7 @@ export default function PickupOnboardingPage() {
   const [studentError, setStudentError] = useState(null);
 
   const [chaperones, setChaperones] = useState([]);
+  const [chaperoneErrors, setChaperoneErrors] = useState({});
 
   const [signature, setSignature] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -1040,29 +1041,50 @@ export default function PickupOnboardingPage() {
     setChaperones((prev) => prev.map((c, i) =>
       i === idx ? { ...c, ...patch, confirmed: false } : c
     ));
+    const tempId = chaperones[idx]?.tempId;
+    if (tempId) {
+      setChaperoneErrors((prev) => {
+        if (!prev[tempId]) return prev;
+        const next = { ...prev };
+        delete next[tempId];
+        return next;
+      });
+    }
   }
   function removeChaperone(idx) {
+    const tempId = chaperones[idx]?.tempId;
     setChaperones((prev) => prev.filter((_, i) => i !== idx));
+    if (tempId) {
+      setChaperoneErrors((prev) => {
+        if (!prev[tempId]) return prev;
+        const next = { ...prev };
+        delete next[tempId];
+        return next;
+      });
+    }
   }
   function confirmChaperone(idx) {
     setError(null);
     const c = chaperones[idx];
     if (!c) return;
+    const setInlineError = (msg) => {
+      setChaperoneErrors((prev) => ({ ...prev, [c.tempId]: msg }));
+    };
     const name = (c.name || '').trim();
     if (!name) {
-      setError(`Person #${idx + 1}: name is required.`);
+      setInlineError(`Person #${idx + 1}: name is required.`);
       return;
     }
     if (name.length < 2) {
-      setError(`Person #${idx + 1}: name must be at least 2 letters — please type the chaperone’s full name.`);
+      setInlineError(`Person #${idx + 1}: name must be at least 2 letters — please type the chaperone's full name.`);
       return;
     }
     if (!c.relation || !RELATION_SET.has(String(c.relation).trim().toLowerCase())) {
-      setError(`Person #${idx + 1}: relationship is required.`);
+      setInlineError(`Person #${idx + 1}: relationship is required.`);
       return;
     }
     if (c.authorizedStudentIds.length === 0) {
-      setError(`Person #${idx + 1}: select at least one student they may pick up.`);
+      setInlineError(`Person #${idx + 1}: select at least one student they may pick up.`);
       return;
     }
     // Require at least one face photo up-front so the parent can't reach
@@ -1071,17 +1093,32 @@ export default function PickupOnboardingPage() {
     // self-service flow we make the photo mandatory.
     const faceCount = Array.isArray(c.facePaths) ? c.facePaths.length : 0;
     if (faceCount === 0) {
-      setError(`Person #${idx + 1}: please capture at least one clear face photo before saving this person.`);
+      setInlineError(`Person #${idx + 1}: please capture at least one clear face photo before saving this person.`);
       return;
     }
+    setChaperoneErrors((prev) => {
+      if (!prev[c.tempId]) return prev;
+      const next = { ...prev };
+      delete next[c.tempId];
+      return next;
+    });
     setChaperones((prev) => prev.map((x, i) =>
       i === idx ? { ...x, confirmed: true } : x
     ));
   }
   function reopenChaperone(idx) {
+    const tempId = chaperones[idx]?.tempId;
     setChaperones((prev) => prev.map((x, i) =>
       i === idx ? { ...x, confirmed: false } : x
     ));
+    if (tempId) {
+      setChaperoneErrors((prev) => {
+        if (!prev[tempId]) return prev;
+        const next = { ...prev };
+        delete next[tempId];
+        return next;
+      });
+    }
   }
   function toggleChaperoneStudent(idx, sid) {
     setChaperones((prev) => prev.map((c, i) => {
@@ -1999,6 +2036,17 @@ export default function PickupOnboardingPage() {
                           ✓ Save this person
                         </button>
                       </div>
+
+                      {chaperoneErrors[c.tempId] && (
+                        <div style={{
+                          marginTop: 10, padding: '10px 12px',
+                          background: BRAND.dangerBg, color: BRAND.danger,
+                          fontSize: 13, lineHeight: 1.45, borderRadius: 8,
+                          border: `1px solid ${BRAND.danger}33`,
+                        }}>
+                          {chaperoneErrors[c.tempId]}
+                        </div>
+                      )}
                         </>
                       )}
                     </div>
