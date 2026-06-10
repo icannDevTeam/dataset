@@ -33,16 +33,13 @@ const BRAND = {
 };
 
 const RELATIONS = [
-  { v: 'mother', l: 'Mother' },
-  { v: 'father', l: 'Father' },
-  { v: 'guardian', l: 'Legal guardian' },
-  { v: 'driver', l: 'Family driver' },
-  { v: 'nanny', l: 'Nanny / au pair' },
-  { v: 'grandparent', l: 'Grandparent' },
-  { v: 'sibling', l: 'Adult sibling' },
-  { v: 'emergency', l: 'Emergency contact' },
-  { v: 'other', l: 'Other' },
+  { v: 'mother', i: 'M', l: 'Mother' },
+  { v: 'father', i: 'F', l: 'Father' },
+  { v: 'guardian', i: 'G', l: 'Guardian' },
+  { v: 'driver', i: 'D', l: 'Driver' },
 ];
+const RELATION_SET = new Set(RELATIONS.map((r) => r.v));
+const RELATION_LABEL = Object.fromEntries(RELATIONS.map((r) => [r.v, `${r.i} - ${r.l}`]));
 
 const FONT_STACK =
   '"Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, ' +
@@ -488,7 +485,7 @@ function PhotoGuidelines() {
 }
 
 // ─── Chaperone face capture (camera + upload) ───────────────────────
-function ChaperoneFaceCapture({ tempId, token, onPhotos, disabled }) {
+function ChaperoneFaceCapture({ tempId, token, initialPaths = [], onPhotos, disabled }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -501,6 +498,35 @@ function ChaperoneFaceCapture({ tempId, token, onPhotos, disabled }) {
 
   const MAX_PHOTOS = 3;
   const MAX_FILE_BYTES = 600 * 1024;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadExisting() {
+      if (!token || !tempId || !Array.isArray(initialPaths) || initialPaths.length === 0) return;
+      // Avoid clobbering if the user has already uploaded new photos in this session.
+      if (photos.length > 0) return;
+      try {
+        const resolved = await Promise.all(initialPaths.slice(0, MAX_PHOTOS).map(async (path) => {
+          const qs = new URLSearchParams({
+            token: String(token),
+            tempId: String(tempId),
+            path: String(path),
+          });
+          const r = await fetch(`/api/pickup/onboarding/face?${qs.toString()}`);
+          if (!r.ok) return { path, dataUrl: null, previewUrl: null };
+          const j = await readApiJsonSafe(r, 'Could not load photo preview.');
+          return { path, dataUrl: null, previewUrl: j.url || null };
+        }));
+        if (!cancelled) setPhotos(resolved.filter((p) => !!p.path));
+      } catch {
+        if (!cancelled) {
+          setPhotos(initialPaths.slice(0, MAX_PHOTOS).map((p) => ({ path: p, dataUrl: null, previewUrl: null })));
+        }
+      }
+    }
+    loadExisting();
+    return () => { cancelled = true; };
+  }, [token, tempId, initialPaths]);
 
   function setAndEmit(next) {
     setPhotos(next);
@@ -757,7 +783,7 @@ function ChaperoneFaceCapture({ tempId, token, onPhotos, disabled }) {
                     border: `1.5px solid ${BRAND.success}`,
                     boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
                   }}>
-                    <img src={p.dataUrl} alt={`Photo ${i + 1}`}
+                    <img src={p.dataUrl || p.previewUrl || ''} alt={`Photo ${i + 1}`}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     <button type="button"
                       onClick={() => removePhoto(i)} disabled={disabled}
@@ -1032,7 +1058,7 @@ export default function PickupOnboardingPage() {
       setError(`Person #${idx + 1}: name must be at least 2 letters — please type the chaperone’s full name.`);
       return;
     }
-    if (!c.relation || !String(c.relation).trim()) {
+    if (!c.relation || !RELATION_SET.has(String(c.relation).trim().toLowerCase())) {
       setError(`Person #${idx + 1}: relationship is required.`);
       return;
     }
@@ -1127,6 +1153,7 @@ export default function PickupOnboardingPage() {
     }
     for (const c of chaperones) {
       if (!c.name.trim() || c.name.trim().length < 2) return 'Every chaperone needs a full name (at least 2 letters).';
+      if (!RELATION_SET.has(String(c.relation || '').trim().toLowerCase())) return `${c.name || 'A chaperone'} relation must be M/F/G/D.`;
       if (c.authorizedStudentIds.length === 0) return `${c.name} must be authorized for at least one student.`;
       const faceCount = Array.isArray(c.facePaths) ? c.facePaths.length : 0;
       if (faceCount === 0) return `${c.name || 'A chaperone'} needs at least one face photo before submitting.`;
@@ -1322,7 +1349,7 @@ export default function PickupOnboardingPage() {
                       const authNames = c.authorizedStudentIds
                         .map((sid) => (students.find((s) => s.id === sid) || {}).name || sid)
                         .filter(Boolean);
-                      const relLabel = (RELATIONS.find((r) => r.v === c.relation) || {}).l || c.relation || '—';
+                      const relLabel = RELATION_LABEL[c.relation] || '—';
                       return (
                         <div key={c.tempId} style={previewItemBox}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
@@ -1860,7 +1887,7 @@ export default function PickupOnboardingPage() {
                             </strong>
                             {c.confirmed && (
                               <div style={{ color: BRAND.textSubtle, fontSize: 12, marginTop: 2 }}>
-                                {c.relation || 'pickup'}
+                                {RELATION_LABEL[c.relation] || '—'}
                                 {c.email && <> · {c.email}</>}
                                 {c.authorizedStudentIds.length > 0 && (
                                   <> · authorized for {c.authorizedStudentIds.length} student{c.authorizedStudentIds.length === 1 ? '' : 's'}</>
@@ -1895,24 +1922,10 @@ export default function PickupOnboardingPage() {
                         <div>
                           <label style={label()}>Relation *</label>
                           <select style={input()}
-                            value={RELATIONS.some((r) => r.v === c.relation) ? c.relation : '__custom__'}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              if (v === '__custom__') {
-                                updateChaperone(idx, { relation: '' });
-                              } else {
-                                updateChaperone(idx, { relation: v });
-                              }
-                            }}>
-                            {RELATIONS.map((r) => <option key={r.v} value={r.v}>{r.l}</option>)}
-                            <option value="__custom__">Other (type custom…)</option>
+                            value={RELATION_SET.has(c.relation) ? c.relation : 'mother'}
+                            onChange={(e) => updateChaperone(idx, { relation: e.target.value })}>
+                            {RELATIONS.map((r) => <option key={r.v} value={r.v}>{r.i} - {r.l}</option>)}
                           </select>
-                          {!RELATIONS.some((r) => r.v === c.relation) && (
-                            <input style={{ ...input(), marginTop: 8 }}
-                              placeholder="Type relationship (e.g. uncle, aunt, godparent)"
-                              value={c.relation}
-                              onChange={(e) => updateChaperone(idx, { relation: e.target.value })} />
-                          )}
                         </div>
                         <div style={{ gridColumn: '1 / -1' }}>
                           <label style={label()}>Email (optional)</label>
@@ -1963,6 +1976,7 @@ export default function PickupOnboardingPage() {
                         <ChaperoneFaceCapture
                           tempId={c.tempId}
                           token={token}
+                          initialPaths={c.facePaths || []}
                           onPhotos={(paths) => updateChaperone(idx, { facePaths: paths })}
                           disabled={submitting}
                         />

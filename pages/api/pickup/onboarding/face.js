@@ -1,9 +1,11 @@
 /**
  * POST /api/pickup/onboarding/face
+ * GET  /api/pickup/onboarding/face?token=...&tempId=...&path=...
  *
  * Token-gated chaperone face photo upload (Phase 3).
  *
- * Body: { token, tempId, photoIndex, imageBase64 }
+ * Body (POST): { token, tempId, photoIndex, imageBase64 }
+ * Query (GET): token, tempId, path
  *   - imageBase64: data URL ("data:image/jpeg;base64,...") or raw base64
  *   - tempId    : client-side uuid that ties multiple photos to one chaperone
  *   - photoIndex: 0..2 (max 3 photos per chaperone)
@@ -43,12 +45,53 @@ function safeTempId(s) {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'POST' && req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-  const rl = enforceRateLimit('pickup:onboarding-face', clientIp(req), { max: 30, windowMs: 60_000 });
+  const rlKey = req.method === 'GET' ? 'pickup:onboarding-face-preview' : 'pickup:onboarding-face';
+  const rlMax = req.method === 'GET' ? 120 : 30;
+  const rl = enforceRateLimit(rlKey, clientIp(req), { max: rlMax, windowMs: 60_000 });
   if (!rl.allowed) {
     res.setHeader('Retry-After', rl.retryAfter);
     return res.status(429).json({ error: 'rate_limited', retryAfter: rl.retryAfter });
+  }
+
+  if (req.method === 'GET') {
+    const token = String(req.query?.token || '');
+    const tempId = String(req.query?.tempId || '');
+    const path = String(req.query?.path || '');
+
+    const claims = verifyPickupOnboardingToken(token);
+    if (!claims) return res.status(401).json({ error: 'invalid or expired token' });
+
+    const tid = claims.tid;
+    const tmp = safeTempId(tempId);
+    if (!tmp) return res.status(400).json({ error: 'invalid tempId' });
+
+    const expectedPrefix = `tenants/${tid}/chaperone_faces_pending/${tmp}/`;
+    if (!path || path.includes('..') || !path.startsWith(expectedPrefix)) {
+      return res.status(400).json({ error: 'invalid path' });
+    }
+
+    try {
+      initializeFirebase();
+      if (claims.lid) {
+        const usable = await inviteLinks.assertInviteUsable(admin.firestore(), tid, claims.lid);
+        if (!usable.ok) {
+          return res.status(usable.status || 403).json({ error: usable.reason });
+        }
+      }
+      const bucket = getFirebaseStorage().bucket();
+      const [url] = await bucket.file(path).getSignedUrl({
+        action: 'read',
+        expires: Date.now() + (10 * 60 * 1000),
+      });
+      return res.status(200).json({ ok: true, path, url });
+    } catch (err) {
+      console.error('[pickup/onboarding/face:get]', err.message);
+      return res.status(500).json({ error: 'internal' });
+    }
   }
 
   const { token, tempId, photoIndex, imageBase64 } = req.body || {};
