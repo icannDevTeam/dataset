@@ -97,7 +97,7 @@ function buildStudentDisplayName(student) {
 function formatStudentGradeBadge(student) {
   const selection = deriveGradeSelectionFromStudent(student);
   if (!selection) return '—';
-  return EY_GRADE_SET.has(selection) ? selection : `Grade ${selection}`;
+  return selection;
 }
 
 function formatStudentFinalClass(student) {
