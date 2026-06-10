@@ -2044,6 +2044,9 @@ export default function PickupOnboardingPage() {
                           fontSize: 13, lineHeight: 1.45, borderRadius: 8,
                           border: `1px solid ${BRAND.danger}33`,
                         }}>
+                          <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                            Why this person can't be saved yet:
+                          </div>
                           {chaperoneErrors[c.tempId]}
                         </div>
                       )}
