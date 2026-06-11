@@ -454,8 +454,16 @@ async function handler(req, res) {
         }
         await usersRef.doc(cleanEmail).update({
           tokenValidAfter: admin.firestore.FieldValue.serverTimestamp(),
+          // Admin-set passwords are temporary — force a change on next login,
+          // same contract as reissue-otp.
+          mustChangePassword: true,
+          lastPasswordResetAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastPasswordResetBy: caller.email,
         });
         invalidateUser(cleanEmail);
+        await logAudit(db, { actor: caller, req, kind: 'user.admin_password_reset',
+          target: { type: 'user', id: cleanEmail, label: doc.data()?.name || cleanEmail },
+          summary: `${caller.email} reset the password for ${cleanEmail} from the admin console` });
         return res.status(200).json({ ok: true, email: cleanEmail });
       }
 

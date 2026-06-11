@@ -15,15 +15,7 @@ const { initializeFirebase, getFirestoreDB } = require('../../../lib/firebase-ad
 const { invalidateUser } = require('../../../lib/api-auth');
 const admin = require('firebase-admin');
 const { logAudit } = require('../../../lib/audit-log');
-
-function validatePassword(pw) {
-  if (!pw || typeof pw !== 'string') return 'Password is required.';
-  if (pw.length < 10) return 'Password must be at least 10 characters.';
-  if (!/[a-z]/.test(pw)) return 'Password must contain a lowercase letter.';
-  if (!/[A-Z]/.test(pw)) return 'Password must contain an uppercase letter.';
-  if (!/[0-9]/.test(pw)) return 'Password must contain a digit.';
-  return null;
-}
+const { validatePassword } = require('../../../lib/password-policy');
 
 async function handler(req, res) {
   if (req.method !== 'POST') {

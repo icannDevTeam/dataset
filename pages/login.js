@@ -1,4 +1,5 @@
 import Head from 'next/head';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/AuthContext';
@@ -122,7 +123,12 @@ export default function LoginPage() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-medium text-slate-400 block mb-1.5">Password</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-medium text-slate-400">Password</label>
+                    <Link href="/forgot-password" className="text-xs font-medium text-brand-500 hover:text-brand-400 transition-colors">
+                      Forgot password?
+                    </Link>
+                  </div>
                   <div className="relative">
                     <i className="ph ph-lock absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
                     <input

@@ -11,7 +11,7 @@
 import { NextResponse } from 'next/server';
 
 // Pages that don't require auth
-const PUBLIC_PATHS = ['/login', '/p'];
+const PUBLIC_PATHS = ['/login', '/p', '/forgot-password', '/reset-password'];
 
 // Prefixes that don't require auth (whole subtrees)
 // /pickup/teacher uses its own device-token auth (not Firebase session),

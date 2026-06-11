@@ -9,7 +9,7 @@ import { FOUC_SCRIPT } from '../lib/theme';
 import ErrorBoundary from '../components/ErrorBoundary';
 
 // Pages that don't require authentication
-const PUBLIC_PAGES = ['/login'];
+const PUBLIC_PAGES = ['/login', '/forgot-password', '/reset-password'];
 // Dynamic page-route prefixes (Next.js pathname form) that are fully public.
 // Keep these in sync with middleware.js PUBLIC_PREFIXES.
 const PUBLIC_PATHNAME_PREFIXES = [
