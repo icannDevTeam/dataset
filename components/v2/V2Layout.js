@@ -48,6 +48,9 @@ const NAV_SECTIONS = [
       { href: '/v2/chaperones', icon: 'ph-users-three', label: 'Chaperones' },
       { href: '/v2/officer-overrides', icon: 'ph-shield-check', label: 'Officer Overrides' },
       { href: '/v2/security', icon: 'ph-shield-warning', label: 'Security Heatmap' },
+      { href: '/v2/pickup-monitor', icon: 'ph-activity', label: 'System Monitor' },
+      { href: '/v2/pickup-ops', icon: 'ph-terminal-window', label: 'Operations Interface' },
+      { href: '/v2/system-interfaces', icon: 'ph-plugs-connected', label: 'Service Interfaces' },
     ],
   },
 ];
