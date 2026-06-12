@@ -41,7 +41,7 @@ export function SwitchIcon({ arrows = 4, dark = false }) {
 /* Cloud — external network. */
 export function CloudIcon() {
   return (
-    <g>
+    <g transform="translate(-8 -8) scale(1.25)">
       <path
         d="M 16 44 a 10 10 0 0 1 -1 -19.9 A 14 14 0 0 1 41 18.5 A 11 11 0 0 1 50 44 Z"
         fill="#0f172a" stroke={CISCO_BLUE_LIGHT} strokeWidth="2.5" strokeLinejoin="round"

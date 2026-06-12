@@ -8,7 +8,7 @@ import { ICONS, CISCO_BLUE, CISCO_BLUE_DEEP, CISCO_BLUE_LIGHT } from './NodeIcon
  */
 
 const VB_W = 1240;
-const VB_H = 760;
+const VB_H = 640;
 
 const STATUS_STROKE = {
   up: '#34d399',
@@ -18,35 +18,30 @@ const STATUS_STROKE = {
 };
 
 /* ---- fixed layout (icon = 64x64, x/y = top-left of icon box) ---- */
-const BASE_NODES = [
-  { id: 'cloud',     x: 80,   y: 40,  icon: 'cloud',    label: 'Internet / Parents', sub: 'Outside world',        ifaceId: null },
-  { id: 'vercel',    x: 300,  y: 150, icon: 'switch',   label: 'Vercel Edge',        sub: 'dataset app · BN',     ifaceId: null,            arrows: 4 },
-  { id: 'api',       x: 560,  y: 290, icon: 'switch',   label: 'Next.js API Layer',  sub: 'pages/api · hub',      ifaceId: null,            arrows: 8 },
-  { id: 'firestore', x: 950,  y: 120, icon: 'db',       label: 'Firestore',          sub: 'Gi0/0',                ifaceId: 'firebase' },
-  { id: 'functions', x: 1120, y: 250, icon: 'fn',       label: 'Cloud Functions',    sub: 'Lo0 · email worker',   ifaceId: 'cloud_functions' },
-  { id: 'resend',    x: 670,  y: 50,  icon: 'envelope', label: 'Resend',             sub: 'Gi0/1 · SMTP relay',   ifaceId: 'resend' },
-  { id: 'whatsapp',  x: 180,  y: 380, icon: 'chat',     label: 'WhatsApp',           sub: 'Tu0 · notify',         ifaceId: 'whatsapp' },
-  { id: 'binus',     x: 80,   y: 540, icon: 'globe',    label: 'BINUS School API',   sub: 'Tu1 · roster sync',    ifaceId: 'binus_api' },
-  { id: 'tv',        x: 380,  y: 560, icon: 'tv',       label: 'TV Kiosk',           sub: 'SSE live board',       ifaceId: null },
-  { id: 'listener',  x: 950,  y: 470, icon: 'listener', label: 'Python Listener',    sub: 'Jetson · event stream', ifaceId: null },
+const NODES = [
+  { id: 'cloud',     x: 70,   y: 50,  icon: 'cloud',    label: 'Internet / Parents', sub: 'outside world',         ifaceId: null },
+  { id: 'resend',    x: 560,  y: 40,  icon: 'envelope', label: 'Resend',             sub: 'Gi0/1 · email relay',   ifaceId: 'resend' },
+  { id: 'functions', x: 1086, y: 40,  icon: 'fn',       label: 'Cloud Functions',    sub: 'Lo0 · email worker',    ifaceId: 'cloud_functions' },
+  { id: 'firestore', x: 920,  y: 170, icon: 'db',       label: 'Firestore',          sub: 'Gi0/0 · database',      ifaceId: 'firebase' },
+  { id: 'vercel',    x: 300,  y: 200, icon: 'switch',   label: 'Vercel Edge',        sub: 'dataset app',           ifaceId: null,            arrows: 4 },
+  { id: 'api',       x: 560,  y: 320, icon: 'switch',   label: 'Next.js API Layer',  sub: '/api/pickup/*',         ifaceId: null,            arrows: 8 },
+  { id: 'binus',     x: 90,   y: 350, icon: 'globe',    label: 'BINUS School API',   sub: 'Tu1 · roster sync',     ifaceId: 'binus_api' },
+  { id: 'whatsapp',  x: 300,  y: 480, icon: 'chat',     label: 'WhatsApp',           sub: 'Tu0 · notify',          ifaceId: 'whatsapp' },
+  { id: 'tv',        x: 590,  y: 500, icon: 'tv',       label: 'TV Kiosk',           sub: 'SSE live board',        ifaceId: null },
+  { id: 'listener',  x: 860,  y: 460, icon: 'listener', label: 'Python Listener',    sub: 'face events → DB',      ifaceId: null },
 ];
 
-/* Terminal slots along the bottom (filled dynamically from hik_* interfaces). */
-const TERM_SLOTS = [
-  { x: 620, y: 620 }, { x: 770, y: 640 }, { x: 920, y: 640 }, { x: 1070, y: 620 },
-];
-
-const BASE_LINKS = [
-  { id: 'cloud-vercel',   from: 'cloud',     to: 'vercel',    ifaceId: null,              dir: 'both' },
-  { id: 'vercel-api',     from: 'vercel',    to: 'api',       ifaceId: null,              dir: 'both' },
-  { id: 'api-firestore',  from: 'api',       to: 'firestore', ifaceId: 'firebase',        dir: 'both',  latency: true },
-  { id: 'fs-functions',   from: 'firestore', to: 'functions', ifaceId: 'cloud_functions', dir: 'fwd' },
-  { id: 'fn-resend',      from: 'functions', to: 'resend',    ifaceId: 'resend',          dir: 'fwd',   queueBadge: true },
-  { id: 'resend-cloud',   from: 'resend',    to: 'cloud',     ifaceId: 'resend',          dir: 'fwd' },
-  { id: 'api-whatsapp',   from: 'api',       to: 'whatsapp',  ifaceId: 'whatsapp',        dir: 'fwd' },
-  { id: 'api-binus',      from: 'api',       to: 'binus',     ifaceId: 'binus_api',       dir: 'both' },
-  { id: 'api-tv',         from: 'api',       to: 'tv',        ifaceId: null,              dir: 'fwd' },
-  { id: 'listener-fs',    from: 'listener',  to: 'firestore', ifaceId: null,              dir: 'fwd' },
+const LINKS = [
+  { id: 'cloud-vercel',  from: 'cloud',     to: 'vercel',    ifaceId: null,              dir: 'both' },
+  { id: 'vercel-api',    from: 'vercel',    to: 'api',       ifaceId: null,              dir: 'both' },
+  { id: 'api-firestore', from: 'api',       to: 'firestore', ifaceId: 'firebase',        dir: 'both',  latency: true },
+  { id: 'fs-functions',  from: 'firestore', to: 'functions', ifaceId: 'cloud_functions', dir: 'fwd' },
+  { id: 'fn-resend',     from: 'functions', to: 'resend',    ifaceId: 'resend',          dir: 'fwd',   queueBadge: true, badgeT: 0.62 },
+  { id: 'resend-cloud',  from: 'resend',    to: 'cloud',     ifaceId: 'resend',          dir: 'fwd' },
+  { id: 'api-binus',     from: 'api',       to: 'binus',     ifaceId: 'binus_api',       dir: 'both' },
+  { id: 'api-whatsapp',  from: 'api',       to: 'whatsapp',  ifaceId: 'whatsapp',        dir: 'fwd' },
+  { id: 'api-tv',        from: 'api',       to: 'tv',        ifaceId: null,              dir: 'fwd' },
+  { id: 'listener-fs',   from: 'listener',  to: 'firestore', ifaceId: null,              dir: 'fwd' },
 ];
 
 function centerOf(node) {
@@ -74,12 +69,14 @@ function AnimatedLink({ link, from, to, iface, reducedMotion }) {
   // shorten so lines stop at icon edges
   const dx = b.cx - a.cx, dy = b.cy - a.cy;
   const len = Math.hypot(dx, dy) || 1;
-  const pad = 40;
+  const pad = 44;
   const x1 = a.cx + (dx / len) * pad, y1 = a.cy + (dy / len) * pad;
   const x2 = b.cx - (dx / len) * pad, y2 = b.cy - (dy / len) * pad;
   const pathD = `M ${x1} ${y1} L ${x2} ${y2}`;
   const pathDRev = `M ${x2} ${y2} L ${x1} ${y1}`;
   const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
+  const bt = link.badgeT ?? 0.5;
+  const badgeX = x1 + (x2 - x1) * bt, badgeY = y1 + (y2 - y1) * bt;
 
   const dashDur = tier === 2 ? '0.7s' : tier === 1 ? '1.6s' : '3.2s';
   const pktDur = tier === 2 ? '1.4s' : tier === 1 ? '2.6s' : '5s';
@@ -88,14 +85,14 @@ function AnimatedLink({ link, from, to, iface, reducedMotion }) {
 
   return (
     <g>
-      <path d={pathD} stroke={down ? '#7f1d1d' : 'rgba(148,163,184,.25)'} strokeWidth="3" fill="none" />
+      <path d={pathD} stroke={down ? '#7f1d1d' : 'rgba(148,163,184,.2)'} strokeWidth="3" fill="none" />
       <path
         d={pathD}
         stroke={color}
         strokeWidth={down ? 2 : 2.2}
         fill="none"
         strokeDasharray={uncfg ? '3 7' : down ? '6 6' : '9 9'}
-        opacity={uncfg ? 0.5 : down ? 0.9 : tier === 0 ? 0.45 : 0.95}
+        opacity={uncfg ? 0.5 : down ? 0.9 : tier === 0 ? 0.4 : 0.9}
         className={animate ? 'topo-dash' : undefined}
         style={animate ? { animationDuration: dashDur } : undefined}
       />
@@ -124,7 +121,7 @@ function AnimatedLink({ link, from, to, iface, reducedMotion }) {
         </g>
       )}
       {link.queueBadge && link.queueCount > 0 && (
-        <g transform={`translate(${midX} ${midY + 16})`}>
+        <g transform={`translate(${badgeX} ${badgeY + 16})`}>
           <rect x="-44" y="-11" width="88" height="20" rx="10" fill="#0f172a" stroke="rgba(251,191,36,.45)" strokeWidth="1" />
           <text textAnchor="middle" y="4" fill="#fbbf24" fontSize="11" fontFamily="ui-monospace, monospace">
             queue: {link.queueCount}
@@ -149,7 +146,7 @@ function Node({ node, iface, onSelect }) {
       className="topo-node"
     >
       {node.icon !== 'cloud' && (
-        <rect x="-4" y="-4" width="72" height="72" rx="16" fill="none" stroke={ring} strokeWidth="1.5" opacity="0.6" />
+        <rect x="-4" y="-4" width="72" height="72" rx="16" fill="none" stroke={ring} strokeWidth="1.5" opacity="0.55" />
       )}
       <Icon arrows={node.arrows} />
       {node.ifaceId && (
@@ -157,10 +154,12 @@ function Node({ node, iface, onSelect }) {
           {status === 'up' && <animate attributeName="opacity" values="1;.45;1" dur="2s" repeatCount="indefinite" />}
         </circle>
       )}
-      <text x="32" y="84" textAnchor="middle" fill="#e2e8f0" fontSize="13" fontWeight="600" fontFamily="ui-sans-serif, system-ui">
+      <text x="32" y="84" textAnchor="middle" fill="#e2e8f0" fontSize="13" fontWeight="600"
+        fontFamily="ui-sans-serif, system-ui" stroke="#0a0f1c" strokeWidth="5" paintOrder="stroke" strokeLinejoin="round">
         {node.label}
       </text>
-      <text x="32" y="99" textAnchor="middle" fill="#64748b" fontSize="10.5" fontFamily="ui-monospace, monospace">
+      <text x="32" y="99" textAnchor="middle" fill="#64748b" fontSize="10.5"
+        fontFamily="ui-monospace, monospace" stroke="#0a0f1c" strokeWidth="4" paintOrder="stroke" strokeLinejoin="round">
         {iface?.name || node.sub}
       </text>
     </g>
@@ -196,42 +195,16 @@ export default function TopologyDiagram({ interfaces = [], health = null, onSele
     return m;
   }, [interfaces]);
 
-  const termIfaces = useMemo(
-    () => interfaces.filter((i) => i.id.startsWith('hik')).slice(0, TERM_SLOTS.length),
-    [interfaces]
-  );
-
-  const nodes = useMemo(() => {
-    const terms = termIfaces.map((iface, i) => ({
-      id: `term-${iface.id}`,
-      x: TERM_SLOTS[i].x,
-      y: TERM_SLOTS[i].y,
-      icon: 'terminal',
-      label: iface.description || `Terminal ${i + 1}`,
-      sub: iface.name,
-      ifaceId: iface.id,
-    }));
-    return [...BASE_NODES, ...terms];
-  }, [termIfaces]);
-
   const links = useMemo(() => {
     const queuePending = health?.emailQueue?.pending ?? 0;
-    const base = BASE_LINKS.map((l) => (l.queueBadge ? { ...l, queueCount: queuePending } : l));
-    const termLinks = termIfaces.map((iface) => ({
-      id: `link-term-${iface.id}`,
-      from: `term-${iface.id}`,
-      to: 'listener',
-      ifaceId: iface.id,
-      dir: 'fwd',
-    }));
-    return [...base, ...termLinks];
-  }, [termIfaces, health]);
+    return LINKS.map((l) => (l.queueBadge ? { ...l, queueCount: queuePending } : l));
+  }, [health]);
 
   const nodeById = useMemo(() => {
     const m = {};
-    for (const n of nodes) m[n.id] = n;
+    for (const n of NODES) m[n.id] = n;
     return m;
-  }, [nodes]);
+  }, []);
 
   return (
     <div className="relative w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/70">
@@ -250,16 +223,10 @@ export default function TopologyDiagram({ interfaces = [], health = null, onSele
         <rect width={VB_W} height={VB_H} fill="url(#topoGridDots)" />
 
         {/* Services block (Cisco-style dotted enclosure) */}
-        <rect x="900" y="20" width="320" height="330" rx="14" fill="rgba(21,101,192,.05)"
+        <rect x="876" y="14" width="344" height="270" rx="14" fill="rgba(21,101,192,.05)"
           stroke="rgba(30,136,229,.45)" strokeWidth="1.5" strokeDasharray="6 5" />
-        <text x="918" y="44" fill="#60a5fa" fontSize="12" fontWeight="700" letterSpacing="2"
-          fontFamily="ui-monospace, monospace">GOOGLE CLOUD SERVICES</text>
-
-        {/* Edge block */}
-        <rect x="560" y="560" width="640" height="170" rx="14" fill="rgba(21,101,192,.04)"
-          stroke="rgba(100,116,139,.4)" strokeWidth="1.5" strokeDasharray="6 5" />
-        <text x="578" y="584" fill="#94a3b8" fontSize="12" fontWeight="700" letterSpacing="2"
-          fontFamily="ui-monospace, monospace">FACE TERMINALS · SERIAL0/N</text>
+        <text x="894" y="38" fill="#60a5fa" fontSize="12" fontWeight="700" letterSpacing="2"
+          fontFamily="ui-monospace, monospace">GOOGLE CLOUD</text>
 
         {links.map((l) => {
           const from = nodeById[l.from];
@@ -268,12 +235,12 @@ export default function TopologyDiagram({ interfaces = [], health = null, onSele
           return <AnimatedLink key={l.id} link={l} from={from} to={to} iface={l.ifaceId ? byId[l.ifaceId] : null} reducedMotion={reducedMotion} />;
         })}
 
-        {nodes.map((n) => (
+        {NODES.map((n) => (
           <Node key={n.id} node={n} iface={n.ifaceId ? byId[n.ifaceId] : null} onSelect={onSelect} />
         ))}
 
         {/* Legend */}
-        <g transform="translate(28 660)" fontFamily="ui-sans-serif, system-ui" fontSize="11.5">
+        <g transform="translate(40 528)" fontFamily="ui-sans-serif, system-ui" fontSize="11.5">
           <rect x="-12" y="-22" width="250" height="104" rx="10" fill="rgba(2,6,23,.8)" stroke="rgba(51,65,85,.7)" strokeWidth="1" />
           <text y="-4" fill="#94a3b8" fontSize="10" fontWeight="700" letterSpacing="2">LEGEND</text>
           <line x1="0" y1="12" x2="34" y2="12" stroke={STATUS_STROKE.up} strokeWidth="2.2" strokeDasharray="9 9" />
