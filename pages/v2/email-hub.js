@@ -59,7 +59,7 @@ function ConfirmModal({ open, title, body, confirmLabel, busy, danger, onCancel,
   if (!open) return null;
   return (
     <div role="dialog" aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="v2-dark fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}>
       <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md p-5">
         <h3 className="text-base font-semibold text-white">{title}</h3>
@@ -120,7 +120,7 @@ function TemplateModal({ open, template, busy, onCancel, onSave }) {
   const insertPlaceholder = (ph) => setMessage((m) => `${m}${m && !m.endsWith(' ') ? ' ' : ''}${ph}`);
   return (
     <div role="dialog" aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="v2-dark fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}>
       <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto">
         <h3 className="text-base font-semibold text-white flex items-center gap-2">
@@ -175,7 +175,7 @@ function ContactModal({ open, busy, onCancel, onSave }) {
   if (!open) return null;
   return (
     <div role="dialog" aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="v2-dark fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}>
       <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md p-5">
         <h3 className="text-base font-semibold text-white flex items-center gap-2">
@@ -223,7 +223,7 @@ function InviteLinkModal({ open, contacts, invites, busy, onCancel, onSend }) {
   const usable = (invites || []).filter((i) => i.enabled !== false);
   return (
     <div role="dialog" aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="v2-dark fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}>
       <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md p-5">
         <h3 className="text-base font-semibold text-white flex items-center gap-2">
