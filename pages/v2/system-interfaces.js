@@ -20,6 +20,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import MonitorTopNav from '../../components/v2/MonitorTopNav';
 import TopologyDiagram from '../../components/v2/topology/TopologyDiagram';
+import { Section, InterfaceTable, SecurityMonitor, sc, statusLabel, relTime } from '../../components/v2/monitor/InterfaceSections';
 
 const REFRESH_SEC = 30;
 
@@ -41,29 +42,6 @@ function fmtBytes(n) {
   if (n < 1024) return `${n}`;
   if (n < 1_048_576) return `${(n / 1024).toFixed(1)}K`;
   return `${(n / 1_048_576).toFixed(1)}M`;
-}
-function relTime(iso) {
-  if (!iso) return '—';
-  const d = Date.now() - Date.parse(iso);
-  if (d < 60_000) return `${Math.round(d / 1000)}s ago`;
-  if (d < 3_600_000) return `${Math.round(d / 60_000)}m ago`;
-  return `${Math.round(d / 3_600_000)}h ago`;
-}
-
-// ─── Status helpers ───────────────────────────────────────────────────────────
-const STATUS_COLOR = {
-  up:           { line: 'text-emerald-400', badge: 'bg-emerald-900/60 text-emerald-300 border border-emerald-700' },
-  degraded:     { line: 'text-amber-400',   badge: 'bg-amber-900/60   text-amber-300   border border-amber-700' },
-  down:         { line: 'text-red-400',     badge: 'bg-red-900/60     text-red-300     border border-red-700' },
-  unconfigured: { line: 'text-gray-500',    badge: 'bg-gray-800/60    text-gray-400    border border-gray-700' },
-};
-function sc(status) { return STATUS_COLOR[status] || STATUS_COLOR.unconfigured; }
-function statusLabel(status) {
-  if (status === 'up')           return 'UP';
-  if (status === 'degraded')     return 'DEGRADED';
-  if (status === 'down')         return 'DOWN';
-  if (status === 'unconfigured') return 'UNCONFIGURED';
-  return 'UNKNOWN';
 }
 
 // ─── Cisco Interface Card ─────────────────────────────────────────────────────
@@ -328,6 +306,9 @@ export default function SystemInterfacesPage() {
   const summary = data?.summary || {};
   const interfaces = data?.interfaces || [];
   const keys = data?.keys || {};
+  // Terminal (Serial0/N) interfaces live on Operations & Terminals pages — keep this view to core services
+  const serviceIfaces = interfaces.filter((i) => !String(i.id).startsWith('hik'));
+  const svcUp = serviceIfaces.filter((i) => i.status === 'up').length;
 
   return (
     <V2Layout>
@@ -377,31 +358,43 @@ export default function SystemInterfacesPage() {
 
         {/* Quick stat bar */}
         {data && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
             {[
               {
-                label: 'Interfaces UP',
-                value: `${summary.upCount ?? '—'}/${summary.totalCount ?? '—'}`,
+                label: 'Services UP',
+                value: `${svcUp}/${serviceIfaces.length}`,
                 icon: 'ph-activity',
-                color: summary.upCount === summary.totalCount ? 'text-emerald-400' : 'text-amber-400',
-              },
-              {
-                label: 'Hikvision Reachable',
-                value: `${summary.hikReachable ?? '—'}/${summary.hikTotal ?? '—'}`,
-                icon: 'ph-fingerprint',
-                color: summary.hikReachable === summary.hikTotal ? 'text-emerald-400' : 'text-red-400',
-              },
-              {
-                label: 'Keys Configured',
-                value: `${summary.keyConfigured ?? '—'}/${summary.keyTotal ?? '—'}`,
-                icon: 'ph-key',
-                color: summary.keyConfigured === summary.keyTotal ? 'text-emerald-400' : 'text-amber-400',
+                color: svcUp === serviceIfaces.length ? 'text-emerald-400' : 'text-amber-400',
               },
               {
                 label: 'Firestore Latency',
                 value: summary.fsLatencyMs != null ? `${summary.fsLatencyMs}ms` : '—',
                 icon: 'ph-database',
                 color: summary.fsLatencyMs != null && summary.fsLatencyMs < 200 ? 'text-emerald-400' : 'text-amber-400',
+              },
+              {
+                label: 'Security 24h',
+                value: health?.security?.last24h ?? '—',
+                icon: 'ph-shield-warning',
+                color: (health?.security?.last24h ?? 0) > 0 ? 'text-red-400' : 'text-emerald-400',
+              },
+              {
+                label: 'Rate-limit Blocks',
+                value: health?.rateLimit?.blockedLast15min ?? '—',
+                icon: 'ph-gauge',
+                color: (health?.rateLimit?.blockedLast15min ?? 0) > 0 ? 'text-red-400' : 'text-emerald-400',
+              },
+              {
+                label: 'Email Pending',
+                value: health?.emailQueue?.pending ?? '—',
+                icon: 'ph-envelope-simple',
+                color: (health?.emailQueue?.pending ?? 0) > 0 ? 'text-amber-400' : 'text-emerald-400',
+              },
+              {
+                label: 'Keys Configured',
+                value: `${summary.keyConfigured ?? '—'}/${summary.keyTotal ?? '—'}`,
+                icon: 'ph-key',
+                color: summary.keyConfigured === summary.keyTotal ? 'text-emerald-400' : 'text-amber-400',
               },
             ].map((s) => (
               <div key={s.label} className="bg-gray-900/80 border border-gray-800 rounded-xl px-4 py-3">
@@ -429,36 +422,48 @@ export default function SystemInterfacesPage() {
           />
         </div>
 
-        {/* Interface cards */}
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-3">
-            <i className="ph ph-network text-sm text-cyan-400" />
-            <h2 className="text-gray-200 text-sm font-semibold">Interface Status</h2>
-            <span className="ml-2 text-gray-600 text-xs font-mono">
-              — {interfaces.length} interfaces total
-            </span>
-          </div>
-          {loading && !data && (
+        {/* Security / abuse monitor */}
+        <Section
+          id="security"
+          icon="ph-shield-check"
+          iconColor="text-red-400"
+          title="Security Monitor"
+          note="— incidents, rate limiting / DDoS, email queue"
+          defaultOpen
+        >
+          <SecurityMonitor health={health} />
+        </Section>
+
+        {/* Compact interface status */}
+        <Section
+          id="ifaces"
+          icon="ph-network"
+          iconColor="text-cyan-400"
+          title="Interface Status"
+          note={`— ${serviceIfaces.length} service interfaces · terminals live on Operations page`}
+          defaultOpen={false}
+        >
+          {loading && !data ? (
             <div className="text-gray-600 text-sm font-mono animate-pulse py-8 text-center">
               Probing interfaces…
             </div>
+          ) : (
+            <InterfaceTable interfaces={serviceIfaces} onSelect={setSelected} />
           )}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {interfaces.map((iface) => (
-              <ServiceInterfaceCard key={iface.id} iface={iface} />
-            ))}
-          </div>
-        </div>
+        </Section>
 
         {/* API key panel */}
         {data && Object.keys(keys).length > 0 && (
-          <div className="mb-6">
-            <div className="flex items-center gap-2 mb-3">
-              <i className="ph ph-shield-check text-sm text-amber-400" />
-              <h2 className="text-gray-200 text-sm font-semibold">Credential & Key Status</h2>
-            </div>
+          <Section
+            id="keys"
+            icon="ph-key"
+            iconColor="text-amber-400"
+            title="Credential & Key Status"
+            note="— masked server-side"
+            defaultOpen={false}
+          >
             <ApiKeyPanel keys={keys} />
-          </div>
+          </Section>
         )}
 
         {/* Footer note */}

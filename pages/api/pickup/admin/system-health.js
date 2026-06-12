@@ -36,6 +36,7 @@ import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
+const { getRateLimitStats } = require('../../../../lib/rate-limit');
 
 const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
 
@@ -166,6 +167,7 @@ async function handler(req, res) {
     emailQueue,
     security,
     onboarding,
+    rateLimit: getRateLimitStats(),
   });
 }
 
