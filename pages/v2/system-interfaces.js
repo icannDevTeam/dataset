@@ -19,6 +19,7 @@ import Head from 'next/head';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import MonitorTopNav from '../../components/v2/MonitorTopNav';
+import TopologyDiagram from '../../components/v2/topology/TopologyDiagram';
 
 const REFRESH_SEC = 30;
 
@@ -64,25 +65,6 @@ function statusLabel(status) {
   if (status === 'unconfigured') return 'UNCONFIGURED';
   return 'UNKNOWN';
 }
-
-// ─── Topology diagram ─────────────────────────────────────────────────────────
-const TOPOLOGY = `
-  Hikvision DS-K1T3xx              Python Listener                Firebase / Firestore
-  ┌──────────────────────┐   LAN   ┌──────────────────────┐  SDK  ┌────────────────────┐
-  │  face scan events    ├────────►│  attendance_         ├──────►│  pickup_events     │
-  │  /ISAPI/eventTrigger │  ISAPI  │  listener.py         │       │  email_queue       │
-  └──────────────────────┘  Digest └──────────┬───────────┘       └────────────────────┘
-                                              │ Firestore writes
-                                   ┌──────────▼───────────┐       ┌────────────────────┐
-                                   │  Next.js API Layer   │       │  Cloud Functions   │
-                                   │  /api/pickup/*       ├──────►│  processEmailQueue │
-                                   └───┬──────────────┬───┘       └────────────────────┘
-                              SSE feed │              │ SMTP/API
-                     ┌─────────────────▼─┐        ┌───▼──────────────────┐
-                     │  TV Kiosk Display  │        │  Resend — Email      │
-                     │  (pickup screen)   │        │  WhatsApp Broadcast  │
-                     └────────────────────┘        └──────────────────────┘
-`.trim();
 
 // ─── Cisco Interface Card ─────────────────────────────────────────────────────
 function ServiceInterfaceCard({ iface }) {
@@ -299,6 +281,8 @@ function ApiKeyPanel({ keys }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function SystemInterfacesPage() {
   const [data, setData] = useState(null);
+  const [health, setHealth] = useState(null);
+  const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [countdown, setCountdown] = useState(REFRESH_SEC);
@@ -308,10 +292,17 @@ export default function SystemInterfacesPage() {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch('/api/pickup/admin/service-interfaces', { credentials: 'include' });
+      const [r, hr] = await Promise.all([
+        fetch('/api/pickup/admin/service-interfaces', { credentials: 'include' }),
+        fetch('/api/pickup/admin/system-health', { credentials: 'include' }).catch(() => null),
+      ]);
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
       const j = await r.json();
       setData(j);
+      if (hr && hr.ok) {
+        const hj = await hr.json().catch(() => null);
+        if (hj) setHealth(hj);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -425,15 +416,17 @@ export default function SystemInterfacesPage() {
         )}
 
         {/* Network topology diagram */}
-        <div className="mb-6 bg-gray-950 border border-gray-800 rounded-xl overflow-hidden">
-          <div className="px-5 py-2.5 border-b border-gray-800 bg-gray-900 flex items-center gap-2">
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
             <i className="ph ph-graph text-sm text-purple-400" />
-            <span className="text-gray-300 text-sm font-semibold">Network Topology</span>
-            <span className="ml-2 text-gray-600 text-xs font-mono">— data flow overview</span>
+            <span className="text-gray-300 text-sm font-semibold">Live Network Topology</span>
+            <span className="ml-2 text-gray-600 text-xs font-mono">— click a node for show interface detail</span>
           </div>
-          <pre className="text-[11px] leading-5 text-gray-500 px-5 py-4 font-mono overflow-x-auto whitespace-pre">
-            {TOPOLOGY}
-          </pre>
+          <TopologyDiagram
+            interfaces={interfaces}
+            health={health}
+            onSelect={(iface) => setSelected(iface.id)}
+          />
         </div>
 
         {/* Interface cards */}
@@ -474,6 +467,34 @@ export default function SystemInterfacesPage() {
           Rates are computed from 5-minute and 1-hour buckets. Hikvision terminals are probed live via ISAPI/Digest Auth.
         </p>
       </div>
+
+      {/* Node detail slide-over */}
+      {selected && (() => {
+        const iface = interfaces.find((i) => i.id === selected);
+        if (!iface) return null;
+        return (
+          <div className="v2-dark fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm" onClick={() => setSelected(null)}>
+            <div
+              className="w-full max-w-2xl h-full overflow-y-auto bg-gray-950 border-l border-gray-800 p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-gray-100 font-semibold text-sm flex items-center gap-2">
+                  <i className="ph ph-plugs-connected text-cyan-400" />
+                  {iface.ifName} — {iface.name}
+                </h2>
+                <button
+                  onClick={() => setSelected(null)}
+                  className="px-2.5 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-gray-400 text-xs hover:border-gray-500"
+                >
+                  <i className="ph ph-x" /> Close
+                </button>
+              </div>
+              <ServiceInterfaceCard iface={iface} />
+            </div>
+          </div>
+        );
+      })()}
     </V2Layout>
   );
 }
