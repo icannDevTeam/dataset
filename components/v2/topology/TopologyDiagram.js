@@ -32,7 +32,7 @@ const NODES = [
 ];
 
 const LINKS = [
-  { id: 'cloud-vercel',  from: 'cloud',     to: 'vercel',    ifaceId: null,              dir: 'both' },
+  { id: 'cloud-vercel',  from: 'cloud',     to: 'vercel',    ifaceId: null,              dir: 'both',  formsBadge: true, badgeT: 0.45 },
   { id: 'vercel-api',    from: 'vercel',    to: 'api',       ifaceId: null,              dir: 'both' },
   { id: 'api-firestore', from: 'api',       to: 'firestore', ifaceId: 'firebase',        dir: 'both',  latency: true },
   { id: 'fs-functions',  from: 'firestore', to: 'functions', ifaceId: 'cloud_functions', dir: 'fwd' },
@@ -48,23 +48,31 @@ function centerOf(node) {
   return { cx: node.x + 32, cy: node.y + 32 };
 }
 
-/* Speed tier from 5-min packet rates: 0 idle, 1 light, 2 busy. */
+/* Speed tier from 5-min packet rates: 0 idle, 1 light, 2 busy, 3 heavy. */
 function speedTier(iface) {
   if (!iface || !iface.counters) return 0;
   const r = (iface.counters.inputRate5min || 0) + (iface.counters.outputRate5min || 0);
+  if (r >= 5) return 3;
   if (r >= 1) return 2;
   if (r > 0) return 1;
   return 0;
 }
 
+/* Traffic heat colors (only applied when link status is 'up') */
+const TRAFFIC_STROKE = { 2: '#22d3ee', 3: '#fb923c' };
+
 function AnimatedLink({ link, from, to, iface, reducedMotion }) {
   const a = centerOf(from);
   const b = centerOf(to);
   const status = link.ifaceId ? (iface?.status || 'unconfigured') : 'up';
-  const color = STATUS_STROKE[status] || STATUS_STROKE.unconfigured;
   const down = status === 'down';
   const uncfg = status === 'unconfigured';
-  const tier = down || uncfg ? 0 : speedTier(iface);
+  let tier = down || uncfg ? 0 : speedTier(iface);
+  const formsCount = link.formsBadge ? (link.formsCount || 0) : 0;
+  if (formsCount > 0 && tier < 2) tier = 2;
+  const color = status === 'up'
+    ? (TRAFFIC_STROKE[tier] || STATUS_STROKE.up)
+    : (STATUS_STROKE[status] || STATUS_STROKE.unconfigured);
 
   // shorten so lines stop at icon edges
   const dx = b.cx - a.cx, dy = b.cy - a.cy;
@@ -78,9 +86,9 @@ function AnimatedLink({ link, from, to, iface, reducedMotion }) {
   const bt = link.badgeT ?? 0.5;
   const badgeX = x1 + (x2 - x1) * bt, badgeY = y1 + (y2 - y1) * bt;
 
-  const dashDur = tier === 2 ? '0.7s' : tier === 1 ? '1.6s' : '3.2s';
-  const pktDur = tier === 2 ? '1.4s' : tier === 1 ? '2.6s' : '5s';
-  const pkts = down || uncfg ? 0 : tier === 2 ? 3 : tier === 1 ? 2 : 1;
+  const dashDur = tier === 3 ? '0.45s' : tier === 2 ? '0.7s' : tier === 1 ? '1.6s' : '3.2s';
+  const pktDur = tier === 3 ? '1s' : tier === 2 ? '1.4s' : tier === 1 ? '2.6s' : '5s';
+  const pkts = down || uncfg ? 0 : tier === 3 ? 4 : tier === 2 ? 3 : tier === 1 ? 2 : 1;
   const animate = !reducedMotion && !down && !uncfg;
 
   return (
@@ -89,7 +97,7 @@ function AnimatedLink({ link, from, to, iface, reducedMotion }) {
       <path
         d={pathD}
         stroke={color}
-        strokeWidth={down ? 2 : 2.2}
+        strokeWidth={down ? 2 : tier === 3 ? 3 : 2.2}
         fill="none"
         strokeDasharray={uncfg ? '3 7' : down ? '6 6' : '9 9'}
         opacity={uncfg ? 0.5 : down ? 0.9 : tier === 0 ? 0.4 : 0.9}
@@ -125,6 +133,16 @@ function AnimatedLink({ link, from, to, iface, reducedMotion }) {
           <rect x="-44" y="-11" width="88" height="20" rx="10" fill="#0f172a" stroke="rgba(251,191,36,.45)" strokeWidth="1" />
           <text textAnchor="middle" y="4" fill="#fbbf24" fontSize="11" fontFamily="ui-monospace, monospace">
             queue: {link.queueCount}
+          </text>
+        </g>
+      )}
+      {link.formsBadge && formsCount > 0 && (
+        <g transform={`translate(${badgeX} ${badgeY + 18})`}>
+          <animate attributeName="opacity" values="1;.55;1" dur="1.6s" repeatCount="indefinite" />
+          <rect x="-62" y="-11" width="124" height="20" rx="10" fill="#0f172a" stroke="rgba(34,211,238,.5)" strokeWidth="1" />
+          <path d="M -52 -2 L -48 4 L -44 -2" stroke="#22d3ee" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          <text textAnchor="middle" x="6" y="4" fill="#22d3ee" fontSize="11" fontFamily="ui-monospace, monospace">
+            {formsCount} form{formsCount === 1 ? '' : 's'} incoming
           </text>
         </g>
       )}
@@ -197,7 +215,12 @@ export default function TopologyDiagram({ interfaces = [], health = null, onSele
 
   const links = useMemo(() => {
     const queuePending = health?.emailQueue?.pending ?? 0;
-    return LINKS.map((l) => (l.queueBadge ? { ...l, queueCount: queuePending } : l));
+    const formsPending = health?.onboarding?.pending ?? 0;
+    return LINKS.map((l) => {
+      if (l.queueBadge) return { ...l, queueCount: queuePending };
+      if (l.formsBadge) return { ...l, formsCount: formsPending };
+      return l;
+    });
   }, [health]);
 
   const nodeById = useMemo(() => {
@@ -240,17 +263,21 @@ export default function TopologyDiagram({ interfaces = [], health = null, onSele
         ))}
 
         {/* Legend */}
-        <g transform="translate(40 528)" fontFamily="ui-sans-serif, system-ui" fontSize="11.5">
-          <rect x="-12" y="-22" width="250" height="104" rx="10" fill="rgba(2,6,23,.8)" stroke="rgba(51,65,85,.7)" strokeWidth="1" />
+        <g transform="translate(40 488)" fontFamily="ui-sans-serif, system-ui" fontSize="11.5">
+          <rect x="-12" y="-22" width="250" height="144" rx="10" fill="rgba(2,6,23,.8)" stroke="rgba(51,65,85,.7)" strokeWidth="1" />
           <text y="-4" fill="#94a3b8" fontSize="10" fontWeight="700" letterSpacing="2">LEGEND</text>
           <line x1="0" y1="12" x2="34" y2="12" stroke={STATUS_STROKE.up} strokeWidth="2.2" strokeDasharray="9 9" />
-          <text x="44" y="16" fill="#cbd5e1">UP — traffic flowing</text>
-          <line x1="0" y1="32" x2="34" y2="32" stroke={STATUS_STROKE.degraded} strokeWidth="2.2" strokeDasharray="9 9" />
-          <text x="44" y="36" fill="#cbd5e1">Degraded</text>
-          <line x1="0" y1="52" x2="34" y2="52" stroke={STATUS_STROKE.down} strokeWidth="2.2" strokeDasharray="6 6" />
-          <text x="44" y="56" fill="#cbd5e1">DOWN — link severed</text>
-          <circle cx="8" cy="72" r="3.4" fill={STATUS_STROKE.up} />
-          <text x="44" y="76" fill="#cbd5e1">Packet in flight</text>
+          <text x="44" y="16" fill="#cbd5e1">UP — normal traffic</text>
+          <line x1="0" y1="32" x2="34" y2="32" stroke={TRAFFIC_STROKE[2]} strokeWidth="2.2" strokeDasharray="9 9" />
+          <text x="44" y="36" fill="#cbd5e1">Busy — elevated traffic</text>
+          <line x1="0" y1="52" x2="34" y2="52" stroke={TRAFFIC_STROKE[3]} strokeWidth="3" strokeDasharray="9 9" />
+          <text x="44" y="56" fill="#cbd5e1">Heavy traffic</text>
+          <line x1="0" y1="72" x2="34" y2="72" stroke={STATUS_STROKE.degraded} strokeWidth="2.2" strokeDasharray="9 9" />
+          <text x="44" y="76" fill="#cbd5e1">Degraded</text>
+          <line x1="0" y1="92" x2="34" y2="92" stroke={STATUS_STROKE.down} strokeWidth="2.2" strokeDasharray="6 6" />
+          <text x="44" y="96" fill="#cbd5e1">DOWN — link severed</text>
+          <circle cx="8" cy="112" r="3.4" fill={STATUS_STROKE.up} />
+          <text x="44" y="116" fill="#cbd5e1">Packet in flight</text>
         </g>
       </svg>
 

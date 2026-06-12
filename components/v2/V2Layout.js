@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/AuthContext';
 import rbac from '../../lib/rbac';
 import { filterNavForRole } from '../../lib/permissions';
 import { useTheme } from '../../lib/theme';
+import NotificationBell from './NotificationBell';
 
 function getWIBTime() {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -435,9 +436,12 @@ export default function V2Layout({ children }) {
           <img src="/binus-logo.jpg" alt="BINUS" className="w-7 h-7 rounded-lg object-contain bg-white p-0.5" />
           <span className="font-bold text-sm text-white">BINUS <span className="text-slate-400 font-normal text-xs">Simprug</span></span>
         </div>
-        <button onClick={signOut} title="Sign out" className="text-slate-400 hover:text-red-400 transition-colors">
-          <i className="ph ph-sign-out text-xl"></i>
-        </button>
+        <div className="flex items-center gap-2">
+          {user && <NotificationBell />}
+          <button onClick={signOut} title="Sign out" className="text-slate-400 hover:text-red-400 transition-colors">
+            <i className="ph ph-sign-out text-xl"></i>
+          </button>
+        </div>
       </header>
 
       {/* Mobile overlay */}
@@ -447,6 +451,13 @@ export default function V2Layout({ children }) {
           <div className="absolute left-0 top-0 bottom-0 w-64 glass-panel border-r border-slate-800/80 bg-slate-950/95 z-10">
             {sidebar}
           </div>
+        </div>
+      )}
+
+      {/* Desktop notification bell (fixed top-right) */}
+      {user && (
+        <div className="hidden lg:block fixed top-4 right-5 z-40">
+          <NotificationBell />
         </div>
       )}
 
