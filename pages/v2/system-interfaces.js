@@ -77,7 +77,7 @@ function ServiceInterfaceCard({ iface }) {
   return (
     <div className="bg-gray-950 border border-gray-800 rounded-xl overflow-hidden font-mono text-xs">
       {/* Header bar */}
-      <div className={`flex items-center gap-3 px-4 py-2.5 border-b border-gray-800 ${isDown ? 'bg-gray-900/60' : 'bg-gray-900'}`}>
+      <div className={`flex items-center gap-3 flex-wrap px-4 py-2.5 border-b border-gray-800 ${isDown ? 'bg-gray-900/60' : 'bg-gray-900'}`}>
         <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider ${col.badge}`}>
           {statusLabel(iface.status)}
         </span>
@@ -350,7 +350,7 @@ export default function SystemInterfacesPage() {
               <span className="font-mono text-[11px]">show interfaces</span>
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             {data?.generatedAt && (
               <span className="text-gray-600 text-xs font-mono">
                 Probed {relTime(data.generatedAt)}

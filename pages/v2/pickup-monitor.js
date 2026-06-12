@@ -38,7 +38,7 @@ function fmtDate(isoStr) {
 function Card({ title, icon, children, className = '', action }) {
   return (
     <div className={`bg-white border border-gray-200 rounded-2xl shadow-sm ${className}`}>
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+      <div className="flex items-center justify-between flex-wrap gap-2 px-5 py-4 border-b border-gray-100">
         <div className="flex items-center gap-2.5">
           <i className={`ph ${icon} text-lg text-gray-500`}></i>
           <span className="text-sm font-semibold text-gray-800">{title}</span>
@@ -419,7 +419,7 @@ export default function PickupMonitorPage() {
               icon="ph-envelope"
               className="mb-5"
               action={
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {/* Status filter */}
                   <select
                     value={notifStatusF}

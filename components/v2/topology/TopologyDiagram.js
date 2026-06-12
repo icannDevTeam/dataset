@@ -207,8 +207,8 @@ export default function TopologyDiagram({ interfaces = [], health = null, onSele
   }, []);
 
   return (
-    <div className="relative w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/70">
-      <svg ref={svgRef} viewBox={`0 0 ${VB_W} ${VB_H}`} className="block w-full h-auto" role="img" aria-label="Live system topology">
+    <div className="relative w-full overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/70">
+      <svg ref={svgRef} viewBox={`0 0 ${VB_W} ${VB_H}`} className="block w-full h-auto min-w-[820px]" role="img" aria-label="Live system topology">
         <defs>
           <linearGradient id="topoSwitchGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={CISCO_BLUE_LIGHT} />

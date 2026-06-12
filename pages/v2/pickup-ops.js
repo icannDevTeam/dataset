@@ -56,7 +56,7 @@ function confidence_bar(pct) {
 function Card({ title, icon, children, className = '', action, dark = false }) {
   return (
     <div className={`border rounded-2xl shadow-sm ${dark ? 'bg-gray-950 border-gray-800' : 'bg-white border-gray-200'} ${className}`}>
-      <div className={`flex items-center justify-between px-5 py-3.5 border-b ${dark ? 'border-gray-800' : 'border-gray-100'}`}>
+      <div className={`flex items-center justify-between flex-wrap gap-2 px-5 py-3.5 border-b ${dark ? 'border-gray-800' : 'border-gray-100'}`}>
         <div className="flex items-center gap-2.5">
           <i className={`ph ${icon} text-lg ${dark ? 'text-cyan-400' : 'text-gray-500'}`}></i>
           <span className={`text-sm font-semibold ${dark ? 'text-gray-100' : 'text-gray-800'}`}>{title}</span>
@@ -588,9 +588,9 @@ export default function PickupOpsPage() {
             </h2>
             <Card dark title="listeners.log — tail" icon="ph-terminal" className="mb-5"
               action={
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   {listenerStatus.length > 0 && (
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       {listenerStatus.map((ls) => (
                         <span key={ls.terminal} className={`text-xs font-mono flex items-center gap-1 ${ls.running ? 'text-emerald-400' : 'text-red-400'}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${ls.running ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`}></span>
