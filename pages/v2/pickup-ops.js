@@ -420,7 +420,9 @@ export default function PickupOpsPage() {
   const listenerStatus = listenerLog?.listenerStatus || [];
 
   const onlineDevices  = devList.filter((d) => d.online).length;
-  const upInterfaces   = interfaces.filter((i) => i.status === 'up').length;
+  const liveDevices    = devList.filter((d) => d.online);
+  const liveInterfaces = interfaces.filter((i) => i.status === 'up');
+  const upInterfaces   = liveInterfaces.length;
   const totalEvents24h = interfaces.reduce((s, i) => s + i.metrics.total24h, 0);
   const totalErrors    = interfaces.reduce((s, i) => s + i.metrics.inputErrors, 0);
 
@@ -492,17 +494,24 @@ export default function PickupOpsPage() {
             {opsErr && (
               <div className="mb-6 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">⚠ {opsErr}</div>
             )}
-            {interfaces.length > 0 && (
+            {liveInterfaces.length > 0 && (
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-6">
-                {interfaces.map((iface) => (
+                {liveInterfaces.map((iface) => (
                   <InterfaceCard key={iface.id || iface.name} iface={iface} />
                 ))}
               </div>
             )}
-            {opsData && interfaces.length === 0 && (
+            {opsData && liveInterfaces.length === 0 && (
               <div className="mb-6 p-4 rounded-xl bg-gray-950 border border-gray-800 font-mono text-xs text-gray-500 text-center">
-                No pickup events recorded yet — interfaces will appear once terminals start firing.
+                {interfaces.length > 0
+                  ? `No terminal interfaces live right now — ${interfaces.length} registered but offline.`
+                  : 'No pickup events recorded yet — interfaces will appear once terminals start firing.'}
               </div>
+            )}
+            {liveInterfaces.length > 0 && interfaces.length > liveInterfaces.length && (
+              <p className="-mt-3 mb-6 text-xs text-gray-400">
+                {interfaces.length - liveInterfaces.length} offline interface{interfaces.length - liveInterfaces.length === 1 ? '' : 's'} hidden
+              </p>
             )}
 
             {/* ── Section 2 + 3: Devices + Live ticker side by side ───── */}
@@ -513,7 +522,7 @@ export default function PickupOpsPage() {
                 <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
                   <i className="ph ph-devices text-gray-400"></i> Device Registry
                 </h2>
-                <Card title="All Paired Devices" icon="ph-devices" className="h-full">
+                <Card title="Connected Devices" icon="ph-devices" className="h-full">
                   {devices?.summary && (
                     <div className="flex flex-wrap gap-2 mb-4">
                       <Badge variant="blue">{devices.summary.terminalEnabled}/{devices.summary.terminalTotal} terminals</Badge>
@@ -523,10 +532,14 @@ export default function PickupOpsPage() {
                     </div>
                   )}
                   {!devices && <Spinner />}
-                  {devList.length === 0 && devices && (
-                    <p className="text-sm text-gray-400 text-center py-6">No devices registered yet.</p>
+                  {liveDevices.length === 0 && devices && (
+                    <p className="text-sm text-gray-400 text-center py-6">
+                      {devList.length > 0
+                        ? `No devices connected right now — ${devList.length} paired but offline.`
+                        : 'No devices registered yet.'}
+                    </p>
                   )}
-                  {devList.length > 0 && (
+                  {liveDevices.length > 0 && (
                     <div className="overflow-x-auto rounded-xl border border-gray-100">
                       <table className="min-w-full text-sm">
                         <thead>
@@ -541,10 +554,15 @@ export default function PickupOpsPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50 bg-white">
-                          {devList.map((d) => <DeviceRow key={`${d.type}-${d.id}`} device={d} />)}
+                          {liveDevices.map((d) => <DeviceRow key={`${d.type}-${d.id}`} device={d} />)}
                         </tbody>
                       </table>
                     </div>
+                  )}
+                  {liveDevices.length > 0 && devList.length > liveDevices.length && (
+                    <p className="text-xs text-gray-400 mt-2">
+                      {devList.length - liveDevices.length} paired device{devList.length - liveDevices.length === 1 ? '' : 's'} offline — hidden
+                    </p>
                   )}
                 </Card>
               </div>

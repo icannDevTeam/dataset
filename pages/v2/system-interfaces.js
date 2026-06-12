@@ -22,7 +22,12 @@ import MonitorTopNav from '../../components/v2/MonitorTopNav';
 import TopologyDiagram from '../../components/v2/topology/TopologyDiagram';
 import { Section, InterfaceTable, SecurityMonitor, sc, statusLabel, relTime } from '../../components/v2/monitor/InterfaceSections';
 
-const REFRESH_SEC = 30;
+const REFRESH_SEC = 30 * 60; // auto-refresh every 30 minutes — probes hit live services, keep it light
+
+function fmtCountdown(s) {
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmtBits(bitsPerSec) {
@@ -338,7 +343,7 @@ export default function SystemInterfacesPage() {
               </span>
             )}
             <span className="text-gray-700 text-xs font-mono">
-              Next refresh in <span className="text-cyan-500">{countdown}s</span>
+              Next refresh in <span className="text-cyan-500">{fmtCountdown(countdown)}</span>
             </span>
             <button
               onClick={fetchData}

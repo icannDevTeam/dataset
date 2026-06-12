@@ -48,13 +48,16 @@ function centerOf(node) {
   return { cx: node.x + 32, cy: node.y + 32 };
 }
 
-/* Speed tier from 5-min packet rates: 0 idle, 1 light, 2 busy, 3 heavy. */
+/* Speed tier from 5-min packet rates: 0 idle, 1 light, 2 busy, 3 heavy.
+   Thresholds are in events-per-5min — this system does dozens of events a day,
+   not packets/sec, so pkts/sec thresholds would leave every link on idle. */
 function speedTier(iface) {
   if (!iface || !iface.counters) return 0;
-  const r = (iface.counters.inputRate5min || 0) + (iface.counters.outputRate5min || 0);
-  if (r >= 5) return 3;
-  if (r >= 1) return 2;
-  if (r > 0) return 1;
+  const perFiveMin =
+    ((iface.counters.inputRate5min || 0) + (iface.counters.outputRate5min || 0)) * 300;
+  if (perFiveMin >= 30) return 3;
+  if (perFiveMin >= 5) return 2;
+  if (perFiveMin > 0) return 1;
   return 0;
 }
 
@@ -86,9 +89,9 @@ function AnimatedLink({ link, from, to, iface, reducedMotion }) {
   const bt = link.badgeT ?? 0.5;
   const badgeX = x1 + (x2 - x1) * bt, badgeY = y1 + (y2 - y1) * bt;
 
-  const dashDur = tier === 3 ? '0.45s' : tier === 2 ? '0.7s' : tier === 1 ? '1.6s' : '3.2s';
-  const pktDur = tier === 3 ? '1s' : tier === 2 ? '1.4s' : tier === 1 ? '2.6s' : '5s';
-  const pkts = down || uncfg ? 0 : tier === 3 ? 4 : tier === 2 ? 3 : tier === 1 ? 2 : 1;
+  const dashDur = tier === 3 ? '0.45s' : tier === 2 ? '0.7s' : tier === 1 ? '1.1s' : '1.8s';
+  const pktDur = tier === 3 ? '1s' : tier === 2 ? '1.4s' : tier === 1 ? '2.2s' : '3.6s';
+  const pkts = down || uncfg ? 0 : tier === 3 ? 4 : tier === 2 ? 3 : 2;
   const animate = !reducedMotion && !down && !uncfg;
 
   return (
@@ -100,7 +103,7 @@ function AnimatedLink({ link, from, to, iface, reducedMotion }) {
         strokeWidth={down ? 2 : tier === 3 ? 3 : 2.2}
         fill="none"
         strokeDasharray={uncfg ? '3 7' : down ? '6 6' : '9 9'}
-        opacity={uncfg ? 0.5 : down ? 0.9 : tier === 0 ? 0.4 : 0.9}
+        opacity={uncfg ? 0.5 : down ? 0.9 : tier === 0 ? 0.65 : 0.9}
         className={animate ? 'topo-dash' : undefined}
         style={animate ? { animationDuration: dashDur } : undefined}
       />
