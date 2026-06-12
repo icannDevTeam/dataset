@@ -836,26 +836,33 @@ export default function PickupAdminPage() {
 
         <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-[90rem] mx-auto">
           {/* Page header (shared) */}
-          <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
-            <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-3">
-                <i className="ph ph-hand-waving text-brand-400"></i>
-                Pickup System Admin
-              </h1>
-              <p className="text-sm text-slate-400 mt-1">
-                {view === 'invites'
-                  ? 'Generate and manage open-ended onboarding links to share with parents.'
-                  : 'Review parent-submitted authorizations. Approve to allocate a chaperone ID and push the face to all pickup terminals.'}
-              </p>
-            </div>
-            {view === 'onboarding' && (
-              <div className="flex items-center gap-2">
-                <button onClick={reload}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
-                  <i className="ph ph-arrows-clockwise mr-1"></i>Refresh
-                </button>
+          <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-r from-brand-500/[0.12] via-slate-900/70 to-slate-950/70 px-5 py-5 mb-6">
+            <div className="pointer-events-none absolute -top-20 -right-16 w-64 h-64 rounded-full bg-brand-500/10 blur-3xl" aria-hidden></div>
+            <div className="relative flex items-end justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-4 min-w-0">
+                <span className="w-12 h-12 rounded-2xl bg-brand-500/20 border border-brand-500/30 text-brand-300 flex items-center justify-center text-2xl flex-shrink-0">
+                  <i className="ph ph-hand-waving"></i>
+                </span>
+                <div className="min-w-0">
+                  <h1 className="text-2xl font-bold text-white tracking-tight">
+                    Pickup System Admin
+                  </h1>
+                  <p className="text-sm text-slate-400 mt-0.5">
+                    {view === 'invites'
+                      ? 'Generate and manage open-ended onboarding links to share with parents.'
+                      : 'Review parent-submitted authorizations. Approve to allocate a chaperone ID and push the face to all pickup terminals.'}
+                  </p>
+                </div>
               </div>
-            )}
+              {view === 'onboarding' && (
+                <div className="flex items-center gap-2">
+                  <button onClick={reload}
+                    className="px-3.5 py-2 text-xs font-semibold rounded-xl bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10 hover:border-slate-500 transition-colors">
+                    <i className="ph ph-arrows-clockwise mr-1.5"></i>Refresh
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {view === 'invites' ? (
@@ -1012,14 +1019,17 @@ export default function PickupAdminPage() {
 
           {/* Tabs + search + sort row */}
           <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
-            <div className="flex gap-1 bg-white/5 p-1 rounded-lg border border-slate-800">
+            <div className="flex gap-1 bg-slate-900/70 backdrop-blur p-1 rounded-xl border border-slate-800">
               {TABS.map((t) => (
                 <button key={t.key} onClick={() => setTab(t.key)}
-                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all relative ${
-                    tab === t.key ? 'bg-brand-500/20 text-brand-300' : 'text-slate-400 hover:text-slate-200'
+                  className={`px-4 py-1.5 text-sm font-medium rounded-lg transition-all relative ${
+                    tab === t.key
+                      ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/25'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
                   }`}>
                   {t.label}
                   <span className={`ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full text-[10px] font-bold ${
+                    tab === t.key ? 'bg-white/20 text-white' :
                     t.key === 'pending' && counts.pending > 0 ? 'bg-amber-500 text-amber-950' :
                     'bg-slate-800 text-slate-400'
                   }`}>
@@ -1033,7 +1043,7 @@ export default function PickupAdminPage() {
                 <i className="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"></i>
                 <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search guardian, student, chaperone, ID…"
-                  className="w-full bg-white/5 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500/50" />
+                  className="w-full bg-slate-900/70 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500/60 focus:ring-2 focus:ring-brand-500/20 transition-shadow" />
                 {search && (
                   <button onClick={() => setSearch('')}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
@@ -1042,14 +1052,14 @@ export default function PickupAdminPage() {
                 )}
               </div>
               <select value={sort} onChange={(e) => setSort(e.target.value)}
-                className="bg-white/5 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-300 focus:outline-none focus:border-brand-500/50">
+                className="bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-brand-500/60">
                 {SORT_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
               </select>
             </div>
           </div>
 
           {/* Bulk action bar — visible on all tabs; buttons are contextual */}
-          <div className="flex items-center gap-3 mb-4 px-4 py-2.5 rounded-lg bg-white/5 border border-slate-800">
+          <div className="flex items-center gap-3 mb-4 px-4 py-2.5 rounded-xl bg-slate-900/60 backdrop-blur border border-slate-800">
             <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
               <input type="checkbox" checked={allSelected} ref={(el) => { if (el) el.indeterminate = someSelected; }}
                 onChange={toggleAll}
@@ -1116,9 +1126,13 @@ export default function PickupAdminPage() {
               <i className="ph ph-spinner-gap text-3xl animate-spin"></i>
             </div>
           ) : visibleRecords.length === 0 ? (
-            <div className="text-center py-16 text-slate-500 bg-white/5 rounded-xl border border-slate-800/80">
-              <i className="ph ph-tray text-4xl mb-2 block"></i>
-              {search ? `No results for "${search}".` : `No ${tab} submissions.`}
+            <div className="text-center py-16 bg-gradient-to-b from-slate-900/40 to-slate-950/40 rounded-2xl border border-slate-800/80">
+              <span className="inline-flex w-14 h-14 rounded-2xl bg-slate-800/60 border border-slate-700/60 items-center justify-center text-slate-500 text-3xl mb-3">
+                <i className="ph ph-tray"></i>
+              </span>
+              <p className="text-slate-400 text-sm">
+                {search ? `No results for "${search}".` : `No ${tab} submissions.`}
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -1265,7 +1279,10 @@ function LiveGateTile() {
   return (
     <div className="mb-5 rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900/60 to-slate-950/60 p-4">
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
+          <span className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center text-base flex-shrink-0">
+            <i className="ph ph-broadcast"></i>
+          </span>
           <span className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
@@ -1672,24 +1689,27 @@ function TerminalGateControlCard() {
 // ─── Stat card ──────────────────────────────────────────────────────────────
 function StatCard({ label, value, hint, tone = 'slate', icon }) {
   const tones = {
-    slate:   'bg-white/5 border-slate-800',
-    amber:   'bg-amber-500/10 border-amber-500/30',
-    emerald: 'bg-emerald-500/10 border-emerald-500/30',
-    red:     'bg-red-500/10 border-red-500/30',
-    brand:   'bg-brand-500/10 border-brand-500/30',
+    slate:   { card: 'from-slate-800/40 to-slate-950/60 border-slate-700/60',     chip: 'bg-slate-700/40 text-slate-300 border-slate-600/40',   value: 'text-white' },
+    amber:   { card: 'from-amber-500/[0.14] to-slate-950/60 border-amber-500/30', chip: 'bg-amber-500/20 text-amber-300 border-amber-500/30',   value: 'text-amber-200' },
+    emerald: { card: 'from-emerald-500/[0.12] to-slate-950/60 border-emerald-500/30', chip: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30', value: 'text-emerald-200' },
+    red:     { card: 'from-red-500/[0.14] to-slate-950/60 border-red-500/30',     chip: 'bg-red-500/20 text-red-300 border-red-500/30',         value: 'text-red-200' },
+    brand:   { card: 'from-brand-500/[0.14] to-slate-950/60 border-brand-500/30', chip: 'bg-brand-500/20 text-brand-300 border-brand-500/30',   value: 'text-brand-200' },
   };
-  const valueTones = {
-    slate: 'text-white', amber: 'text-amber-200', emerald: 'text-emerald-200',
-    red: 'text-red-200', brand: 'text-brand-200',
-  };
+  const t = tones[tone] || tones.slate;
   return (
-    <div className={`border rounded-xl px-4 py-3 ${tones[tone] || tones.slate}`}>
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{label}</div>
-        {icon && <i className={`ph ${icon} text-slate-500`}></i>}
+    <div className={`bg-gradient-to-br ${t.card} border rounded-2xl px-4 py-3.5 transition-transform duration-150 hover:-translate-y-0.5`}>
+      <div className="flex items-center gap-3">
+        {icon && (
+          <span className={`w-10 h-10 rounded-xl border flex items-center justify-center text-lg flex-shrink-0 ${t.chip}`}>
+            <i className={`ph ${icon}`}></i>
+          </span>
+        )}
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold truncate">{label}</div>
+          <div className={`text-2xl font-bold leading-tight ${t.value}`}>{value}</div>
+          {hint && <div className="text-[11px] text-slate-500 truncate">{hint}</div>}
+        </div>
       </div>
-      <div className={`text-2xl font-bold mt-1 ${valueTones[tone] || valueTones.slate}`}>{value}</div>
-      {hint && <div className="text-[11px] text-slate-500 mt-0.5">{hint}</div>}
     </div>
   );
 }
@@ -1765,7 +1785,7 @@ function RecordCard(props) {
               className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500/40 flex-shrink-0"
             />
           )}
-          <div className="w-10 h-10 rounded-full bg-brand-500/15 text-brand-300 flex items-center justify-center font-bold flex-shrink-0">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-500/30 to-brand-500/10 text-brand-200 ring-1 ring-brand-500/30 flex items-center justify-center font-bold flex-shrink-0">
             {(rec.guardian?.name || '?').charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0 flex-1">
