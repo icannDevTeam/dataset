@@ -834,7 +834,7 @@ export default function AnalyticsPage() {
             <span>BINUS Attendance System</span>
           </div>
           <div className="flex items-center gap-6 text-sm">
-            <span className="text-slate-600">BINUS School Serpong</span>
+            <span className="text-slate-600">BINUS School Simprug</span>
           </div>
         </div>
       </footer>
