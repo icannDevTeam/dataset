@@ -707,8 +707,12 @@ export default function PickupAdminPage() {
 
   async function bulkReject() {
     if (selectedIds.length === 0) return;
-    const reason = prompt(`Reject ${selectedIds.length} submission(s)?\n\nReason (min 4 chars):`);
-    if (!reason || reason.trim().length < 4) return;
+    const reason = prompt(`Reject ${selectedIds.length} submission(s)?\n\n` +
+      `Rejection note (min 4 chars) — this is attached to the email sent to each parent:`);
+    if (reason === null) return; // cancelled
+    if (reason.trim().length < 4) {
+      return pushToast('warn', 'A rejection note (min 4 characters) is required — it is emailed to the parents.');
+    }
     setBulkBusy(true);
     try {
       const r = await fetch('/api/pickup/admin/bulk-action', {
@@ -2091,7 +2095,7 @@ function DetailDrawer(props) {
                 rejecting ? (
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-red-300 block">
-                      Rejection reason (visible to parent on follow-up):
+                      Rejection note (required — attached to the email sent to the parent):
                     </label>
                     <textarea
                       value={rejectReason}
