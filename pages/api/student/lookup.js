@@ -115,7 +115,7 @@ async function handler(req, res) {
 
     const studentData = result.studentDataResponse || result.data || result;
     
-    console.log('Parsed student data:', JSON.stringify(studentData, null, 2));
+    console.log('Student lookup success:', { resultCode: studentData.resultCode, hasName: !!studentData.studentName });
     
     // Check if we got valid student data
     if (!studentData || !studentData.studentName) {

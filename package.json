@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google-cloud/firestore": "^8.0.0",
+    "@google-cloud/tasks": "^4.1.0",
     "@mhoc/axios-digest-auth": "^0.8.0",
     "@react-pdf/renderer": "^4.5.1",
     "axios": "^1.4.0",

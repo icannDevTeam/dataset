@@ -23,10 +23,11 @@
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
-const { getRunner, runJob, writeReportRun } = require('../../../../lib/download-runner');
+import { getOrCreateExportJob } from '../../../../lib/exports-idempotency';
+import { enqueueExportJob } from '../../../../lib/cloud-tasks-client';
+const { getRunner, writeReportRun } = require('../../../../lib/download-runner');
 const tenancy = require('../../../../lib/tenancy');
 const { logAudit } = require('../../../../lib/audit-log');
-const { verifyReauth } = require('../../../../lib/reauth');
 
 export const config = { api: { bodyParser: { sizeLimit: '128kb' } } };
 
@@ -55,6 +56,7 @@ async function handler(req, res) {
   }
 
   // Sensitive ops: tighter re-auth window than sync downloads.
+  const { verifyReauth } = require('../../../../lib/reauth');
   const reauth = await verifyReauth(req, { maxAgeSec: 120 });
   if (!reauth.ok) {
     if (reauth.retryAfterSec) res.setHeader('Retry-After', reauth.retryAfterSec);
@@ -68,78 +70,62 @@ async function handler(req, res) {
   const tid = tenancy.getTenantId();
   const actor = req.user || null;
 
-  const jobRef = await db
-    .collection(`${tenancy.tenantDoc(tid)}/exportJobs`)
-    .add({
-      status: 'queued',
-      cardId,
-      format: fmt,
-      from: from || null,
-      to: to || null,
-      filters: filters || {},
-      byUid: actor?.uid || null,
-      byEmail: actor?.email || null,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+  // Use idempotency layer to prevent duplicate jobs within dedup window
+  const jobId = await getOrCreateExportJob({
+    tenantId: tid,
+    cardId,
+    format: fmt,
+    from: from || null,
+    to: to || null,
+    filters: filters || {},
+    actor,
+  });
+
+  const jobRef = db.collection(`${tenancy.tenantDoc(tid)}/exportJobs`).doc(jobId);
+  const jobDoc = await jobRef.get();
+  const jobData = jobDoc.data();
 
   const auditKindBase = `downloads.${cardId.replace(/-/g, '_')}`;
   try {
     await logAudit(db, {
-      tenantId: tid, actor, kind: `${auditKindBase}.queued`,
-      target: { type: 'export_job', id: jobRef.id, label: cardId },
+      tenantId: tid,
+      actor,
+      kind: `${auditKindBase}.queued`,
+      target: { type: 'export_job', id: jobId, label: cardId },
       summary: `Queued ${cardId} background export`,
-      metadata: { jobId: jobRef.id, format: fmt, from, to, filters },
+      metadata: { jobId, format: fmt, from, to, filters },
       req,
     });
   } catch {}
 
-  // M1: run inline. M2: enqueue on a worker tier (Cloud Tasks / PubSub).
-  // We still return immediately to the client and let it poll /status —
-  // the contract is identical whether inline or remote.
-  runJob({ jobId: jobRef.id, cardId, format: fmt, from, to, filters, actor, tenantId: tid })
-    .then(async (result) => {
-      await jobRef.update({
-        status: 'completed',
-        rowCount: result.rowCount,
-        storagePath: result.storagePath,
-        contentType: result.contentType,
-        filename: result.filename,
-        durationMs: result.durationMs,
-        completedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }).catch(() => {});
-    })
-    .catch(async (err) => {
-      console.error(`[jobs/start] ${cardId} failed:`, err);
-      await jobRef.update({
-        status: 'failed',
-        error: String(err?.message || err),
-        failedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }).catch(() => {});
-      // Mirror failure into reportRuns so it shows up in run history.
-      try {
-        await writeReportRun(db, {
-          tenantId: tid, actor, format: fmt, from: from || null, to: to || null,
-          filters: filters || {},
-        }, { cardId }, {
-          runId: jobRef.id, mode: 'async', status: 'failed',
-          errorMessage: String(err?.message || err),
-        });
-      } catch {}
-      try {
-        await logAudit(db, {
-          tenantId: tid, actor, kind: `${auditKindBase}.job_failed`,
-          target: { type: 'export_job', id: jobRef.id, label: cardId },
-          summary: `Background export ${cardId} failed`,
-          metadata: { jobId: jobRef.id, error: String(err?.message || err) },
-          req,
-        });
-      } catch {}
+  // M2: Enqueue to Cloud Tasks for background processing
+  try {
+    await enqueueExportJob(jobId, {
+      jobId,
+      cardId,
+      format: fmt,
+      from,
+      to,
+      filters,
+      actor,
+      tenantId: tid,
     });
+
+    console.log(`[jobs/start] Enqueued ${cardId} export job ${jobId} to Cloud Tasks`);
+  } catch (err) {
+    console.error(`[jobs/start] Failed to enqueue job ${jobId}:`, err);
+    // Mark job as failed if enqueue fails
+    await jobRef.update({
+      status: 'failed',
+      lastError: `Failed to enqueue: ${err.message}`,
+      failedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch(() => {});
+  }
 
   return res.status(202).json({
     ok: true,
-    jobId: jobRef.id,
-    statusUrl: `/api/downloads/_jobs/status?jobId=${jobRef.id}`,
+    jobId,
+    statusUrl: `/api/downloads/_jobs/status?jobId=${jobId}`,
   });
 }
 

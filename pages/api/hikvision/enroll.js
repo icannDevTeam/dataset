@@ -153,6 +153,7 @@ function serveFaceFile(filePath, port) {
 
 import { withMetrics } from '../../../lib/metrics';
 import { withApi } from '../../../lib/api-auth';
+import { verifyCookie } from '../../../lib/session-cookie';
 
 async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -172,9 +173,8 @@ async function handler(req, res) {
   try {
     const sessionCookie = req.cookies?.__session || req.headers?.cookie?.match(/__session=([^;]+)/)?.[1];
     if (sessionCookie) {
-      const decoded = Buffer.from(sessionCookie, 'base64').toString();
-      const email = decoded.split(':')[0];
-      if (email) enrolledBy = email;
+      const verified = verifyCookie(sessionCookie);
+      if (verified?.email) enrolledBy = verified.email;
     }
   } catch { /* ignore */ }
 

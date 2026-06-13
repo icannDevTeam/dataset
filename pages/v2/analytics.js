@@ -62,6 +62,9 @@ export default function AnalyticsPage() {
   const [pickupLoading, setPickupLoading] = useState(false);
   const [pickupError, setPickupError] = useState(null);
 
+  // Onboarding forms summary (shown alongside pickup analytics)
+  const [formsSummary, setFormsSummary] = useState(null);
+
   const fetchAnalytics = useCallback(async () => {
     try {
       setLoading(true);
@@ -82,12 +85,16 @@ export default function AnalyticsPage() {
       setPickupLoading(true);
       setPickupError(null);
       const { from, to } = getDateRange(days);
-      const res = await fetch(`/api/pickup/admin/analytics?from=${from}&to=${to}`, { credentials: 'include' });
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
-        throw new Error(b.error || `HTTP ${res.status}`);
+      const [analyticsRes, formsRes] = await Promise.all([
+        fetch(`/api/pickup/admin/analytics?from=${from}&to=${to}`, { credentials: 'include' }),
+        fetch('/api/pickup/admin/forms-summary', { credentials: 'include' }),
+      ]);
+      if (!analyticsRes.ok) {
+        const b = await analyticsRes.json().catch(() => ({}));
+        throw new Error(b.error || `HTTP ${analyticsRes.status}`);
       }
-      setPickupData(await res.json());
+      setPickupData(await analyticsRes.json());
+      if (formsRes.ok) setFormsSummary(await formsRes.json());
     } catch (err) {
       setPickupError(err.message);
     } finally {
@@ -260,6 +267,7 @@ export default function AnalyticsPage() {
             days={days}
             setDays={setDays}
             onRefresh={fetchPickupAnalytics}
+            formsSummary={formsSummary}
           />
         )}
 
@@ -861,7 +869,7 @@ export default function AnalyticsPage() {
 
 // ── Pickup Analytics Panel ────────────────────────────────────────────────────
 
-function PickupAnalyticsPanel({ data, loading, error, days, setDays, onRefresh }) {
+function PickupAnalyticsPanel({ data, loading, error, days, setDays, onRefresh, formsSummary }) {
   const CARD_STATE_COLORS = {
     green:  { bar: 'bg-emerald-500', text: 'text-emerald-400', label: 'Authorized' },
     yellow: { bar: 'bg-amber-500',   text: 'text-amber-400',   label: 'Conditional' },
@@ -1067,6 +1075,85 @@ function PickupAnalyticsPanel({ data, loading, error, days, setDays, onRefresh }
             </div>
           )}
         </>
+      )}
+
+      {/* ── Onboarding Forms Overview ── */}
+      {formsSummary && (
+        <div className="glass-panel rounded-2xl border border-slate-800 p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-base font-semibold text-white flex items-center gap-2">
+              <i className="ph ph-clipboard-text text-orange-400 text-lg"></i>
+              Onboarding Forms
+            </h3>
+            <a href="/v2/pickup-admin" className="text-xs text-orange-400 hover:text-orange-300 transition-colors flex items-center gap-1">
+              Review queue <i className="ph ph-arrow-right"></i>
+            </a>
+          </div>
+
+          {/* Counts row */}
+          <div className="grid grid-cols-3 gap-4 mb-5">
+            {[
+              { label: 'Pending',  count: formsSummary.counts.pending,  icon: 'ph-clock',        color: 'text-amber-400',   border: 'border-l-amber-500' },
+              { label: 'Approved', count: formsSummary.counts.approved, icon: 'ph-check-circle',  color: 'text-emerald-400', border: 'border-l-emerald-500' },
+              { label: 'Rejected', count: formsSummary.counts.rejected, icon: 'ph-x-circle',      color: 'text-red-400',     border: 'border-l-red-500' },
+            ].map((s) => (
+              <div key={s.label} className={`glass-panel rounded-xl border-l-2 ${s.border} border border-slate-800 p-4`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <i className={`ph ${s.icon} ${s.color} text-sm`}></i>
+                  <span className="text-xs text-slate-400 uppercase tracking-wide">{s.label}</span>
+                </div>
+                <p className={`text-2xl font-bold ${s.color}`}>{s.count}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Approval rate bar */}
+          {formsSummary.counts.total > 0 && (() => {
+            const pct = Math.round((formsSummary.counts.approved / formsSummary.counts.total) * 100);
+            const rejPct = Math.round((formsSummary.counts.rejected / formsSummary.counts.total) * 100);
+            const pendPct = 100 - pct - rejPct;
+            return (
+              <div>
+                <div className="flex justify-between text-xs text-slate-400 mb-1">
+                  <span>Approval rate</span>
+                  <span>{pct}% approved · {pendPct}% pending · {rejPct}% rejected</span>
+                </div>
+                <div className="h-2 rounded-full bg-slate-800 overflow-hidden flex">
+                  <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }}></div>
+                  <div className="h-full bg-amber-500/60" style={{ width: `${pendPct}%` }}></div>
+                  <div className="h-full bg-red-500/60" style={{ width: `${rejPct}%` }}></div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Recent pending */}
+          {formsSummary.recentPending.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-800/60">
+              <p className="text-xs text-slate-400 uppercase tracking-wide mb-3">Recent Pending</p>
+              <div className="space-y-2">
+                {formsSummary.recentPending.map((f) => {
+                  const ago = f.submittedAt ? (() => {
+                    const delta = Date.now() - Date.parse(f.submittedAt);
+                    if (delta < 60_000) return `${Math.round(delta / 1000)}s ago`;
+                    if (delta < 3_600_000) return `${Math.round(delta / 60_000)}m ago`;
+                    return `${Math.round(delta / 3_600_000)}h ago`;
+                  })() : '—';
+                  return (
+                    <div key={f.id} className="flex items-center justify-between gap-3 py-1.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0"></span>
+                        <span className="text-sm text-slate-300 truncate">{f.guardianName}</span>
+                        <span className="text-xs text-slate-500 truncate hidden sm:block">· {f.studentNames.join(', ')}</span>
+                      </div>
+                      <span className="text-xs text-slate-500 shrink-0">{ago}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

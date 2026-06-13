@@ -19,6 +19,8 @@ import Head from 'next/head';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import MonitorTopNav from '../../components/v2/MonitorTopNav';
+import { useAuth } from '../../lib/AuthContext';
+import rbac from '../../lib/rbac';
 import TopologyDiagram from '../../components/v2/topology/TopologyDiagram';
 import { Section, InterfaceTable, SecurityMonitor, sc, statusLabel, relTime } from '../../components/v2/monitor/InterfaceSections';
 
@@ -263,6 +265,9 @@ function ApiKeyPanel({ keys }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function SystemInterfacesPage() {
+  const { permissions } = useAuth();
+  const canView = rbac.can(permissions, 'system_interface.view');
+
   const [data, setData] = useState(null);
   const [health, setHealth] = useState(null);
   const [selected, setSelected] = useState(null);
@@ -314,6 +319,27 @@ export default function SystemInterfacesPage() {
   // Terminal (Serial0/N) interfaces live on Operations & Terminals pages — keep this view to core services
   const serviceIfaces = interfaces.filter((i) => !String(i.id).startsWith('hik'));
   const svcUp = serviceIfaces.filter((i) => i.status === 'up').length;
+
+  if (!canView) {
+    return (
+      <V2Layout>
+        <Head><title>Service Interfaces · Access Denied</title></Head>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 max-w-md text-center space-y-4">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center">
+              <i className="ph ph-lock-key text-amber-600 text-3xl" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Access restricted</h2>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Service Interfaces is an owner-only module. Ask an Owner to grant
+              <span className="font-mono text-gray-800 mx-1">system_interface.view</span>
+              to your account.
+            </p>
+          </div>
+        </div>
+      </V2Layout>
+    );
+  }
 
   return (
     <V2Layout>

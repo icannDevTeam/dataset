@@ -57,9 +57,11 @@ async function handler(req, res) {
     cardId: job.cardId || null,
     format: job.format || null,
     rowCount: typeof job.rowCount === 'number' ? job.rowCount : null,
-    error: job.error || null,
+    error: job.error || job.lastError || null,
     durationMs: typeof job.durationMs === 'number' ? job.durationMs : null,
+    notificationSent: job.notificationSent || false,
     createdAt: job.createdAt?.toDate ? job.createdAt.toDate().toISOString() : null,
+    startedAt: job.startedAt?.toDate ? job.startedAt.toDate().toISOString() : null,
     completedAt: job.completedAt?.toDate ? job.completedAt.toDate().toISOString() : null,
     failedAt: job.failedAt?.toDate ? job.failedAt.toDate().toISOString() : null,
   };

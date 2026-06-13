@@ -10,6 +10,8 @@
 import Head from 'next/head';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
+import { useAuth } from '../../lib/AuthContext';
+import rbac from '../../lib/rbac';
 
 const TABS = [
   { key: 'broadcast', label: 'Broadcast', icon: 'ph-megaphone' },
@@ -268,6 +270,9 @@ function InviteLinkModal({ open, contacts, invites, busy, onCancel, onSend }) {
 }
 
 export default function EmailHubPage() {
+  const { permissions } = useAuth();
+  const canView = rbac.can(permissions, 'email_hub.view');
+
   const [tab, setTab] = useState('broadcast');
   const [toast, setToast] = useState(null);
   const pushToast = useCallback((type, msg) => {
@@ -515,6 +520,27 @@ export default function EmailHubPage() {
   }
 
   const previewContact = recipients[0] || emailContacts[0] || null;
+
+  if (!canView) {
+    return (
+      <V2Layout>
+        <Head><title>Email Hub · Access Denied</title></Head>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 max-w-md text-center space-y-4">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center">
+              <i className="ph ph-lock-key text-amber-600 text-3xl" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Access restricted</h2>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Email Hub requires the
+              <span className="font-mono text-gray-800 mx-1">email_hub.view</span>
+              permission. Ask an Owner or Admin to grant you access.
+            </p>
+          </div>
+        </div>
+      </V2Layout>
+    );
+  }
 
   return (
     <>

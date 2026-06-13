@@ -14,6 +14,8 @@ import Head from 'next/head';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import MonitorTopNav from '../../components/v2/MonitorTopNav';
+import { useAuth } from '../../lib/AuthContext';
+import rbac from '../../lib/rbac';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function relTime(isoStr) {
@@ -326,6 +328,9 @@ function LogLine({ entry }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function PickupOpsPage() {
+  const { permissions } = useAuth();
+  const canView = rbac.can(permissions, 'operation_interface.view');
+
   const [opsData, setOpsData]       = useState(null);
   const [opsErr, setOpsErr]         = useState(null);
   const [devices, setDevices]       = useState(null);
@@ -425,6 +430,27 @@ export default function PickupOpsPage() {
   const upInterfaces   = liveInterfaces.length;
   const totalEvents24h = interfaces.reduce((s, i) => s + i.metrics.total24h, 0);
   const totalErrors    = interfaces.reduce((s, i) => s + i.metrics.inputErrors, 0);
+
+  if (!canView) {
+    return (
+      <V2Layout>
+        <Head><title>Operations Interface · Access Denied</title></Head>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 max-w-md text-center space-y-4">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center">
+              <i className="ph ph-lock-key text-amber-600 text-3xl" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Access restricted</h2>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Operations Interface is an owner-only module. Ask an Owner to grant
+              <span className="font-mono text-gray-800 mx-1">operation_interface.view</span>
+              to your account.
+            </p>
+          </div>
+        </div>
+      </V2Layout>
+    );
+  }
 
   return (
     <>

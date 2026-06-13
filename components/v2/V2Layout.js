@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../lib/AuthContext';
 import rbac from '../../lib/rbac';
 import { filterNavForRole } from '../../lib/permissions';
-import { useTheme } from '../../lib/theme';
 import NotificationBell from './NotificationBell';
 
 function getWIBTime() {
@@ -71,7 +70,6 @@ const BOTTOM_NAV = [
 export default function V2Layout({ children }) {
   const router = useRouter();
   const { user, role, permissions, signOut, mustChangePassword } = useAuth();
-  const { theme, toggle: toggleTheme } = useTheme();
   const [clock, setClock] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -402,22 +400,6 @@ export default function V2Layout({ children }) {
         >
           <i className={`ph ${collapsed ? 'ph-caret-double-right' : 'ph-caret-double-left'} text-lg`}></i>
           {!collapsed && <span>Collapse</span>}
-        </button>
-        {/* Theme toggle */}
-        <button
-          onClick={toggleTheme}
-          className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'} w-full gap-2 px-3 py-2 rounded-xl text-slate-400 hover:text-amber-300 hover:bg-amber-500/5 border border-transparent hover:border-amber-500/20 transition-all text-sm`}
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          <span className="flex items-center gap-2">
-            <i className={`ph ${theme === 'dark' ? 'ph-sun' : 'ph-moon'} text-lg`}></i>
-            {!collapsed && <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>}
-          </span>
-          {!collapsed && (
-            <span className="text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
-              Beta
-            </span>
-          )}
         </button>
       </div>
     </div>

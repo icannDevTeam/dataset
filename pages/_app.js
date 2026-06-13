@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
 import { canAccessPath } from '../lib/permissions';
-import { FOUC_SCRIPT } from '../lib/theme';
 import ErrorBoundary from '../components/ErrorBoundary';
 
 // Pages that don't require authentication
@@ -156,8 +155,7 @@ export default function App({ Component, pageProps }) {
   return (
     <>
       <Head>
-        {/* Pre-hydration theme application — prevents FOUC on light mode */}
-        <script dangerouslySetInnerHTML={{ __html: FOUC_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: `document.documentElement.classList.add('dark');document.documentElement.dataset.theme='dark';` }} />
       </Head>
       <ErrorBoundary>
         <AuthProvider>

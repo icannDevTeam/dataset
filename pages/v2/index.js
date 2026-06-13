@@ -67,6 +67,9 @@ export default function DashboardV2() {
   const [pickupError, setPickupError] = useState(null);
   const [pickupAlerts, setPickupAlerts] = useState({ pending: 0, flaggedReleases: 0 });
 
+  // Onboarding forms summary (shown in pickup tab)
+  const [formsSummary, setFormsSummary] = useState(null);
+
   // Thumbnails
   const [thumbnails, setThumbnails] = useState({});
 
@@ -113,12 +116,16 @@ export default function DashboardV2() {
       setPickupLoading(true);
       setPickupError(null);
       const today = getWIBDate();
-      const res = await fetch(`/api/pickup/admin/analytics?from=${today}&to=${today}`, { credentials: 'include' });
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
-        throw new Error(b.error || `HTTP ${res.status}`);
+      const [analyticsRes, formsRes] = await Promise.all([
+        fetch(`/api/pickup/admin/analytics?from=${today}&to=${today}`, { credentials: 'include' }),
+        fetch('/api/pickup/admin/forms-summary', { credentials: 'include' }),
+      ]);
+      if (!analyticsRes.ok) {
+        const b = await analyticsRes.json().catch(() => ({}));
+        throw new Error(b.error || `HTTP ${analyticsRes.status}`);
       }
-      setPickupData(await res.json());
+      setPickupData(await analyticsRes.json());
+      if (formsRes.ok) setFormsSummary(await formsRes.json());
     } catch (err) {
       setPickupError(err.message);
     } finally {
@@ -348,6 +355,7 @@ export default function DashboardV2() {
             loading={pickupLoading}
             error={pickupError}
             onRefresh={fetchPickup}
+            formsSummary={formsSummary}
           />
         )}
 
@@ -796,7 +804,7 @@ export default function DashboardV2() {
 }
 
 // ── Pickup Dashboard Widget ────────────────────────────────────────────────────
-function DashboardPickupView({ data, loading, error, onRefresh }) {
+function DashboardPickupView({ data, loading, error, onRefresh, formsSummary }) {
   const today = new Date(Date.now() + 7 * 3600 * 1000).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   return (
     <div className="space-y-6">
@@ -901,11 +909,72 @@ function DashboardPickupView({ data, loading, error, onRefresh }) {
             </div>
           </div>
 
-          {/* Quick link */}
-          <div className="flex">
+          {/* ── Onboarding Forms Inbox ── */}
+          {formsSummary && (
+            <div className="glass-panel rounded-2xl border border-slate-800 p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <i className="ph ph-clipboard-text text-orange-400"></i>
+                  Onboarding Forms
+                </h3>
+                <a href="/v2/pickup-admin" className="text-xs text-orange-400 hover:text-orange-300 transition-colors flex items-center gap-1">
+                  Review all <i className="ph ph-arrow-right"></i>
+                </a>
+              </div>
+
+              {/* Status count pills */}
+              <div className="flex gap-3 mb-4">
+                {[
+                  { label: 'Pending',  count: formsSummary.counts.pending,  dot: 'bg-amber-500',   text: 'text-amber-300' },
+                  { label: 'Approved', count: formsSummary.counts.approved, dot: 'bg-emerald-500', text: 'text-emerald-300' },
+                  { label: 'Rejected', count: formsSummary.counts.rejected, dot: 'bg-red-500',     text: 'text-red-300' },
+                ].map((s) => (
+                  <div key={s.label} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50">
+                    <span className={`w-2 h-2 rounded-full ${s.dot}`}></span>
+                    <span className={`text-xs font-semibold ${s.text}`}>{s.count}</span>
+                    <span className="text-xs text-slate-500">{s.label}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Recent pending submissions */}
+              {formsSummary.recentPending.length > 0 ? (
+                <div className="space-y-2">
+                  {formsSummary.recentPending.map((f) => {
+                    const ago = f.submittedAt
+                      ? (() => {
+                          const delta = Date.now() - Date.parse(f.submittedAt);
+                          if (delta < 60_000) return `${Math.round(delta / 1000)}s ago`;
+                          if (delta < 3600_000) return `${Math.round(delta / 60_000)}m ago`;
+                          return `${Math.round(delta / 3600_000)}h ago`;
+                        })()
+                      : '—';
+                    return (
+                      <div key={f.id} className="flex items-start justify-between gap-3 py-2 border-t border-slate-800/60">
+                        <div className="min-w-0">
+                          <p className="text-sm text-slate-200 truncate">{f.guardianName}</p>
+                          <p className="text-xs text-slate-500 truncate">{f.studentNames.join(', ')}</p>
+                        </div>
+                        <span className="shrink-0 text-xs text-slate-500 mt-0.5">{ago}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">No pending forms — inbox clear.</p>
+              )}
+            </div>
+          )}
+
+          {/* Quick links */}
+          <div className="flex gap-4">
             <a href="/v2/reports?module=pickup" className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1 transition-colors">
               <i className="ph ph-arrow-right"></i>
-              View full Pickup System report
+              Full Pickup report
+            </a>
+            <a href="/v2/pickup-admin" className="text-xs text-slate-400 hover:text-slate-300 flex items-center gap-1 transition-colors">
+              <i className="ph ph-arrow-right"></i>
+              Onboarding review
             </a>
           </div>
         </>

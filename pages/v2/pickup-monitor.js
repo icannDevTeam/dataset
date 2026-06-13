@@ -15,6 +15,8 @@ import Head from 'next/head';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 import MonitorTopNav from '../../components/v2/MonitorTopNav';
+import { useAuth } from '../../lib/AuthContext';
+import rbac from '../../lib/rbac';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function relTime(isoStr) {
@@ -168,6 +170,9 @@ const API_PROBES = [
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function PickupMonitorPage() {
+  const { permissions } = useAuth();
+  const canView = rbac.can(permissions, 'system_monitor.view');
+
   const [health, setHealth]     = useState(null);
   const [healthErr, setHealthErr] = useState(null);
   const [notifLog, setNotifLog] = useState(null);
@@ -245,6 +250,27 @@ export default function PickupMonitorPage() {
   const eq = health?.emailQueue || {};
   const pending24h = notifLog?.summary?.pending ?? 0;
   const failed24h  = notifLog?.summary?.failed  ?? 0;
+
+  if (!canView) {
+    return (
+      <V2Layout>
+        <Head><title>System Monitor · Access Denied</title></Head>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 max-w-md text-center space-y-4">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center">
+              <i className="ph ph-lock-key text-amber-600 text-3xl" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900">Access restricted</h2>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              System Monitor is an owner-only module. Ask an Owner to grant
+              <span className="font-mono text-gray-800 mx-1">system_monitor.view</span>
+              to your account.
+            </p>
+          </div>
+        </div>
+      </V2Layout>
+    );
+  }
 
   return (
     <>
