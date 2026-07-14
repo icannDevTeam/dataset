@@ -11,6 +11,7 @@
  *
  * Usage:
  *   node scripts/seed-grade5-pickup.js              # seed
+ *   node scripts/seed-grade5-pickup.js --count 10   # seed 10 demo events
  *   node scripts/seed-grade5-pickup.js --cleanup    # delete everything tagged
  */
 const admin = require('firebase-admin');
@@ -225,10 +226,22 @@ async function seed() {
   console.log('[ok] release group:', rgData.name, '|', rgData.gradeLabel,
     '| paired to:', rgData.tabletDeviceId, '| terminals:', rgData.terminalIds);
 
+  const countArgIndex = process.argv.indexOf('--count');
+  const countArgValue = countArgIndex >= 0 ? Number.parseInt(process.argv[countArgIndex + 1], 10) : NaN;
+  const countFlagValue = Number.parseInt(
+    process.argv.find((arg) => arg.startsWith('--count='))?.split('=')[1] || '',
+    10,
+  );
+  const count = Number.isFinite(countFlagValue)
+    ? countFlagValue
+    : (Number.isFinite(countArgValue) ? countArgValue : ROSTER.length);
+  const items = ROSTER.slice(0, Math.max(1, Math.min(ROSTER.length, count)));
+  console.log(`[seed] writing ${items.length} demo event(s)`);
+
   const now = Date.now();
   let chaperoneSeq = FIRST_CHAPERONE_NO;
 
-  for (const item of ROSTER) {
+  for (const item of items) {
     const employeeNo = String(chaperoneSeq++);
     const chaperoneId = `chap-${employeeNo}`;
     const recordedAt = new Date(now - item.minutesAgo * 60_000);
@@ -307,7 +320,7 @@ async function seed() {
       `  ${item.chaperone.name}  →  ${studentList.map((s) => s.name).join(' + ')}` +
       `  @ ${TERMINALS[item.terminalId]}`);
   }
-  console.log('\nDone. The Grade 5 iPad should now show 5 active (cap 2 visible) + 8 held pickups.');
+  console.log(`\nDone. The Grade 5 iPad should now show ${items.length} demo event(s).`);
 }
 
 (async () => {

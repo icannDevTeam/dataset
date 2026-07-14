@@ -6,7 +6,7 @@
  *
  * UX:
  *   - Pairing screen if no token → "Enter code".
- *   - 2-card "now serving" panel (max 2 active events).
+ *   - 4-card "now serving" panel (max 4 active events).
  *   - Held rail below — collapsed cards, tap to release/hold again.
  *   - Red unknown_chaperone events render as a BLOCKED banner with the same
  *     Hold / Release affordances. No security escalation.
@@ -882,7 +882,7 @@ export default function TeacherTabletPage() {
   const pollFeed = useCallback(async () => {
     if (!token) return;
     try {
-      const r = await fetch(`/api/pickup/tablet/feed?max=2&t=${Date.now()}`, {
+      const r = await fetch(`/api/pickup/tablet/feed?max=4&t=${Date.now()}`, {
         headers: { 'x-tablet-device-token': token },
         cache: 'no-store',
       });
@@ -1147,11 +1147,11 @@ export default function TeacherTabletPage() {
           </div>
         )}
 
-        {/* Active panel: max 2 cards */}
+        {/* Active panel: max 4 cards */}
         <div style={{ padding: '22px', maxWidth: 1400, margin: '0 auto' }}>
           {(() => {
-            const activeTwo = (feed.active || []).slice(0, 2);
-            if (activeTwo.length === 0) {
+            const activeFour = (feed.active || []).slice(0, 4);
+            if (activeFour.length === 0) {
               return (
                 <StandbyHero
                   identity={identity}
@@ -1164,10 +1164,10 @@ export default function TeacherTabletPage() {
             return (
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: activeTwo.length === 1 ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+                gridTemplateColumns: activeFour.length === 1 ? '1fr' : 'repeat(2, minmax(0, 1fr))',
                 gap: 18,
               }}>
-                {activeTwo.map((ev) => (
+                {activeFour.map((ev) => (
                   <Card key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} big />
                 ))}
               </div>
