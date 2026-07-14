@@ -17,16 +17,26 @@
  */
 import QRCode from 'qrcode';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
-import { withApi } from '../../../../lib/api-auth';
+import { withApi, can } from '../../../../lib/api-auth';
 import * as invites from '../../../../lib/onboarding-invites';
 const admin = require('firebase-admin');
 const tenancy = require('../../../../lib/tenancy');
+
+function deny(res) {
+  return res.status(403).json({ error: 'forbidden' });
+}
 
 async function handler(req, res) {
   try {
     initializeFirebase();
     const db = admin.firestore();
     const tid = tenancy.getTenantId(req.query?.tenant);
+    const perms = req.user?.permissions || {};
+    const canView = req.user?.superAdmin || can(perms, 'pickup_admin.view');
+    const canWrite = req.user?.superAdmin || can(perms, 'pickup_admin.edit_chaperone');
+
+    if (req.method === 'GET' && !canView) return deny(res);
+    if (req.method !== 'GET' && !canWrite) return deny(res);
 
     if (req.method === 'GET') {
       const id = req.query.id ? String(req.query.id) : null;
@@ -111,5 +121,5 @@ async function handler(req, res) {
 
 export default withApi(handler, {
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
-  anyPermission: ['pickup_admin.view', 'pickup_admin.edit_chaperone'],
+  requireUser: true,
 });

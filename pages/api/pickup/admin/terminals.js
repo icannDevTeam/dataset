@@ -16,9 +16,13 @@
 import admin from 'firebase-admin';
 import crypto from 'crypto';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
-import { withApi } from '../../../../lib/api-auth';
+import { withApi, can } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 const { isValidHHMM } = require('../../../../lib/terminal-gate');
+
+function deny(res) {
+  return res.status(403).json({ error: 'forbidden' });
+}
 
 function stableTerminalId(name) {
   return crypto.createHash('sha1').update(String(name || '')).digest('hex').slice(0, 12);
@@ -61,6 +65,12 @@ async function handler(req, res) {
   const db = admin.firestore();
   const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
   const colRef = db.collection(tenancy.terminalsPath(tid));
+  const perms = req.user?.permissions || {};
+  const canView = req.user?.superAdmin || can(perms, 'pickup_admin.view');
+  const canManage = req.user?.superAdmin || can(perms, 'pickup_admin.manage_terminals');
+
+  if (req.method === 'GET' && !canView) return deny(res);
+  if (req.method !== 'GET' && !canManage) return deny(res);
 
   try {
     if (req.method === 'GET') {
@@ -180,5 +190,5 @@ async function handler(req, res) {
 
 export default withApi(handler, {
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  anyPermission: ['pickup_admin.view', 'pickup_admin.manage_terminals'],
+  requireUser: true,
 });
