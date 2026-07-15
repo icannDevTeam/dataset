@@ -266,6 +266,10 @@ export default function ChaperonesPage() {
       });
       const j = await r.json();
       if (!r.ok) { setErr(j.error || `HTTP ${r.status}`); return; }
+      if (j.deviceRemoval && !j.deviceRemoval.ok) {
+        const failed = (j.deviceRemoval.devices || []).filter((d) => !d.ok).map((d) => d.ip).join(', ');
+        setErr(`Chaperone deleted, but device removal failed on: ${failed || 'unknown'}. Their face may still be on those gates — retry when devices are online.`);
+      }
       setDeleteTarget(null);
       load();
     } catch (e) {

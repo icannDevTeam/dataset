@@ -3,14 +3,17 @@
  *
  * Shadow-delete a chaperone: flip lifecycleStatus → 'deleted' and record an
  * immutable revision snapshot under tenants/{tid}/chaperones/{cid}/revisions.
- * Does NOT touch facePaths, photoUrls, or Hikvision enrolment — restore is
- * fully reversible.
+ * Also removes the chaperone's face + user record from all configured
+ * Hikvision gate terminals (best-effort) so a deleted chaperone can no
+ * longer open gates. Firestore data / facePaths are untouched — restore is
+ * reversible, but requires a re-enroll to push faces back to devices.
  *
  * Body: { chaperoneId: string, reason: string }
  */
 import admin from 'firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
+import { unenrollChaperone } from '../../../../lib/chaperone-enroll';
 const tenancy = require('../../../../lib/tenancy');
 const { logAudit } = require('../../../../lib/audit-log');
 
@@ -69,6 +72,15 @@ async function handler(req, res) {
       snapshot: before,
     });
 
+    // Remove from gate terminals so the face can no longer open doors.
+    // Best-effort: offline devices are reported, not fatal.
+    let deviceRemoval = { ok: false, devices: [] };
+    try {
+      deviceRemoval = await unenrollChaperone(db, tid, chaperoneId);
+    } catch (e) {
+      deviceRemoval = { ok: false, devices: [], error: e.message };
+    }
+
     await logAudit(db, {
       tenantId: tid,
       actor,
@@ -77,7 +89,15 @@ async function handler(req, res) {
       before: { lifecycleStatus: before.lifecycleStatus || 'active' },
       after: { lifecycleStatus: 'deleted', deletedReason: trimmedReason },
       summary: `Shadow-deleted chaperone ${before.name || chaperoneId}`,
-      metadata: { revisionId: revisionRef.id, reason: trimmedReason },
+      metadata: {
+        revisionId: revisionRef.id,
+        reason: trimmedReason,
+        deviceRemoval: {
+          ok: deviceRemoval.ok,
+          devices: (deviceRemoval.devices || []).map((d) => ({ ip: d.ip, ok: d.ok, error: d.error || null })),
+          error: deviceRemoval.error || null,
+        },
+      },
       req,
     });
 
@@ -86,6 +106,7 @@ async function handler(req, res) {
       chaperoneId,
       lifecycleStatus: 'deleted',
       revisionId: revisionRef.id,
+      deviceRemoval,
     });
   } catch (err) {
     console.error('[pickup/admin/chaperone-delete]', err.message, err.stack);
