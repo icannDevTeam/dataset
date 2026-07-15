@@ -675,8 +675,8 @@ function Field({ label, hint, hintTone, children }) {
 }
 
 // ── Grade scope multi-select chips ────────────────────────────────────
-// Canonical grades 1–8. Empty selection = shared gate (all grades).
-const GRADE_OPTIONS = ['1', '2', '3', '4', '5', '6', '7', '8'];
+// Canonical grades: EY1–EY3 and 1–5. Empty selection = shared gate (all grades).
+const GRADE_OPTIONS = ['EY1', 'EY2', 'EY3', '1', '2', '3', '4', '5'];
 function GradeScopeChips({ value, onChange }) {
   const selected = new Set((value || []).map(String));
   const toggle = (g) => {
@@ -707,7 +707,7 @@ function GradeScopeChips({ value, onChange }) {
             key={g}
             type="button"
             onClick={() => toggle(g)}
-            className={`w-7 h-7 rounded text-[11px] font-bold border transition ${
+            className={`min-w-7 h-7 px-1.5 rounded text-[11px] font-bold border transition ${
               on
                 ? 'bg-brand-500 border-brand-400 text-white shadow-sm shadow-brand-500/30'
                 : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200'

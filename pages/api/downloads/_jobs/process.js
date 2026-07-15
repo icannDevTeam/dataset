@@ -1,9 +1,9 @@
-import { db, auth } from '../../lib/firebase-admin';
-import { runJob } from '../../lib/download-runner';
+import { db, auth } from '../../../../lib/firebase-admin';
+import { runJob } from '../../../../lib/download-runner';
 import {
   sendExportCompletionEmail,
   sendExportFailureEmail,
-} from '../../lib/exports-notifications';
+} from '../../../../lib/exports-notifications';
 
 /**
  * POST /api/downloads/_jobs/process
