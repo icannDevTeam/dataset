@@ -184,7 +184,9 @@ async function handler(req, res) {
     if (!snap.exists) return res.status(404).json({ error: 'record not found' });
     const rec = snap.data();
 
-    if (rec.status !== 'pending') {
+    // 'changes_requested' is still an editable pre-approval state — ACOP
+    // applies fixes the parent sent via email/WhatsApp directly on the form.
+    if (!['pending', 'changes_requested'].includes(rec.status)) {
       // The only post-approval mutation we allow is admin appending a
       // brand-new chaperone (e.g. parent asked the school to add a
       // replacement). Everything else stays locked to preserve the audit

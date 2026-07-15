@@ -23,10 +23,14 @@ import PageGuard from '../../components/v2/PageGuard';
 
 const TABS = [
   { key: 'pending',  label: 'Pending',  badge: true },
+  { key: 'changes_requested', label: 'Awaiting parent' },
   { key: 'approved', label: 'Approved' },
   { key: 'rejected', label: 'Rejected' },
   { key: 'archived', label: 'Archived' },
 ];
+
+// Statuses where the form is still pre-approval and fully editable by ACOP.
+const EDITABLE_ONBOARDING_STATUSES = ['pending', 'changes_requested'];
 
 const REL_LABEL = {
   mother: 'Mother', father: 'Father', parent: 'Parent',
@@ -171,7 +175,7 @@ function ToastHost({ toasts, onDismiss }) {
 export default function PickupAdminPage() {
   const [tab, setTab] = useState('pending');
   const [records, setRecords] = useState([]);
-  const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0, archived: 0 });
+  const [counts, setCounts] = useState({ pending: 0, changes_requested: 0, approved: 0, rejected: 0, archived: 0 });
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [working, setWorking] = useState({});       // recordId -> 'approve'|'reject'|'reenroll'
@@ -181,6 +185,8 @@ export default function PickupAdminPage() {
   const [autoAddChaperone, setAutoAddChaperone] = useState(false);
   const [rejectingId, setRejectingId] = useState(null);  // inline reject form
   const [rejectReason, setRejectReason] = useState('');
+  const [messagingId, setMessagingId] = useState(null);  // inline "message parent" form
+  const [messageText, setMessageText] = useState('');
   const [lightbox, setLightbox] = useState(null);
   const [thumbnails, setThumbnails] = useState({});
   const [search, setSearch] = useState('');
@@ -340,20 +346,22 @@ export default function PickupAdminPage() {
   const reload = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      // Always fetch all four tabs in parallel so the stat strip is accurate
-      const [pendingL, approvedL, rejectedL, archivedL] = await Promise.all([
+      // Always fetch all tabs in parallel so the stat strip is accurate
+      const [pendingL, changesL, approvedL, rejectedL, archivedL] = await Promise.all([
         fetchList('pending').catch(() => []),
+        fetchList('changes_requested').catch(() => []),
         fetchList('approved').catch(() => []),
         fetchList('rejected').catch(() => []),
         fetchList('archived').catch(() => []),
       ]);
       setCounts({
         pending: pendingL.length,
+        changes_requested: changesL.length,
         approved: approvedL.length,
         rejected: rejectedL.length,
         archived: archivedL.length,
       });
-      const byTab = { pending: pendingL, approved: approvedL, rejected: rejectedL, archived: archivedL };
+      const byTab = { pending: pendingL, changes_requested: changesL, approved: approvedL, rejected: rejectedL, archived: archivedL };
       setRecords(byTab[tab] || []);
     } catch (e) { setErr(e.message); }
     finally { setLoading(false); }
@@ -374,7 +382,7 @@ export default function PickupAdminPage() {
   }, [tab, fetchList]);
 
   // Clear selection when tab changes
-  useEffect(() => { setSelected({}); setRejectingId(null); }, [tab]);
+  useEffect(() => { setSelected({}); setRejectingId(null); setMessagingId(null); }, [tab]);
 
   // ─── Detail drawer URL sync (?pkp=<id>) ─────────────────────────────────
   useEffect(() => {
@@ -650,6 +658,30 @@ export default function PickupAdminPage() {
       setRejectingId(null); setRejectReason('');
       await reload();
     } catch (e) { pushToast('error', e.message, 'Reject failed'); }
+    finally { setWorking((w) => { const n = { ...w }; delete n[rec.id]; return n; }); }
+  }
+
+  // Ask the parent for a fix (new photo, corrected details) WITHOUT reopening
+  // the form — parent replies to the ACOP inbox / WhatsApp, ACOP applies the
+  // change with the onboarding editor. No re-submission, no duplicate docs.
+  async function submitRequestChanges(rec) {
+    const message = messageText.trim();
+    if (message.length < 4) return pushToast('warn', 'Message must be at least 4 characters.');
+    setWorking((w) => ({ ...w, [rec.id]: 'message' }));
+    try {
+      const r = await fetch('/api/pickup/admin/request-changes', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId: rec.id, message }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || j.message || 'request failed');
+      pushToast('success',
+        `Email queued to ${j.to}. Their reply goes to the ACOP inbox — apply it on this form, no re-submission needed.`,
+        'Message sent to parent');
+      setMessagingId(null); setMessageText('');
+      await reload();
+    } catch (e) { pushToast('error', e.message, 'Message failed'); }
     finally { setWorking((w) => { const n = { ...w }; delete n[rec.id]; return n; }); }
   }
 
@@ -1135,7 +1167,7 @@ export default function PickupAdminPage() {
                 <i className="ph ph-tray"></i>
               </span>
               <p className="text-slate-400 text-sm">
-                {search ? `No results for "${search}".` : `No ${tab} submissions.`}
+                {search ? `No results for "${search}".` : `No ${tab === 'changes_requested' ? 'awaiting-parent' : tab} submissions.`}
               </p>
             </div>
           ) : (
@@ -1181,11 +1213,14 @@ export default function PickupAdminPage() {
           open={view === 'onboarding' && !!selectedRecord}
           rec={selectedRecord}
           thumbnails={thumbnails}
-          onClose={() => { setSelectedId(null); setRejectingId(null); setAutoAddChaperone(false); }}
+          onClose={() => { setSelectedId(null); setRejectingId(null); setMessagingId(null); setAutoAddChaperone(false); }}
           onApprove={selectedRecord ? () => approve(selectedRecord) : undefined}
-          onStartReject={selectedRecord ? () => { setRejectingId(selectedRecord.id); setRejectReason(''); } : undefined}
+          onStartReject={selectedRecord ? () => { setRejectingId(selectedRecord.id); setRejectReason(''); setMessagingId(null); } : undefined}
           onCancelReject={() => { setRejectingId(null); setRejectReason(''); }}
           onSubmitReject={selectedRecord ? () => submitReject(selectedRecord) : undefined}
+          onStartMessage={selectedRecord ? () => { setMessagingId(selectedRecord.id); setMessageText(''); setRejectingId(null); } : undefined}
+          onCancelMessage={() => { setMessagingId(null); setMessageText(''); }}
+          onSubmitMessage={selectedRecord ? () => submitRequestChanges(selectedRecord) : undefined}
           onReenroll={selectedRecord ? () => reenroll(selectedRecord) : undefined}
           onPhoto={(url, caption) => setLightbox({ url, caption })}
           onPrint={selectedRecord ? () => setPrintRec(selectedRecord) : undefined}
@@ -1199,6 +1234,9 @@ export default function PickupAdminPage() {
           rejecting={selectedRecord ? rejectingId === selectedRecord.id : false}
           rejectReason={rejectReason}
           setRejectReason={setRejectReason}
+          messaging={selectedRecord ? messagingId === selectedRecord.id : false}
+          messageText={messageText}
+          setMessageText={setMessageText}
           // siblings for prev/next nav
           prevId={(() => {
             if (!selectedRecord) return null;
@@ -1721,13 +1759,15 @@ function StatCard({ label, value, hint, tone = 'slate', icon }) {
 function StatusPill({ status }) {
   const map = {
     pending:  ['bg-amber-500/15 text-amber-300 border-amber-500/30',  'ph-clock'],
+    changes_requested: ['bg-orange-500/15 text-orange-300 border-orange-500/30', 'ph-chat-circle-dots'],
     approved: ['bg-emerald-500/15 text-emerald-300 border-emerald-500/30', 'ph-check-circle'],
     rejected: ['bg-red-500/15 text-red-300 border-red-500/30',        'ph-x-circle'],
   };
+  const label = status === 'changes_requested' ? 'awaiting parent' : status;
   const [cls, icon] = map[status] || map.pending;
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${cls}`}>
-      <i className={`ph ${icon}`}></i>{status}
+      <i className={`ph ${icon}`}></i>{label}
     </span>
   );
 }
@@ -1830,7 +1870,7 @@ function RecordCard(props) {
           >
             <i className="ph ph-printer"></i>
           </button>
-          {onAddChaperone && (rec.status === 'pending' || rec.status === 'approved') && (
+          {onAddChaperone && (EDITABLE_ONBOARDING_STATUSES.includes(rec.status) || rec.status === 'approved') && (
             <button
               onClick={(e) => { e.stopPropagation(); onAddChaperone(); }}
               disabled={(rec.chaperones?.length || 0) >= 5}
@@ -1852,6 +1892,12 @@ function RecordCard(props) {
             >
               {busy === 'approve' ? '…' : <><i className="ph ph-check mr-1"></i>Approve</>}
             </button>
+          )}
+          {rec.status === 'changes_requested' && (
+            <span className="text-[11px] text-orange-300/80 px-2 py-1 rounded bg-orange-500/10 border border-orange-500/20"
+              title={rec.changesRequestedMessage || ''}>
+              <i className="ph ph-envelope-simple mr-1"></i>parent emailed
+            </span>
           )}
           <i className="ph ph-caret-right text-slate-600 group-hover:text-slate-300 transition-colors" aria-hidden></i>
         </div>
@@ -1877,8 +1923,24 @@ function RecordDetail(props) {
 
   return (
     <div className="px-5 py-5 space-y-5">
+      {/* Awaiting-parent banner */}
+      {rec.status === 'changes_requested' && (
+        <div className="px-3 py-2.5 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-start gap-3">
+          <i className="ph ph-chat-circle-dots text-orange-400 mt-0.5"></i>
+          <div className="flex-1 text-xs">
+            <div className="text-orange-300 font-semibold">Waiting for parent reply</div>
+            <div className="text-orange-200/80 mt-0.5 whitespace-pre-line">{rec.changesRequestedMessage || '—'}</div>
+            <div className="text-orange-300/60 mt-1">
+              Sent {rec.changesRequestedAt ? fmtTime(rec.changesRequestedAt) : '—'} by{' '}
+              <span className="font-mono">{rec.changesRequestedBy || '—'}</span>
+              {' — '}apply their reply directly on this form, then approve. No re-submission needed.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Admin: add a brand-new chaperone to this form (pinned at top) */}
-      {(rec.status === 'pending' || rec.status === 'approved') && !!onOnboardingEdit && (
+      {(EDITABLE_ONBOARDING_STATUSES.includes(rec.status) || rec.status === 'approved') && !!onOnboardingEdit && (
         <AddChaperonePanel
           recordId={rec.id}
           recordStatus={rec.status}
@@ -1915,8 +1977,8 @@ function RecordDetail(props) {
               s={s}
               index={i}
               total={enrichedStudents.length}
-              canEdit={rec.status === 'pending' && !!onOnboardingEdit}
-              canDelete={rec.status === 'pending' && !!onOnboardingEdit && enrichedStudents.length > 1}
+              canEdit={EDITABLE_ONBOARDING_STATUSES.includes(rec.status) && !!onOnboardingEdit}
+              canDelete={EDITABLE_ONBOARDING_STATUSES.includes(rec.status) && !!onOnboardingEdit && enrichedStudents.length > 1}
               onEdit={(patch) => onOnboardingEdit({ recordId: rec.id, target: 'student', id: s.id, action: 'update', patch })}
               onDelete={() => onOnboardingEdit({ recordId: rec.id, target: 'student', id: s.id, action: 'delete' })}
             />
@@ -1931,7 +1993,7 @@ function RecordDetail(props) {
           {(rec.chaperones || []).map((c, i) => {
             const allocated = rec.allocatedChaperones?.[i];
             const enrol = (rec.enrollment || []).find((e) => e.chaperoneId === allocated?.chaperoneId);
-            const editable = rec.status === 'pending' && !!onOnboardingEdit;
+            const editable = EDITABLE_ONBOARDING_STATUSES.includes(rec.status) && !!onOnboardingEdit;
             return (
               <ChaperoneRow
                 key={c.tempId || i}
@@ -1974,8 +2036,11 @@ function RecordDetail(props) {
         </div>
       </div>
 
+      {/* Internal admin notes (never emailed to the guardian) */}
+      <AdminNotesPanel rec={rec} />
+
       {/* Decision metadata (post-review) */}
-      {rec.status !== 'pending' && (
+      {(rec.status === 'approved' || rec.status === 'rejected') && (
         <div className="text-xs text-slate-500 pt-1 border-t border-slate-800">
           <div className="mt-3">
             {rec.status === 'approved' ? 'Approved' : 'Rejected'} {fmtTime(rec.reviewedAt)} by{' '}
@@ -1998,7 +2063,9 @@ function DetailDrawer(props) {
   const {
     open, onClose, rec, prevId, nextId, onJump,
     onApprove, onStartReject, onCancelReject, onSubmitReject, onReenroll,
+    onStartMessage, onCancelMessage, onSubmitMessage,
     onPrint, busy, rejecting, rejectReason, setRejectReason,
+    messaging, messageText, setMessageText,
   } = props;
 
   useEffect(() => {
@@ -2091,7 +2158,7 @@ function DetailDrawer(props) {
 
             {/* Sticky footer with primary actions */}
             <footer className="border-t border-slate-800 bg-slate-950/95 backdrop-blur-md px-5 py-3">
-              {rec.status === 'pending' ? (
+              {EDITABLE_ONBOARDING_STATUSES.includes(rec.status) ? (
                 rejecting ? (
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-red-300 block">
@@ -2121,8 +2188,45 @@ function DetailDrawer(props) {
                       </button>
                     </div>
                   </div>
+                ) : messaging ? (
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-orange-300 block">
+                      Message to parent (emailed — they simply reply with the photo/details, no re-submission):
+                    </label>
+                    <textarea
+                      value={messageText}
+                      onChange={(e) => setMessageText(e.target.value)}
+                      rows={2}
+                      placeholder="e.g. The driver's face photo is blurry — please reply to this email with a clearer photo."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-orange-500/50"
+                    />
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={onCancelMessage}
+                        disabled={!!busy}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={onSubmitMessage}
+                        disabled={!!busy || messageText.trim().length < 4}
+                        className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-40"
+                      >
+                        {busy === 'message' ? 'Sending…' : 'Send to parent'}
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <div className="flex items-center justify-end gap-2 flex-wrap">
+                    <button
+                      onClick={onStartMessage}
+                      disabled={!!busy}
+                      title="Email the parent asking for a fix (new photo, corrected details) — they reply to the ACOP inbox, no re-submission"
+                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-300 hover:bg-orange-500/20 disabled:opacity-50"
+                    >
+                      <i className="ph ph-chat-circle-dots mr-1"></i>Message parent
+                    </button>
                     <button
                       onClick={onStartReject}
                       disabled={!!busy}
@@ -2179,6 +2283,91 @@ function DetailDrawer(props) {
         )}
       </aside>
     </>
+  );
+}
+
+function AdminNotesPanel({ rec }) {
+  const [notes, setNotes] = useState(() => (Array.isArray(rec.adminNotes) ? rec.adminNotes : []));
+  const [draft, setDraft] = useState('');
+  const [openForm, setOpenForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  // Re-sync when navigating between records in the drawer
+  useEffect(() => {
+    setNotes(Array.isArray(rec.adminNotes) ? rec.adminNotes : []);
+    setDraft(''); setOpenForm(false); setErr(null);
+  }, [rec.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submit = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    setSaving(true); setErr(null);
+    try {
+      const r = await fetch('/api/pickup/admin/onboarding-note', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId: rec.id, note: text }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || j.message || 'save failed');
+      setNotes((n) => [...n, j.note]);
+      setDraft(''); setOpenForm(false);
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="rounded-lg bg-slate-900 border border-slate-800">
+      <div className="px-3 py-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+          <i className="ph ph-note-pencil text-brand-400"></i>
+          Internal notes ({notes.length})
+          <span className="text-[10px] font-normal text-slate-500">— ACOP only, never sent to the parent</span>
+        </div>
+        {!openForm && (
+          <button onClick={() => setOpenForm(true)}
+            className="text-[11px] px-2 py-1 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
+            <i className="ph ph-plus mr-1"></i>Add note
+          </button>
+        )}
+      </div>
+      {notes.length > 0 && (
+        <div className="px-3 pb-2 space-y-1.5">
+          {notes.map((n, i) => (
+            <div key={i} className="text-xs bg-slate-950/60 border border-slate-800 rounded-lg px-2.5 py-1.5">
+              <div className="text-slate-200 whitespace-pre-line break-words">{n.text}</div>
+              <div className="text-[10px] text-slate-500 mt-0.5">
+                {(n.by?.name || n.by?.email || '—')} · {n.at ? fmtTime(n.at) : ''}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {openForm && (
+        <div className="px-3 pb-3 space-y-2">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={2}
+            maxLength={2000}
+            placeholder="e.g. Called guardian 15:20 — will WhatsApp a new driver photo tonight."
+            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-brand-500/50"
+          />
+          {err && <div className="text-[11px] text-red-400"><i className="ph ph-warning mr-1"></i>{err}</div>}
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => { setOpenForm(false); setDraft(''); setErr(null); }} disabled={saving}
+              className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
+              Cancel
+            </button>
+            <button onClick={submit} disabled={saving || !draft.trim()}
+              className="px-3 py-1 text-[11px] font-semibold rounded-lg bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-40">
+              {saving ? 'Saving…' : 'Save note'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

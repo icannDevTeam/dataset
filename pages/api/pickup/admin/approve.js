@@ -135,7 +135,7 @@ async function handler(req, res) {
     const recSnap = await recRef.get();
     if (!recSnap.exists) return res.status(404).json({ error: 'record not found' });
     const rec = recSnap.data();
-    if (rec.status !== 'pending') {
+    if (!['pending', 'changes_requested'].includes(rec.status)) {
       return res.status(409).json({ error: `record status is ${rec.status}, not pending` });
     }
     if (!Array.isArray(rec.chaperones) || rec.chaperones.length === 0) {

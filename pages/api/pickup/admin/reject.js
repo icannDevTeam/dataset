@@ -69,7 +69,7 @@ async function handler(req, res) {
     const ref = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
     const snap = await ref.get();
     if (!snap.exists) return res.status(404).json({ error: 'record not found' });
-    if (snap.data().status !== 'pending') {
+    if (!['pending', 'changes_requested'].includes(snap.data().status)) {
       return res.status(409).json({ error: `record status is ${snap.data().status}` });
     }
     const reviewer = req.headers['x-admin-user'] || 'api-key';
