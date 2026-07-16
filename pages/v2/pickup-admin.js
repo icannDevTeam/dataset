@@ -1906,7 +1906,7 @@ function SubmissionTrackerPanel({ rows }) {
 
   const totalEntries = filteredRows.reduce((sum, row) => sum + row.entries.length, 0);
 
-  const exportCsv = () => {
+  const exportRowsCsv = (rowsToExport, filenamePrefix = 'pickup-submission-tracker') => {
     const csvEscape = (value) => {
       const raw = String(value ?? '');
       if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
@@ -1924,7 +1924,7 @@ function SubmissionTrackerPanel({ rows }) {
       'Record ID',
     ];
     const lines = [header.join(',')];
-    filteredRows.forEach((row) => {
+    rowsToExport.forEach((row) => {
       row.entries.forEach((entry) => {
         lines.push([
           row.classLabel,
@@ -1943,11 +1943,18 @@ function SubmissionTrackerPanel({ rows }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `pickup-submission-tracker-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const exportCsv = () => exportRowsCsv(filteredRows, 'pickup-submission-tracker');
+
+  const exportClassCsv = (row) => {
+    const cls = String(row.classLabel || 'class').replace(/[^A-Za-z0-9_-]+/g, '-');
+    exportRowsCsv([row], `pickup-submission-${cls}`);
   };
 
   return (
@@ -2062,6 +2069,76 @@ function SubmissionTrackerPanel({ rows }) {
           </div>
         )}
       </div>
+
+      {filteredRows.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-slate-800/80">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+              Independent Class Sheets
+            </h4>
+            <span className="text-[11px] text-slate-500">
+              One sheet per class for teacher follow-up
+            </span>
+          </div>
+          <div className="space-y-2 max-h-[26rem] overflow-y-auto pr-1">
+            {filteredRows.map((row) => (
+              <details key={`sheet-${row.classLabel}`} className="rounded-xl border border-slate-800/90 bg-slate-950/35" open={classFilter !== 'ALL'}>
+                <summary className="list-none cursor-pointer px-3 py-2.5 flex items-center justify-between gap-3">
+                  <div className="inline-flex items-center gap-2">
+                    <span className="text-xs font-semibold px-2 py-1 rounded-md bg-brand-500/20 border border-brand-500/35 text-brand-200">
+                      {row.classLabel}
+                    </span>
+                    <span className="text-xs text-slate-300">{row.formsCount} forms</span>
+                    <span className="text-xs text-slate-400">{row.studentsCount} students</span>
+                  </div>
+                  <div className="inline-flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); exportClassCsv(row); }}
+                      className="text-[11px] px-2.5 py-1 rounded-md bg-sky-500/20 border border-sky-500/35 text-sky-200 hover:bg-sky-500/30"
+                    >
+                      <i className="ph ph-download-simple mr-1"></i>Download Class Sheet
+                    </button>
+                    <i className="ph ph-caret-down text-slate-500"></i>
+                  </div>
+                </summary>
+                <div className="px-3 pb-3 overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-800">
+                        <th className="text-left py-1.5 pr-2 font-medium">Student</th>
+                        <th className="text-left py-1.5 pr-2 font-medium">Parent</th>
+                        <th className="text-left py-1.5 pr-2 font-medium">Status</th>
+                        <th className="text-left py-1.5 pr-2 font-medium">Submitted</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {row.entries.map((entry, idx) => (
+                        <tr key={`${row.classLabel}-sheet-${idx}`} className="border-b border-slate-900/80 last:border-0">
+                          <td className="py-1.5 pr-2 text-white">
+                            <div className="font-medium">{entry.studentName}</div>
+                            {entry.studentId && <div className="text-[10px] text-slate-500">{entry.studentId}</div>}
+                          </td>
+                          <td className="py-1.5 pr-2 text-slate-300">
+                            <div>{entry.parentName}</div>
+                            <div className="text-[10px] text-slate-500 truncate">{entry.parentPhone || entry.parentEmail || '—'}</div>
+                          </td>
+                          <td className="py-1.5 pr-2">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800/70 text-slate-200">
+                              {STATUS_LABEL[entry.status] || entry.status}
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-2 text-slate-400">{fmtTime(entry.submittedAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
