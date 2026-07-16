@@ -1913,29 +1913,32 @@ function SubmissionTrackerPanel({ rows }) {
       return raw;
     };
     const header = [
+      'No',
       'Class',
       'Student Name',
-      'Student ID',
       'Parent Name',
-      'Parent Email',
       'Parent Phone',
+      'Parent Email',
       'Status',
       'Submitted At',
-      'Record ID',
+      'Follow-up Note',
+      'Teacher Acknowledged',
     ];
     const lines = [header.join(',')];
+    let seq = 1;
     rowsToExport.forEach((row) => {
       row.entries.forEach((entry) => {
         lines.push([
+          seq++,
           row.classLabel,
           entry.studentName,
-          entry.studentId || '',
           entry.parentName,
-          entry.parentEmail || '',
           entry.parentPhone || '',
+          entry.parentEmail || '',
           STATUS_LABEL[entry.status] || entry.status,
-          entry.submittedAt || '',
-          entry.recordId,
+          fmtTime(entry.submittedAt),
+          '',
+          '',
         ].map(csvEscape).join(','));
       });
     });
@@ -1976,7 +1979,7 @@ function SubmissionTrackerPanel({ rows }) {
             disabled={totalEntries === 0}
             className="text-[11px] px-2.5 py-1 rounded-md bg-emerald-500/20 border border-emerald-500/35 text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
           >
-            <i className="ph ph-download-simple mr-1"></i>Export CSV
+            <i className="ph ph-download-simple mr-1"></i>Export Template CSV
           </button>
         </div>
       </div>
@@ -2097,7 +2100,7 @@ function SubmissionTrackerPanel({ rows }) {
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); exportClassCsv(row); }}
                       className="text-[11px] px-2.5 py-1 rounded-md bg-sky-500/20 border border-sky-500/35 text-sky-200 hover:bg-sky-500/30"
                     >
-                      <i className="ph ph-download-simple mr-1"></i>Download Class Sheet
+                      <i className="ph ph-download-simple mr-1"></i>Download Class Template
                     </button>
                     <i className="ph ph-caret-down text-slate-500"></i>
                   </div>
