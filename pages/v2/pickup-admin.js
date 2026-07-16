@@ -140,6 +140,10 @@ function summarizeClassSubmissions(records = []) {
   const bucket = new Map();
   records.forEach((rec) => {
     const parentName = String(rec?.guardian?.name || 'Unknown parent').trim() || 'Unknown parent';
+    const parentEmail = String(rec?.guardian?.email || '').trim();
+    const parentPhone = String(rec?.guardian?.phone || '').trim();
+    const status = String(rec?.status || 'pending');
+    const submittedAt = rec?.submittedAt || null;
     const recordId = String(rec?.id || `${parentName}-${rec?.submittedAt || ''}`);
     (rec.students || []).forEach((student) => {
       const classLabel = (
@@ -151,7 +155,7 @@ function summarizeClassSubmissions(records = []) {
       const studentName = buildStudentDisplayName(student);
       const studentId = getStoredStudentId(student) || null;
       const studentKey = studentId || `${studentName.toLowerCase()}::${classLabel}`;
-      const pairKey = `${studentKey}::${parentName.toLowerCase()}`;
+      const pairKey = `${recordId}::${studentKey}::${parentName.toLowerCase()}`;
 
       if (!bucket.has(classLabel)) {
         bucket.set(classLabel, {
@@ -159,15 +163,34 @@ function summarizeClassSubmissions(records = []) {
           forms: new Set(),
           studentKeys: new Set(),
           pairKeys: new Set(),
+          statusCounts: {
+            pending: 0,
+            changes_requested: 0,
+            approved: 0,
+            rejected: 0,
+          },
           entries: [],
         });
       }
       const row = bucket.get(classLabel);
       row.forms.add(recordId);
       row.studentKeys.add(studentKey);
+      if (Object.prototype.hasOwnProperty.call(row.statusCounts, status)) {
+        row.statusCounts[status] += 1;
+      }
       if (!row.pairKeys.has(pairKey)) {
         row.pairKeys.add(pairKey);
-        row.entries.push({ studentName, parentName, studentId });
+        row.entries.push({
+          classLabel,
+          recordId,
+          studentName,
+          studentId,
+          parentName,
+          parentEmail,
+          parentPhone,
+          status,
+          submittedAt,
+        });
       }
     });
   });
@@ -177,7 +200,13 @@ function summarizeClassSubmissions(records = []) {
       classLabel: row.classLabel,
       formsCount: row.forms.size,
       studentsCount: row.studentKeys.size,
-      entries: row.entries.sort((a, b) => a.studentName.localeCompare(b.studentName)),
+      statusCounts: row.statusCounts,
+      entries: row.entries.sort((a, b) => {
+        const ta = Date.parse(a.submittedAt || 0);
+        const tb = Date.parse(b.submittedAt || 0);
+        if (!Number.isNaN(ta) && !Number.isNaN(tb) && tb !== ta) return tb - ta;
+        return a.studentName.localeCompare(b.studentName);
+      }),
     }))
     .sort((a, b) => compareClassLabel(a.classLabel, b.classLabel));
 }
@@ -1831,6 +1860,96 @@ function StatCard({ label, value, hint, tone = 'slate', icon }) {
 
 function SubmissionTrackerPanel({ rows }) {
   if (!rows?.length) return null;
+
+  const STATUS_LABEL = {
+    pending: 'Pending',
+    changes_requested: 'Awaiting parent',
+    approved: 'Approved',
+    rejected: 'Rejected',
+  };
+
+  const [classFilter, setClassFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [query, setQuery] = useState('');
+
+  const classOptions = useMemo(() => ['ALL', ...rows.map((r) => r.classLabel)], [rows]);
+
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return rows
+      .filter((row) => classFilter === 'ALL' || row.classLabel === classFilter)
+      .map((row) => {
+        const entries = row.entries.filter((entry) => {
+          if (statusFilter !== 'ALL' && entry.status !== statusFilter) return false;
+          if (!q) return true;
+          const hay = [
+            entry.studentName,
+            entry.parentName,
+            entry.parentEmail,
+            entry.parentPhone,
+            entry.studentId,
+            entry.classLabel,
+          ].filter(Boolean).join(' ').toLowerCase();
+          return hay.includes(q);
+        });
+        const uniqueForms = new Set(entries.map((e) => e.recordId));
+        const uniqueStudents = new Set(entries.map((e) => e.studentId || `${e.studentName}::${e.classLabel}`));
+        return {
+          ...row,
+          formsCount: uniqueForms.size,
+          studentsCount: uniqueStudents.size,
+          entries,
+        };
+      })
+      .filter((row) => row.entries.length > 0);
+  }, [rows, classFilter, statusFilter, query]);
+
+  const totalEntries = filteredRows.reduce((sum, row) => sum + row.entries.length, 0);
+
+  const exportCsv = () => {
+    const csvEscape = (value) => {
+      const raw = String(value ?? '');
+      if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
+      return raw;
+    };
+    const header = [
+      'Class',
+      'Student Name',
+      'Student ID',
+      'Parent Name',
+      'Parent Email',
+      'Parent Phone',
+      'Status',
+      'Submitted At',
+      'Record ID',
+    ];
+    const lines = [header.join(',')];
+    filteredRows.forEach((row) => {
+      row.entries.forEach((entry) => {
+        lines.push([
+          row.classLabel,
+          entry.studentName,
+          entry.studentId || '',
+          entry.parentName,
+          entry.parentEmail || '',
+          entry.parentPhone || '',
+          STATUS_LABEL[entry.status] || entry.status,
+          entry.submittedAt || '',
+          entry.recordId,
+        ].map(csvEscape).join(','));
+      });
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pickup-submission-tracker-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/45 backdrop-blur p-4">
       <div className="flex items-start justify-between gap-3 mb-3">
@@ -1840,13 +1959,53 @@ function SubmissionTrackerPanel({ rows }) {
             Submitted forms with student-parent names so ACOP can brief teachers for follow-up.
           </p>
         </div>
-        <span className="text-[11px] px-2 py-1 rounded-full border border-slate-700 bg-slate-800/70 text-slate-300">
-          {rows.length} classes
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] px-2 py-1 rounded-full border border-slate-700 bg-slate-800/70 text-slate-300">
+            {filteredRows.length} classes
+          </span>
+          <button
+            type="button"
+            onClick={exportCsv}
+            disabled={totalEntries === 0}
+            className="text-[11px] px-2.5 py-1 rounded-md bg-emerald-500/20 border border-emerald-500/35 text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
+          >
+            <i className="ph ph-download-simple mr-1"></i>Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
+        <select
+          value={classFilter}
+          onChange={(e) => setClassFilter(e.target.value)}
+          className="bg-slate-900/70 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-200"
+        >
+          {classOptions.map((opt) => (
+            <option key={opt} value={opt}>{opt === 'ALL' ? 'All classes' : opt}</option>
+          ))}
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="bg-slate-900/70 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-200"
+        >
+          <option value="ALL">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="changes_requested">Awaiting parent</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search student / parent / phone"
+          className="md:col-span-2 bg-slate-900/70 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-white placeholder-slate-500"
+        />
       </div>
 
       <div className="space-y-3 max-h-[24rem] overflow-y-auto pr-1">
-        {rows.map((row) => (
+        {filteredRows.map((row) => (
           <div key={row.classLabel} className="rounded-xl border border-slate-800/90 bg-slate-950/35 p-3">
             <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
               <div className="inline-flex items-center gap-2">
@@ -1856,18 +2015,52 @@ function SubmissionTrackerPanel({ rows }) {
                 <span className="text-xs text-slate-300">{row.formsCount} forms</span>
                 <span className="text-xs text-slate-400">{row.studentsCount} students</span>
               </div>
+              <div className="inline-flex items-center gap-1 text-[10px]">
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/25 text-amber-300">P {row.statusCounts.pending || 0}</span>
+                <span className="px-1.5 py-0.5 rounded bg-orange-500/15 border border-orange-500/25 text-orange-300">A {row.statusCounts.changes_requested || 0}</span>
+                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-300">OK {row.statusCounts.approved || 0}</span>
+                <span className="px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/25 text-red-300">X {row.statusCounts.rejected || 0}</span>
+              </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-slate-400 border-b border-slate-800">
+                    <th className="text-left py-1.5 pr-2 font-medium">Student</th>
+                    <th className="text-left py-1.5 pr-2 font-medium">Parent</th>
+                    <th className="text-left py-1.5 pr-2 font-medium">Status</th>
+                    <th className="text-left py-1.5 pr-2 font-medium">Submitted</th>
+                  </tr>
+                </thead>
+                <tbody>
               {row.entries.map((entry, idx) => (
-                <div key={`${row.classLabel}-${idx}`} className="text-xs text-slate-300 truncate">
-                  <span className="font-medium text-white">{entry.studentName}</span>
-                  <span className="text-slate-500"> - </span>
-                  <span>{entry.parentName}</span>
-                </div>
+                  <tr key={`${row.classLabel}-${idx}`} className="border-b border-slate-900/80 last:border-0">
+                    <td className="py-1.5 pr-2 text-white">
+                      <div className="font-medium">{entry.studentName}</div>
+                      {entry.studentId && <div className="text-[10px] text-slate-500">{entry.studentId}</div>}
+                    </td>
+                    <td className="py-1.5 pr-2 text-slate-300">
+                      <div>{entry.parentName}</div>
+                      <div className="text-[10px] text-slate-500 truncate">{entry.parentPhone || entry.parentEmail || '—'}</div>
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800/70 text-slate-200">
+                        {STATUS_LABEL[entry.status] || entry.status}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-2 text-slate-400">{fmtTime(entry.submittedAt)}</td>
+                  </tr>
               ))}
+                </tbody>
+              </table>
             </div>
           </div>
         ))}
+        {filteredRows.length === 0 && (
+          <div className="rounded-xl border border-slate-800/90 bg-slate-950/35 p-4 text-xs text-slate-400 text-center">
+            No submissions match the current filters.
+          </div>
+        )}
       </div>
     </div>
   );
