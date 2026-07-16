@@ -118,6 +118,70 @@ function formatStudentFinalClass(student) {
   return pathway ? `${selection}${pathway}` : null;
 }
 
+function compareClassLabel(a, b) {
+  const A = String(a || '').toUpperCase();
+  const B = String(b || '').toUpperCase();
+  const eyA = /^EY(\d+)$/.exec(A);
+  const eyB = /^EY(\d+)$/.exec(B);
+  if (eyA && eyB) return Number(eyA[1]) - Number(eyB[1]);
+  if (eyA) return -1;
+  if (eyB) return 1;
+  const numA = /^(\d+)([A-Z]*)$/.exec(A);
+  const numB = /^(\d+)([A-Z]*)$/.exec(B);
+  if (numA && numB) {
+    const n = Number(numA[1]) - Number(numB[1]);
+    if (n !== 0) return n;
+    return numA[2].localeCompare(numB[2]);
+  }
+  return A.localeCompare(B);
+}
+
+function summarizeClassSubmissions(records = []) {
+  const bucket = new Map();
+  records.forEach((rec) => {
+    const parentName = String(rec?.guardian?.name || 'Unknown parent').trim() || 'Unknown parent';
+    const recordId = String(rec?.id || `${parentName}-${rec?.submittedAt || ''}`);
+    (rec.students || []).forEach((student) => {
+      const classLabel = (
+        formatStudentFinalClass(student)
+        || deriveGradeSelectionFromStudent(student)
+        || String(student?.homeroom || '').trim().toUpperCase()
+        || 'UNASSIGNED'
+      );
+      const studentName = buildStudentDisplayName(student);
+      const studentId = getStoredStudentId(student) || null;
+      const studentKey = studentId || `${studentName.toLowerCase()}::${classLabel}`;
+      const pairKey = `${studentKey}::${parentName.toLowerCase()}`;
+
+      if (!bucket.has(classLabel)) {
+        bucket.set(classLabel, {
+          classLabel,
+          forms: new Set(),
+          studentKeys: new Set(),
+          pairKeys: new Set(),
+          entries: [],
+        });
+      }
+      const row = bucket.get(classLabel);
+      row.forms.add(recordId);
+      row.studentKeys.add(studentKey);
+      if (!row.pairKeys.has(pairKey)) {
+        row.pairKeys.add(pairKey);
+        row.entries.push({ studentName, parentName, studentId });
+      }
+    });
+  });
+
+  return [...bucket.values()]
+    .map((row) => ({
+      classLabel: row.classLabel,
+      formsCount: row.forms.size,
+      studentsCount: row.studentKeys.size,
+      entries: row.entries.sort((a, b) => a.studentName.localeCompare(b.studentName)),
+    }))
+    .sort((a, b) => compareClassLabel(a.classLabel, b.classLabel));
+}
+
 function fmtTime(iso) {
   if (!iso) return '—';
   try {
@@ -195,6 +259,7 @@ export default function PickupAdminPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [printRec, setPrintRec] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [submissionTracker, setSubmissionTracker] = useState([]);
 
   // Top-level view switch — Onboarding queue vs TV Kiosk profiles.
   // Driven by the sidebar (?view=kiosks); no in-page toggle.
@@ -362,6 +427,12 @@ export default function PickupAdminPage() {
         archived: archivedL.length,
       });
       const byTab = { pending: pendingL, changes_requested: changesL, approved: approvedL, rejected: rejectedL, archived: archivedL };
+      setSubmissionTracker(summarizeClassSubmissions([
+        ...pendingL,
+        ...changesL,
+        ...approvedL,
+        ...rejectedL,
+      ]));
       setRecords(byTab[tab] || []);
     } catch (e) { setErr(e.message); }
     finally { setLoading(false); }
@@ -1052,6 +1123,8 @@ export default function PickupAdminPage() {
                 icon="ph-check-square" hint="for bulk action" />
             )}
           </div>
+
+          <SubmissionTrackerPanel rows={submissionTracker} />
 
           {/* Tabs + search + sort row */}
           <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
@@ -1751,6 +1824,50 @@ function StatCard({ label, value, hint, tone = 'slate', icon }) {
           <div className={`text-2xl font-bold leading-tight ${t.value}`}>{value}</div>
           {hint && <div className="text-[11px] text-slate-500 truncate">{hint}</div>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SubmissionTrackerPanel({ rows }) {
+  if (!rows?.length) return null;
+  return (
+    <div className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/45 backdrop-blur p-4">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h3 className="text-sm font-semibold text-white">Form Submission Tracker by Class</h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Submitted forms with student-parent names so ACOP can brief teachers for follow-up.
+          </p>
+        </div>
+        <span className="text-[11px] px-2 py-1 rounded-full border border-slate-700 bg-slate-800/70 text-slate-300">
+          {rows.length} classes
+        </span>
+      </div>
+
+      <div className="space-y-3 max-h-[24rem] overflow-y-auto pr-1">
+        {rows.map((row) => (
+          <div key={row.classLabel} className="rounded-xl border border-slate-800/90 bg-slate-950/35 p-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+              <div className="inline-flex items-center gap-2">
+                <span className="text-xs font-semibold px-2 py-1 rounded-md bg-brand-500/20 border border-brand-500/35 text-brand-200">
+                  {row.classLabel}
+                </span>
+                <span className="text-xs text-slate-300">{row.formsCount} forms</span>
+                <span className="text-xs text-slate-400">{row.studentsCount} students</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
+              {row.entries.map((entry, idx) => (
+                <div key={`${row.classLabel}-${idx}`} className="text-xs text-slate-300 truncate">
+                  <span className="font-medium text-white">{entry.studentName}</span>
+                  <span className="text-slate-500"> - </span>
+                  <span>{entry.parentName}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -536,12 +536,14 @@ function HeldListRow({ ev, onAction, busy, exiting }) {
       </div>
       <button
         type="button"
-        disabled={busy}
-        onClick={() => onAction(ev.id, 'release')}
+        disabled={busy[ev.id] || !!exiting}
+        onClick={() => onAction(ev, 'release')}
         style={{
           background: '#16a34a', color: '#fff', border: 'none',
           borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 800,
-          cursor: 'pointer', touchAction: 'manipulation',
+          cursor: busy[ev.id] || exiting ? 'not-allowed' : 'pointer',
+          opacity: busy[ev.id] || exiting ? 0.6 : 1,
+          touchAction: 'manipulation',
           transition: 'transform 120ms ease',
         }}
         onTouchStart={(e) => { e.currentTarget.style.transform = 'scale(0.96)'; }}
@@ -775,7 +777,9 @@ export default function TeacherTabletPage() {
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
   const [sseLive, setSseLive] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const pollRef = useRef(null);
+  const activeCarouselRef = useRef(null);
 
   // Load token + last-known identity from localStorage so the iPad reopens
   // straight to its assigned class — no code re-entry between launches.
@@ -877,6 +881,12 @@ export default function TeacherTabletPage() {
     })();
     return () => { cancelled = true; };
   }, [token]);
+
+  // Keep the carousel index in range as active cards change.
+  useEffect(() => {
+    const maxIdx = Math.max(0, (feed.active || []).length - 1);
+    setActiveIndex((idx) => Math.min(idx, maxIdx));
+  }, [feed.active]);
 
   // Poll feed
   const pollFeed = useCallback(async () => {
@@ -1147,7 +1157,7 @@ export default function TeacherTabletPage() {
           </div>
         )}
 
-        {/* Active panel: max 4 cards */}
+        {/* Active panel: swipe-first carousel */}
         <div style={{ padding: '22px', maxWidth: 1400, margin: '0 auto' }}>
           {(() => {
             const activeFour = (feed.active || []).slice(0, 4);
@@ -1162,14 +1172,81 @@ export default function TeacherTabletPage() {
               );
             }
             return (
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: activeFour.length === 1 ? '1fr' : 'repeat(2, minmax(0, 1fr))',
-                gap: 18,
-              }}>
-                {activeFour.map((ev) => (
-                  <Card key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} big />
-                ))}
+              <div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  gap: 12, marginBottom: 12,
+                }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, color: BINUS_GOLD, textTransform: 'uppercase' }}>
+                      Active pickup
+                    </div>
+                    <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600, marginTop: 2 }}>
+                      Swipe either direction to review cards. Hold when pickup is not ready.
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '6px 12px', borderRadius: 999,
+                    background: 'rgba(252,191,17,0.10)', border: '1px solid rgba(252,191,17,0.28)',
+                    color: BINUS_MAROON, fontSize: 12, fontWeight: 800,
+                  }}>
+                    {activeFour.length} active
+                  </div>
+                </div>
+
+                <div
+                  ref={activeCarouselRef}
+                  onScroll={(e) => {
+                    const w = e.currentTarget.clientWidth || 1;
+                    const idx = Math.round(e.currentTarget.scrollLeft / w);
+                    setActiveIndex(Math.max(0, Math.min(idx, activeFour.length - 1)));
+                  }}
+                  style={{
+                    display: 'flex',
+                    gap: 14,
+                    overflowX: 'auto',
+                    padding: '4px 2px 10px',
+                    scrollSnapType: 'x mandatory',
+                    WebkitOverflowScrolling: 'touch',
+                    touchAction: 'pan-x',
+                    scrollbarWidth: 'none',
+                  }}
+                >
+                  {activeFour.map((ev) => (
+                    <div
+                      key={ev.id}
+                      style={{
+                        flex: '0 0 100%',
+                        display: 'flex',
+                        justifyContent: 'center',
+                        scrollSnapAlign: 'center',
+                      }}
+                    >
+                      <div style={{ width: 'min(900px, 100%)' }}>
+                        <Card ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} big />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {activeFour.length > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 10 }}>
+                    {activeFour.map((ev, idx) => (
+                      <div
+                        key={ev.id}
+                        aria-hidden
+                        style={{
+                          width: idx === activeIndex ? 18 : 8,
+                          height: 8,
+                          borderRadius: 999,
+                          background: idx === activeIndex ? BINUS_MAROON : '#cbd5e1',
+                          transition: 'width 180ms ease, background 180ms ease',
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })()}
