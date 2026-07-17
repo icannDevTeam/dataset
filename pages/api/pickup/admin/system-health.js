@@ -40,6 +40,17 @@ const { getRateLimitStats } = require('../../../../lib/rate-limit');
 
 const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
 
+function tsMs(v) {
+  if (!v) return null;
+  if (typeof v === 'string') {
+    const ms = Date.parse(v);
+    return Number.isNaN(ms) ? null : ms;
+  }
+  if (typeof v?.toDate === 'function') return v.toDate().getTime();
+  if (v instanceof Date) return v.getTime();
+  return null;
+}
+
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
 
@@ -152,6 +163,59 @@ async function handler(req, res) {
     onboarding.pending = pendingSnap.size;
   } catch { /* non-critical */ }
 
+  // ── 7. Terminals health (up/down by lastSeenAt heartbeat) ─────────────────
+  const terminals = {
+    total: 0,
+    enabled: 0,
+    up: 0,
+    down: 0,
+    unknown: 0,
+    disabled: 0,
+    downThresholdMinutes: Number(process.env.TERMINAL_DOWN_THRESHOLD_MINUTES || 10),
+  };
+  try {
+    const thresholdMs = Math.max(1, terminals.downThresholdMinutes) * 60 * 1000;
+    const now = Date.now();
+    const termSnap = await db.collection(tenancy.terminalsPath(tid)).get();
+    terminals.total = termSnap.size;
+    termSnap.forEach((doc) => {
+      const d = doc.data() || {};
+      const enabled = d.enabled !== false;
+      if (!enabled) {
+        terminals.disabled += 1;
+        return;
+      }
+      terminals.enabled += 1;
+      const seenMs = tsMs(d.lastSeenAt);
+      if (seenMs == null) {
+        terminals.unknown += 1;
+        return;
+      }
+      const age = now - seenMs;
+      if (age > thresholdMs) terminals.down += 1;
+      else terminals.up += 1;
+    });
+  } catch { /* non-critical */ }
+
+  const terminalsService = (() => {
+    if (terminals.total === 0) {
+      return { status: 'warn', note: 'No terminals registered' };
+    }
+    if (terminals.down > 0) {
+      return {
+        status: 'error',
+        note: `${terminals.down}/${terminals.enabled} enabled terminal${terminals.enabled === 1 ? '' : 's'} down`,
+      };
+    }
+    if (terminals.unknown > 0) {
+      return {
+        status: 'warn',
+        note: `${terminals.unknown} terminal${terminals.unknown === 1 ? '' : 's'} with no heartbeat yet`,
+      };
+    }
+    return { status: 'ok', note: `${terminals.up}/${terminals.enabled} enabled terminals up` };
+  })();
+
   return res.status(200).json({
     ok: true,
     checkedAt,
@@ -159,11 +223,13 @@ async function handler(req, res) {
       firestore: firestoreResult,
       email: emailResult,
       whatsapp: whatsappResult,
+      terminals: terminalsService,
       functions: {
         status: 'ok',
         note: 'processEmailQueue runs on Cloud Functions — check Firebase console for invocation errors',
       },
     },
+    terminals,
     emailQueue,
     security,
     onboarding,

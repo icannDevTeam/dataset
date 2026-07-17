@@ -15,8 +15,6 @@ import Head from 'next/head';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
 
-const MAX_TERMINALS_PER_GROUP = 2;
-
 // Filter terminals to those eligible for assignment to a release group:
 //  - unbound (releaseGroupId is null), OR currently bound to *this* group
 //  - grade-compatible: if the group has a gradeLabel, the terminal must
@@ -98,9 +96,6 @@ export default function ReleaseGroupsPage() {
   const create = async () => {
     if (!newGroup.name.trim()) { showToast('error', 'Group name is required.'); return; }
     if (!newGroup.terminalIds.length) { showToast('error', 'Pick at least one terminal.'); return; }
-    if (newGroup.terminalIds.length > MAX_TERMINALS_PER_GROUP) {
-      showToast('error', `Max ${MAX_TERMINALS_PER_GROUP} terminals per group.`); return;
-    }
     setCreating(true);
     try {
       const r = await fetch('/api/pickup/admin/release-groups', {
@@ -183,9 +178,6 @@ export default function ReleaseGroupsPage() {
         }
         if (j.error === 'terminal_grade_mismatch' && j.mismatches?.length) {
           throw new Error(`Grade mismatch: ${j.mismatches.map((m) => `${m.name || m.terminalId} (${(m.terminalGrades||[]).join('/') || 'no grade'})`).join(', ')}`);
-        }
-        if (j.error?.startsWith('too-many-terminals')) {
-          throw new Error(`Max ${MAX_TERMINALS_PER_GROUP} terminals per group.`);
         }
         throw new Error(j.message || j.error || 'failed');
       }
@@ -305,7 +297,7 @@ export default function ReleaseGroupsPage() {
 
             <div>
               <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5">
-                Terminals (max {MAX_TERMINALS_PER_GROUP}, grade-locked)
+                Terminals (grade-locked)
               </label>
               {(() => {
                 const eligible = eligibleTerminals(terminals, { gradeLabel: newGroup.gradeLabel, id: null });
@@ -318,25 +310,21 @@ export default function ReleaseGroupsPage() {
                     </div>
                   );
                 }
-                const reachedCap = newGroup.terminalIds.length >= MAX_TERMINALS_PER_GROUP;
                 return (
                   <>
                     <div className="flex flex-wrap gap-2">
                       {eligible.map((t) => {
                         const checked = newGroup.terminalIds.includes(t.id);
-                        const disabled = !checked && reachedCap;
                         return (
                           <label key={t.id}
                             className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition ${
                               checked ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 cursor-pointer'
-                              : disabled ? 'bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed'
                               : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600 cursor-pointer'
                             }`}>
                             <input
                               type="checkbox"
                               className="rounded border-slate-700 bg-slate-950"
                               checked={checked}
-                              disabled={disabled}
                               onChange={(e) => {
                                 const ids = new Set(newGroup.terminalIds);
                                 if (e.target.checked) ids.add(t.id); else ids.delete(t.id);
@@ -350,8 +338,7 @@ export default function ReleaseGroupsPage() {
                       })}
                     </div>
                     <div className="text-[10px] text-slate-500 mt-1">
-                      {newGroup.terminalIds.length}/{MAX_TERMINALS_PER_GROUP} selected
-                      {reachedCap && <span className="text-amber-400 ml-2">— cap reached</span>}
+                      {newGroup.terminalIds.length} selected
                     </div>
                   </>
                 );

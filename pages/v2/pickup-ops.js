@@ -238,6 +238,7 @@ const TYPE_LABEL = { terminal: 'Terminal', tv: 'TV Screen', tablet: 'Tablet' };
 
 function DeviceRow({ device }) {
   const online = device.online;
+  const connectivity = device.connectivity || (online ? 'up' : (device.heartbeatAt ? 'down' : 'unknown'));
   return (
     <tr className="hover:bg-gray-50 transition-colors">
       <td className="px-3 py-2.5">
@@ -253,9 +254,11 @@ function DeviceRow({ device }) {
         </Badge>
       </td>
       <td className="px-3 py-2.5">
-        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${online ? 'text-emerald-700' : 'text-gray-400'}`}>
+        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
+          connectivity === 'up' ? 'text-emerald-700' : connectivity === 'down' ? 'text-red-600' : 'text-gray-500'
+        }`}>
           <StatusDot status={online ? 'online' : 'offline'} />
-          {online ? 'Online' : 'Offline'}
+          {connectivity === 'up' ? 'Online' : connectivity === 'down' ? 'Down' : 'Unknown'}
         </span>
       </td>
       <td className="px-3 py-2.5 text-xs text-gray-500 max-w-[120px] truncate">
@@ -425,7 +428,10 @@ export default function PickupOpsPage() {
   const listenerStatus = listenerLog?.listenerStatus || [];
 
   const onlineDevices  = devList.filter((d) => d.online).length;
-  const liveDevices    = devList.filter((d) => d.online);
+  const shownDevices = [...devList].sort((a, b) => {
+    if ((a.online ? 1 : 0) !== (b.online ? 1 : 0)) return (b.online ? 1 : 0) - (a.online ? 1 : 0);
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
   const liveInterfaces = interfaces.filter((i) => i.status === 'up');
   const upInterfaces   = liveInterfaces.length;
   const totalEvents24h = interfaces.reduce((s, i) => s + i.metrics.total24h, 0);
@@ -558,14 +564,14 @@ export default function PickupOpsPage() {
                     </div>
                   )}
                   {!devices && <Spinner />}
-                  {liveDevices.length === 0 && devices && (
+                  {shownDevices.length === 0 && devices && (
                     <p className="text-sm text-gray-400 text-center py-6">
                       {devList.length > 0
                         ? `No devices connected right now — ${devList.length} paired but offline.`
                         : 'No devices registered yet.'}
                     </p>
                   )}
-                  {liveDevices.length > 0 && (
+                  {shownDevices.length > 0 && (
                     <div className="overflow-x-auto rounded-xl border border-gray-100">
                       <table className="min-w-full text-sm">
                         <thead>
@@ -580,14 +586,14 @@ export default function PickupOpsPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50 bg-white">
-                          {liveDevices.map((d) => <DeviceRow key={`${d.type}-${d.id}`} device={d} />)}
+                          {shownDevices.map((d) => <DeviceRow key={`${d.type}-${d.id}`} device={d} />)}
                         </tbody>
                       </table>
                     </div>
                   )}
-                  {liveDevices.length > 0 && devList.length > liveDevices.length && (
-                    <p className="text-xs text-gray-400 mt-2">
-                      {devList.length - liveDevices.length} paired device{devList.length - liveDevices.length === 1 ? '' : 's'} offline — hidden
+                  {devList.length > 0 && onlineDevices < devList.length && (
+                    <p className="text-xs text-red-500 mt-2">
+                      {devList.length - onlineDevices} device{devList.length - onlineDevices === 1 ? '' : 's'} currently down/offline
                     </p>
                   )}
                 </Card>

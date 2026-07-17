@@ -248,6 +248,7 @@ export default function PickupMonitorPage() {
 
   const services = health?.services || {};
   const eq = health?.emailQueue || {};
+  const terminals = health?.terminals || {};
   const pending24h = notifLog?.summary?.pending ?? 0;
   const failed24h  = notifLog?.summary?.failed  ?? 0;
 
@@ -345,6 +346,12 @@ export default function PickupMonitorPage() {
                 variant={health?.onboarding?.pending > 0 ? 'blue' : 'default'}
               />
               <StatBox
+                label="Terminals down"
+                value={terminals.down ?? '—'}
+                sub={terminals.enabled != null ? `${terminals.up || 0}/${terminals.enabled} up` : undefined}
+                variant={(terminals.down || 0) > 0 ? 'red' : 'green'}
+              />
+              <StatBox
                 label="Delivery rate"
                 value={notifLog?.summary?.deliveryRate != null ? `${notifLog.summary.deliveryRate}%` : '—'}
                 sub="sent / (sent+failed)"
@@ -388,6 +395,11 @@ export default function PickupMonitorPage() {
                           ? services.whatsapp.url
                           : 'No webhook URL configured in Pickup Settings'
                       }
+                    />
+                    <StatusPill
+                      status={services.terminals?.status || 'checking'}
+                      label="Face Terminals"
+                      detail={services.terminals?.note || `Down threshold: ${terminals.downThresholdMinutes || 10}m`}
                     />
                     <StatusPill
                       status={services.functions?.status || 'checking'}

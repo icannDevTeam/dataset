@@ -34,6 +34,21 @@ import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 
+function terminalNaturalCompare(aName, bName) {
+  const a = String(aName || '').trim();
+  const b = String(bName || '').trim();
+  const am = a.match(/^Terminal\s+(\d+)$/i);
+  const bm = b.match(/^Terminal\s+(\d+)$/i);
+  if (am && bm) {
+    const an = parseInt(am[1], 10);
+    const bn = parseInt(bm[1], 10);
+    if (an !== bn) return an - bn;
+  }
+  if (am && !bm) return -1;
+  if (!am && bm) return 1;
+  return a.localeCompare(b);
+}
+
 function tsIso(v) {
   if (!v) return null;
   if (typeof v.toDate === 'function') return v.toDate().toISOString();
@@ -79,6 +94,8 @@ async function handler(req, res) {
       const hbMs = tsMs(d.lastHeartbeat || d.lastSeenAt || d.updatedAt);
       const msSince = hbMs ? now - hbMs : null;
       const status = d.status || 'unpaired';
+      const online = msSince !== null && msSince < ONLINE_THRESHOLD_MS;
+      const connectivity = msSince == null ? 'unknown' : (online ? 'up' : 'down');
       if (status === 'paired') summary.tvPaired++;
 
       devices.push({
@@ -90,7 +107,8 @@ async function handler(req, res) {
         status,
         heartbeatAt: tsIso(d.lastHeartbeat || d.lastSeenAt || d.updatedAt),
         msSinceHeartbeat: msSince,
-        online: msSince !== null && msSince < ONLINE_THRESHOLD_MS,
+        online,
+        connectivity,
         profileId: d.profileId || null,
         profileName: d.profileId ? (profileNames[d.profileId] || d.profileId) : null,
         releaseGroupId: null,
@@ -116,6 +134,8 @@ async function handler(req, res) {
       const hbMs = tsMs(d.lastSeenAt || d.updatedAt);
       const msSince = hbMs ? now - hbMs : null;
       const status = d.status || 'unpaired';
+      const online = msSince !== null && msSince < ONLINE_THRESHOLD_MS;
+      const connectivity = msSince == null ? 'unknown' : (online ? 'up' : 'down');
       if (status === 'paired') summary.tabletPaired++;
 
       devices.push({
@@ -127,7 +147,8 @@ async function handler(req, res) {
         status,
         heartbeatAt: tsIso(d.lastSeenAt || d.updatedAt),
         msSinceHeartbeat: msSince,
-        online: msSince !== null && msSince < ONLINE_THRESHOLD_MS,
+        online,
+        connectivity,
         profileId: null,
         profileName: null,
         releaseGroupId: d.releaseGroupId || null,
@@ -147,6 +168,8 @@ async function handler(req, res) {
       const hbMs = tsMs(d.lastSeenAt);
       const msSince = hbMs ? now - hbMs : null;
       const enabled = d.enabled !== false;
+      const online = msSince !== null && msSince < 10 * 60 * 1000;
+      const connectivity = !enabled ? 'disabled' : (msSince == null ? 'unknown' : (online ? 'up' : 'down'));
       if (enabled) summary.terminalEnabled++;
 
       devices.push({
@@ -158,7 +181,8 @@ async function handler(req, res) {
         status: enabled ? 'enabled' : 'disabled',
         heartbeatAt: tsIso(d.lastSeenAt),
         msSinceHeartbeat: msSince,
-        online: msSince !== null && msSince < 10 * 60 * 1000, // terminal: 10min threshold
+        online, // terminal: 10min threshold
+        connectivity,
         profileId: null,
         profileName: null,
         releaseGroupId: null,
@@ -174,7 +198,11 @@ async function handler(req, res) {
   devices.sort((a, b) => {
     const to = (TYPE_ORDER[a.type] || 9) - (TYPE_ORDER[b.type] || 9);
     if (to !== 0) return to;
-    return (a.name || '').localeCompare(b.name || '');
+    // Natural sort for terminal labels: Terminal 1..11 (not 1,10,11,2)
+    if (a.type === 'terminal' && b.type === 'terminal') {
+      return terminalNaturalCompare(a.name, b.name);
+    }
+    return String(a.name || '').localeCompare(String(b.name || ''));
   });
 
   res.setHeader('Cache-Control', 'no-store');

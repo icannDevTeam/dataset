@@ -163,6 +163,45 @@ export default function TerminalsPage() {
     }
   };
 
+  const archiveTerminal = async (t) => {
+    if (!confirm(`Archive "${t.name}"? It will remain in history but stop running.`)) return;
+    setBusy((b) => ({ ...b, [t.id]: true }));
+    try {
+      const r = await fetch(`/api/pickup/admin/terminals?id=${t.id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'archive failed');
+      showToast('warn', 'Terminal archived.');
+      await reload();
+    } catch (e) {
+      showToast('error', e.message);
+    } finally {
+      setBusy((b) => ({ ...b, [t.id]: false }));
+    }
+  };
+
+  const hardDeleteTerminal = async (t) => {
+    if (!confirm(`Delete "${t.name}" permanently? This cannot be undone.`)) return;
+    if (!confirm('Final confirmation: permanently delete this terminal record?')) return;
+    setBusy((b) => ({ ...b, [t.id]: true }));
+    try {
+      const r = await fetch(`/api/pickup/admin/terminals?id=${t.id}&hard=1`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'delete failed');
+      showToast('warn', 'Terminal permanently deleted.');
+      await reload();
+    } catch (e) {
+      showToast('error', e.message);
+    } finally {
+      setBusy((b) => ({ ...b, [t.id]: false }));
+    }
+  };
+
   // Effective state, filtered + searched.
   const decorated = useMemo(() => terminals.map((t) => ({ t, eff: computeEffective(t, now) })), [terminals, now]);
   const visible = useMemo(() => {
@@ -175,6 +214,7 @@ export default function TerminalsPage() {
       if (filter === 'open')      return t.enabled !== false && eff.open;
       if (filter === 'closed')    return t.enabled !== false && !eff.open;
       if (filter === 'manual')    return t.enabled !== false && !!eff.override;
+      if (filter === 'down')      return t.healthStatus === 'down';
       if (filter === 'disabled')  return t.enabled === false;
       if (filter === 'unbound')   return !t.releaseGroupId;
       return true;
@@ -182,15 +222,16 @@ export default function TerminalsPage() {
   }, [decorated, filter, search]);
 
   const stats = useMemo(() => {
-    let total = 0, open = 0, closed = 0, disabled = 0, manual = 0, unbound = 0;
+    let total = 0, open = 0, closed = 0, down = 0, disabled = 0, manual = 0, unbound = 0;
     decorated.forEach(({ t, eff }) => {
       total++;
       if (t.enabled === false) { disabled++; return; }
+      if (t.healthStatus === 'down') down++;
       if (eff.open) open++; else closed++;
       if (eff.override) manual++;
       if (!t.releaseGroupId) unbound++;
     });
-    return { total, open, closed, disabled, manual, unbound };
+    return { total, open, closed, down, disabled, manual, unbound };
   }, [decorated]);
 
   return (
@@ -208,7 +249,7 @@ export default function TerminalsPage() {
               <div>
                 <h1 className="text-2xl font-bold text-white">Hikvision Terminals</h1>
                 <p className="text-sm text-slate-300 mt-1 max-w-2xl">
-                  Auto-synced from <code className="text-slate-200 bg-slate-900/60 px-1.5 py-0.5 rounded text-xs">backend/devices.json</code> on listener startup.
+                  Source of truth is Firestore terminal registry.
                   Bind a release group, set a daily pickup window, or force-open / force-close. Manual override always wins.
                 </p>
               </div>
@@ -227,10 +268,11 @@ export default function TerminalsPage() {
         </div>
 
         {/* Stat cards (clickable filters) */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
           <StatCard active={filter === 'all'}      onClick={() => setFilter('all')}      label="Total"     value={stats.total}    icon="ph-cpu"          tone="slate" />
           <StatCard active={filter === 'open'}     onClick={() => setFilter('open')}     label="Open now"  value={stats.open}     icon="ph-door-open"    tone="emerald" />
           <StatCard active={filter === 'closed'}   onClick={() => setFilter('closed')}   label="Closed"    value={stats.closed}   icon="ph-door"         tone="rose" />
+          <StatCard active={filter === 'down'}     onClick={() => setFilter('down')}     label="Down"      value={stats.down}     icon="ph-plug"         tone="rose" />
           <StatCard active={filter === 'manual'}   onClick={() => setFilter('manual')}   label="Manual"    value={stats.manual}   icon="ph-hand-tap"     tone="amber" />
           <StatCard active={filter === 'unbound'}  onClick={() => setFilter('unbound')}  label="No group"  value={stats.unbound}  icon="ph-link-break"   tone="violet" />
           <StatCard active={filter === 'disabled'} onClick={() => setFilter('disabled')} label="Disabled"  value={stats.disabled} icon="ph-prohibit"     tone="zinc" />
@@ -275,7 +317,7 @@ export default function TerminalsPage() {
             </div>
             <div className="mt-1 text-xs text-slate-500">
               {terminals.length === 0
-                ? <>Start the Pandora backend (<code className="text-slate-300">run_listeners.py</code>) to auto-register devices from <code className="text-slate-300">backend/devices.json</code>.</>
+                ? <>No terminal docs found in Firestore yet. Add a terminal from this page or run listener bootstrap once.</>
                 : 'Try clearing the search or filter.'}
             </div>
           </div>
@@ -295,6 +337,8 @@ export default function TerminalsPage() {
               onSave={() => save(t.id)}
               onGate={(v) => setGate(t.id, v)}
               onToggleEnabled={() => toggleEnabled(t)}
+              onArchive={() => archiveTerminal(t)}
+              onDelete={() => hardDeleteTerminal(t)}
               onRename={() => setRenaming(t)}
               onLockedWindow={() => setShowLockedWindow(true)}
             />
@@ -409,15 +453,20 @@ function StatCard({ label, value, icon, tone, active, onClick }) {
 }
 
 // ── Terminal card ─────────────────────────────────────────────────────
-function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave, onGate, onToggleEnabled, onRename, onLockedWindow }) {
+function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave, onGate, onToggleEnabled, onArchive, onDelete, onRename, onLockedWindow }) {
   const dirty = Object.keys(draft).length > 0;
   const disabled = t.enabled === false;
+  const isDown = t.healthStatus === 'down';
+  const isUnknown = t.healthStatus === 'unknown';
+  const listenerKnown = typeof t.listenerRunning === 'boolean';
   const lastSeen = relativeTime(t.lastSeenAt);
   const overrideAt = relativeTime(t.gateOverrideAt);
 
   // Card framing (color-coded by state)
   const frame = disabled
     ? { ring: 'border-zinc-700', glow: 'from-zinc-700/10 to-zinc-900/20', halo: 'bg-zinc-700' }
+    : isDown
+      ? { ring: 'border-red-500/50', glow: 'from-red-500/15 to-slate-900/40', halo: 'bg-red-500' }
     : eff.open
       ? { ring: 'border-emerald-500/40', glow: 'from-emerald-500/10 to-slate-900/40', halo: 'bg-emerald-500' }
       : { ring: 'border-rose-500/40',    glow: 'from-rose-500/10 to-slate-900/40',    halo: 'bg-rose-500' };
@@ -452,6 +501,26 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
                 {eff.open ? 'Open' : 'Closed'}
               </span>
             )}
+            {isDown && !disabled && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-red-500/20 text-red-300 border border-red-500/40 inline-flex items-center gap-1">
+                <i className="ph ph-plug"></i>Down
+              </span>
+            )}
+            {!disabled && listenerKnown && (
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider inline-flex items-center gap-1 ${
+                t.listenerRunning
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  : 'bg-red-500/20 text-red-300 border border-red-500/40'
+              }`}>
+                <i className={`ph ${t.listenerRunning ? 'ph-play-circle' : 'ph-stop-circle'}`}></i>
+                Listener {t.listenerRunning ? 'On' : 'Off'}
+              </span>
+            )}
+            {isUnknown && !disabled && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-slate-600/30 text-slate-300 border border-slate-600 inline-flex items-center gap-1">
+                <i className="ph ph-question"></i>No heartbeat
+              </span>
+            )}
             {eff.override && !disabled && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 inline-flex items-center gap-0.5">
                 <i className="ph ph-hand-tap"></i>Manual
@@ -463,6 +532,11 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
             {lastSeen && (
               <span className="text-slate-500">
                 <i className="ph ph-clock-clockwise mr-0.5"></i>seen {lastSeen}
+              </span>
+            )}
+            {!lastSeen && (
+              <span className="text-slate-600">
+                <i className="ph ph-clock mr-0.5"></i>never seen
               </span>
             )}
           </div>
@@ -488,6 +562,22 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
           >
             <i className={`ph ${disabled ? 'ph-power' : 'ph-prohibit'}`}></i>
           </button>
+          <button
+            onClick={onArchive}
+            disabled={busy || disabled}
+            title="Archive terminal"
+            className="p-1.5 rounded-md text-xs bg-slate-800/60 text-slate-400 border border-slate-700 hover:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 disabled:opacity-50"
+          >
+            <i className="ph ph-archive-box"></i>
+          </button>
+          <button
+            onClick={onDelete}
+            disabled={busy}
+            title="Delete terminal permanently"
+            className="p-1.5 rounded-md text-xs bg-slate-800/60 text-slate-400 border border-slate-700 hover:text-red-300 hover:bg-red-500/10 hover:border-red-500/30 disabled:opacity-50"
+          >
+            <i className="ph ph-trash"></i>
+          </button>
         </div>
       </div>
 
@@ -495,6 +585,17 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
       <div className="px-4 pb-3 text-[11px] text-slate-400 flex items-center gap-1.5">
         <i className="ph ph-info text-slate-500"></i>
         <span>State: <span className="text-slate-200 font-medium">{eff.reason}</span></span>
+        {!disabled && isDown && (
+          <span className="text-red-300">
+            · {t.healthSource === 'listener' ? 'listener is down' : 'terminal heartbeat is down'}
+          </span>
+        )}
+        {!disabled && listenerKnown && t.listenerPid && (
+          <span className="text-slate-500">· PID {t.listenerPid}</span>
+        )}
+        {!disabled && listenerKnown && t.listenerUptime && (
+          <span className="text-slate-600">· up {t.listenerUptime}</span>
+        )}
         {overrideAt && eff.override && (
           <span className="text-slate-600">· since {overrideAt}</span>
         )}

@@ -25,6 +25,21 @@ import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 const { terminalGateStatus, effectiveGateStatus, isValidHHMM } = require('../../../../lib/terminal-gate');
 
+function terminalNaturalCompare(aName, bName) {
+  const a = String(aName || '').trim();
+  const b = String(bName || '').trim();
+  const am = a.match(/^Terminal\s+(\d+)$/i);
+  const bm = b.match(/^Terminal\s+(\d+)$/i);
+  if (am && bm) {
+    const an = parseInt(am[1], 10);
+    const bn = parseInt(bm[1], 10);
+    if (an !== bn) return an - bn;
+  }
+  if (am && !bm) return -1;
+  if (!am && bm) return 1;
+  return a.localeCompare(b);
+}
+
 async function handler(req, res) {
   try {
     initializeFirebase();
@@ -88,7 +103,7 @@ async function handler(req, res) {
 
     if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
 
-    const snap = await termsRef.orderBy('name').get();
+    const snap = await termsRef.get();
     // Preload release groups once so per-terminal lookup is O(1).
     const groupsSnap = await db.collection(tenancy.releaseGroupsPath(tid)).get();
     const groupById = new Map();
@@ -106,7 +121,7 @@ async function handler(req, res) {
         scheduled: status.scheduled,
         effective: { open: status.open, manualOverride: status.manualOverride, reason: status.reason, override: status.override || null },
       };
-    }).filter(Boolean);
+    }).filter(Boolean).sort((a, b) => terminalNaturalCompare(a.name, b.name));
 
     return res.status(200).json({
       ok: true,

@@ -21,7 +21,6 @@ const tab = require('../../../../lib/tablet-devices');
 const { isValidHHMM } = require('../../../../lib/terminal-gate');
 
 const PAIRING_TTL_MS = 10 * 60 * 1000;
-const MAX_TERMINALS_PER_GROUP = 2;   // 2 face terminals per grade gate.
 
 // Validate + normalise the list of one-off pickup-window overrides.
 // Shape: [{ date:'YYYY-MM-DD', open:'HH:MM'|null, close:'HH:MM'|null,
@@ -59,10 +58,6 @@ function normaliseOverrides(raw) {
 async function validateTerminalAssignment(db, tid, colRef, ids, gradeLabel, selfId) {
   if (!Array.isArray(ids)) return;
   if (ids.length === 0)   throw Object.assign(new Error('at-least-one-terminal-required'), { code: 400 });
-  if (ids.length > MAX_TERMINALS_PER_GROUP) {
-    const e = new Error(`too-many-terminals: max ${MAX_TERMINALS_PER_GROUP} per release group`);
-    e.code = 400; throw e;
-  }
 
   // 1. Exclusivity: scan all other groups for overlap.
   const allGroups = await colRef.get();

@@ -58,6 +58,15 @@ function deviceMatchesGrades(device, grades) {
   return device.gradeScopes.some((g) => grades.includes(String(g)));
 }
 
+function preferredChaperonePhotoRef(chaperone) {
+  if (!chaperone) return null;
+  const fromFacePaths = Array.isArray(chaperone.facePaths) ? chaperone.facePaths[0] : null;
+  if (fromFacePaths) return fromFacePaths;
+  if (typeof chaperone.photoUrl === 'string' && chaperone.photoUrl) return chaperone.photoUrl;
+  if (Array.isArray(chaperone.photoUrls) && chaperone.photoUrls[0]) return chaperone.photoUrls[0];
+  return null;
+}
+
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
   const tid = tenancy.getTenantId(req.query.tenant);
@@ -90,7 +99,7 @@ async function handler(req, res) {
     // Pre-fetch authorized students for name lookup
     const allStudentIds = new Set();
     const chaperones = [];
-    const facePathsToSign = new Set();
+    const photoRefsToSign = new Set();
     snap.forEach((d) => {
       const c = d.data() || {};
       // Only show approved (or approved-pending-faces) and not-suspended chaperones.
@@ -100,8 +109,10 @@ async function handler(req, res) {
       if (!['approved', 'approved_pending_faces'].includes(c.status)) return;
       chaperones.push({ id: d.id, ...c });
       (c.authorizedStudentIds || []).forEach((sid) => sid && allStudentIds.add(sid));
-      const first = (c.facePaths || [])[0];
-      if (first) facePathsToSign.add(first);
+      const photoRef = preferredChaperonePhotoRef(c);
+      if (photoRef && !/^https?:\/\//i.test(photoRef)) {
+        photoRefsToSign.add(photoRef);
+      }
     });
     if (chaperones.length === 0) {
       return res.status(200).json({
@@ -121,7 +132,7 @@ async function handler(req, res) {
           return [sid, legacy.exists ? (legacy.data() || {}) : null];
         } catch { return [sid, null]; }
       })),
-      Promise.all([...facePathsToSign].map(async (p) => {
+      Promise.all([...photoRefsToSign].map(async (p) => {
         try {
           const [u] = await bucket.file(p).getSignedUrl({
             action: 'read', expires: Date.now() + SIGNED_TTL_MS,
@@ -131,7 +142,7 @@ async function handler(req, res) {
       })),
     ]);
     const studentMeta = Object.fromEntries(studentEntries);
-    const faceUrlByPath = new Map(signedEntries);
+    const photoUrlByRef = new Map(signedEntries);
 
     // Backfill: any chaperone with empty studentClasses/Grades AND a known
     // approvedFromOnboarding record has the homeroom info on the parent's
@@ -236,6 +247,11 @@ async function handler(req, res) {
       else if (okAny) partiallyEnrolled += 1;
       else neverEnrolled += 1;
 
+      const photoRef = preferredChaperonePhotoRef(c);
+      const resolvedPhotoUrl = !photoRef
+        ? null
+        : (/^https?:\/\//i.test(photoRef) ? photoRef : (photoUrlByRef.get(photoRef) || null));
+
       const item = {
         id: c.id,
         employeeNo: c.employeeNo || null,
@@ -245,7 +261,7 @@ async function handler(req, res) {
         email: c.email || null,
         status: c.status || null,
         photoCount,
-        facePhotoUrl: faceUrlByPath.get((c.facePaths || [])[0]) || null,
+        facePhotoUrl: resolvedPhotoUrl,
         approvedAt: c.approvedAt || null,
         guardianName: c.guardianName || null,
         studentClasses,
