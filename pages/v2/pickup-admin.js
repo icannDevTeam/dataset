@@ -1871,8 +1871,12 @@ function SubmissionTrackerPanel({ rows }) {
   const [classFilter, setClassFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [query, setQuery] = useState('');
+  const [previewSheet, setPreviewSheet] = useState(null);
 
-  const classOptions = useMemo(() => ['ALL', ...rows.map((r) => r.classLabel)], [rows]);
+  const classOptions = useMemo(() => {
+    const uniq = Array.from(new Set(rows.map((r) => r.classLabel).filter(Boolean)));
+    return ['ALL', ...uniq.sort((a, b) => String(a).localeCompare(String(b)))];
+  }, [rows]);
 
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1904,26 +1908,34 @@ function SubmissionTrackerPanel({ rows }) {
       .filter((row) => row.entries.length > 0);
   }, [rows, classFilter, statusFilter, query]);
 
-  const totalEntries = filteredRows.reduce((sum, row) => sum + row.entries.length, 0);
-
-  const exportRowsCsv = (rowsToExport, filenamePrefix = 'pickup-submission-tracker') => {
+  const exportRowsCsv = (rowsToExport, filenamePrefix = 'pickup-class-sheet') => {
     const csvEscape = (value) => {
       const raw = String(value ?? '');
       if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
       return raw;
     };
+
     const header = [
       'No',
       'Class',
       'Student Name',
+      'Student ID',
       'Parent Name',
       'Parent Phone',
       'Parent Email',
-      'Status',
+      'Current Submission Status',
       'Submitted At',
-      'Follow-up Note',
+      'Follow-up Priority',
+      'Contact Attempt 1',
+      'Contact Attempt 2',
+      'Parent Response',
+      'Required Docs Missing',
+      'Action Owner',
+      'Action Deadline',
       'Teacher Acknowledged',
+      'ACOP Note',
     ];
+
     const lines = [header.join(',')];
     let seq = 1;
     rowsToExport.forEach((row) => {
@@ -1932,11 +1944,19 @@ function SubmissionTrackerPanel({ rows }) {
           seq++,
           row.classLabel,
           entry.studentName,
+          entry.studentId || '',
           entry.parentName,
           entry.parentPhone || '',
           entry.parentEmail || '',
           STATUS_LABEL[entry.status] || entry.status,
           fmtTime(entry.submittedAt),
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
           '',
           '',
         ].map(csvEscape).join(','));
@@ -1953,34 +1973,40 @@ function SubmissionTrackerPanel({ rows }) {
     URL.revokeObjectURL(url);
   };
 
-  const exportCsv = () => exportRowsCsv(filteredRows, 'pickup-submission-tracker');
-
   const exportClassCsv = (row) => {
     const cls = String(row.classLabel || 'class').replace(/[^A-Za-z0-9_-]+/g, '-');
-    exportRowsCsv([row], `pickup-submission-${cls}`);
+    exportRowsCsv([row], `pickup-class-sheet-${cls}`);
   };
+
+  const previewRows = useMemo(() => {
+    if (!previewSheet) return [];
+    return (previewSheet.entries || []).map((entry, idx) => ({
+      no: idx + 1,
+      classLabel: previewSheet.classLabel,
+      studentName: entry.studentName,
+      studentId: entry.studentId || '',
+      parentName: entry.parentName,
+      parentPhone: entry.parentPhone || '',
+      parentEmail: entry.parentEmail || '',
+      status: STATUS_LABEL[entry.status] || entry.status,
+      submittedAt: fmtTime(entry.submittedAt),
+    }));
+  }, [previewSheet]);
 
   return (
     <div className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/45 backdrop-blur p-4">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
-          <h3 className="text-sm font-semibold text-white">Form Submission Tracker by Class</h3>
+          <h3 className="text-sm font-semibold text-white">Independent Class Sheets</h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Submitted forms with student-parent names so ACOP can brief teachers for follow-up.
+            Teacher-ready follow-up sheets. Preview first, then download a richer class template.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 text-[11px]">
           <span className="text-[11px] px-2 py-1 rounded-full border border-slate-700 bg-slate-800/70 text-slate-300">
             {filteredRows.length} classes
           </span>
-          <button
-            type="button"
-            onClick={exportCsv}
-            disabled={totalEntries === 0}
-            className="text-[11px] px-2.5 py-1 rounded-md bg-emerald-500/20 border border-emerald-500/35 text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
-          >
-            <i className="ph ph-download-simple mr-1"></i>Export Template CSV
-          </button>
+          <span className="text-slate-500">Preview before downloading is required.</span>
         </div>
       </div>
 
@@ -2014,25 +2040,33 @@ function SubmissionTrackerPanel({ rows }) {
         />
       </div>
 
-      <div className="space-y-3 max-h-[24rem] overflow-y-auto pr-1">
+      <div className="space-y-2 max-h-[30rem] overflow-y-auto pr-1">
         {filteredRows.map((row) => (
-          <div key={row.classLabel} className="rounded-xl border border-slate-800/90 bg-slate-950/35 p-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
-              <div className="inline-flex items-center gap-2">
+          <details key={`sheet-${row.classLabel}`} className="rounded-xl border border-slate-800/90 bg-slate-950/35" open={classFilter !== 'ALL'}>
+            <summary className="list-none cursor-pointer px-3 py-2.5 flex items-center justify-between gap-3">
+              <div className="inline-flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-semibold px-2 py-1 rounded-md bg-brand-500/20 border border-brand-500/35 text-brand-200">
                   {row.classLabel}
                 </span>
                 <span className="text-xs text-slate-300">{row.formsCount} forms</span>
                 <span className="text-xs text-slate-400">{row.studentsCount} students</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/25 text-amber-300">P {row.statusCounts.pending || 0}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 border border-orange-500/25 text-orange-300">A {row.statusCounts.changes_requested || 0}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-300">OK {row.statusCounts.approved || 0}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/25 text-red-300">X {row.statusCounts.rejected || 0}</span>
               </div>
-              <div className="inline-flex items-center gap-1 text-[10px]">
-                <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/25 text-amber-300">P {row.statusCounts.pending || 0}</span>
-                <span className="px-1.5 py-0.5 rounded bg-orange-500/15 border border-orange-500/25 text-orange-300">A {row.statusCounts.changes_requested || 0}</span>
-                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-300">OK {row.statusCounts.approved || 0}</span>
-                <span className="px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/25 text-red-300">X {row.statusCounts.rejected || 0}</span>
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewSheet(row); }}
+                  className="text-[11px] px-2.5 py-1 rounded-md bg-violet-500/20 border border-violet-500/35 text-violet-200 hover:bg-violet-500/30"
+                >
+                  <i className="ph ph-eye mr-1"></i>Preview Template
+                </button>
+                <i className="ph ph-caret-down text-slate-500"></i>
               </div>
-            </div>
-            <div className="overflow-x-auto">
+            </summary>
+            <div className="px-3 pb-3 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-slate-400 border-b border-slate-800">
@@ -2043,102 +2077,123 @@ function SubmissionTrackerPanel({ rows }) {
                   </tr>
                 </thead>
                 <tbody>
-              {row.entries.map((entry, idx) => (
-                  <tr key={`${row.classLabel}-${idx}`} className="border-b border-slate-900/80 last:border-0">
-                    <td className="py-1.5 pr-2 text-white">
-                      <div className="font-medium">{entry.studentName}</div>
-                      {entry.studentId && <div className="text-[10px] text-slate-500">{entry.studentId}</div>}
-                    </td>
-                    <td className="py-1.5 pr-2 text-slate-300">
-                      <div>{entry.parentName}</div>
-                      <div className="text-[10px] text-slate-500 truncate">{entry.parentPhone || entry.parentEmail || '—'}</div>
-                    </td>
-                    <td className="py-1.5 pr-2">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800/70 text-slate-200">
-                        {STATUS_LABEL[entry.status] || entry.status}
-                      </span>
-                    </td>
-                    <td className="py-1.5 pr-2 text-slate-400">{fmtTime(entry.submittedAt)}</td>
-                  </tr>
-              ))}
+                  {row.entries.map((entry, idx) => (
+                    <tr key={`${row.classLabel}-sheet-${idx}`} className="border-b border-slate-900/80 last:border-0">
+                      <td className="py-1.5 pr-2 text-white">
+                        <div className="font-medium">{entry.studentName}</div>
+                        {entry.studentId && <div className="text-[10px] text-slate-500">{entry.studentId}</div>}
+                      </td>
+                      <td className="py-1.5 pr-2 text-slate-300">
+                        <div>{entry.parentName}</div>
+                        <div className="text-[10px] text-slate-500 truncate">{entry.parentPhone || entry.parentEmail || '—'}</div>
+                      </td>
+                      <td className="py-1.5 pr-2">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800/70 text-slate-200">
+                          {STATUS_LABEL[entry.status] || entry.status}
+                        </span>
+                      </td>
+                      <td className="py-1.5 pr-2 text-slate-400">{fmtTime(entry.submittedAt)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-          </div>
+          </details>
         ))}
+
         {filteredRows.length === 0 && (
           <div className="rounded-xl border border-slate-800/90 bg-slate-950/35 p-4 text-xs text-slate-400 text-center">
-            No submissions match the current filters.
+            No class sheets match the current filters.
           </div>
         )}
       </div>
 
-      {filteredRows.length > 0 && (
-        <div className="mt-5 pt-4 border-t border-slate-800/80">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-              Independent Class Sheets
-            </h4>
-            <span className="text-[11px] text-slate-500">
-              One sheet per class for teacher follow-up
-            </span>
-          </div>
-          <div className="space-y-2 max-h-[26rem] overflow-y-auto pr-1">
-            {filteredRows.map((row) => (
-              <details key={`sheet-${row.classLabel}`} className="rounded-xl border border-slate-800/90 bg-slate-950/35" open={classFilter !== 'ALL'}>
-                <summary className="list-none cursor-pointer px-3 py-2.5 flex items-center justify-between gap-3">
-                  <div className="inline-flex items-center gap-2">
-                    <span className="text-xs font-semibold px-2 py-1 rounded-md bg-brand-500/20 border border-brand-500/35 text-brand-200">
-                      {row.classLabel}
-                    </span>
-                    <span className="text-xs text-slate-300">{row.formsCount} forms</span>
-                    <span className="text-xs text-slate-400">{row.studentsCount} students</span>
-                  </div>
-                  <div className="inline-flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); exportClassCsv(row); }}
-                      className="text-[11px] px-2.5 py-1 rounded-md bg-sky-500/20 border border-sky-500/35 text-sky-200 hover:bg-sky-500/30"
-                    >
-                      <i className="ph ph-download-simple mr-1"></i>Download Class Template
-                    </button>
-                    <i className="ph ph-caret-down text-slate-500"></i>
-                  </div>
-                </summary>
-                <div className="px-3 pb-3 overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-slate-400 border-b border-slate-800">
-                        <th className="text-left py-1.5 pr-2 font-medium">Student</th>
-                        <th className="text-left py-1.5 pr-2 font-medium">Parent</th>
-                        <th className="text-left py-1.5 pr-2 font-medium">Status</th>
-                        <th className="text-left py-1.5 pr-2 font-medium">Submitted</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {row.entries.map((entry, idx) => (
-                        <tr key={`${row.classLabel}-sheet-${idx}`} className="border-b border-slate-900/80 last:border-0">
-                          <td className="py-1.5 pr-2 text-white">
-                            <div className="font-medium">{entry.studentName}</div>
-                            {entry.studentId && <div className="text-[10px] text-slate-500">{entry.studentId}</div>}
-                          </td>
-                          <td className="py-1.5 pr-2 text-slate-300">
-                            <div>{entry.parentName}</div>
-                            <div className="text-[10px] text-slate-500 truncate">{entry.parentPhone || entry.parentEmail || '—'}</div>
-                          </td>
-                          <td className="py-1.5 pr-2">
-                            <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800/70 text-slate-200">
-                              {STATUS_LABEL[entry.status] || entry.status}
-                            </span>
-                          </td>
-                          <td className="py-1.5 pr-2 text-slate-400">{fmtTime(entry.submittedAt)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+      {previewSheet && (
+        <div className="fixed inset-0 z-[90] bg-black/70 backdrop-blur-[2px] p-4 overflow-y-auto">
+          <div className="max-w-6xl mx-auto mt-6 rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/40">
+            <div className="px-5 py-4 border-b border-slate-800 bg-gradient-to-r from-brand-600/20 via-slate-900/30 to-cyan-500/10">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-widest text-brand-200/90">Template Preview</p>
+                  <h4 className="text-lg font-semibold text-white">Independent Class Sheet · {previewSheet.classLabel}</h4>
+                  <p className="text-xs text-slate-400 mt-1">Review this formatted template before downloading.</p>
                 </div>
-              </details>
-            ))}
+                <button
+                  type="button"
+                  onClick={() => setPreviewSheet(null)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800"
+                >
+                  <i className="ph ph-x"></i>
+                </button>
+              </div>
+            </div>
+
+            <div className="px-5 py-4 space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+                <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2"><span className="text-slate-500">Class</span><div className="text-slate-200 font-semibold">{previewSheet.classLabel}</div></div>
+                <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2"><span className="text-slate-500">Forms</span><div className="text-slate-200 font-semibold">{previewSheet.formsCount}</div></div>
+                <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2"><span className="text-slate-500">Students</span><div className="text-slate-200 font-semibold">{previewSheet.studentsCount}</div></div>
+                <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2"><span className="text-slate-500">Generated</span><div className="text-slate-200 font-semibold">{new Date().toLocaleString()}</div></div>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-800">
+                <table className="min-w-[1100px] w-full text-xs">
+                  <thead className="bg-slate-900/80 text-slate-300">
+                    <tr>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">No</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Student</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Parent</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Status</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Submitted</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Priority</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Attempt 1</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Attempt 2</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Response</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Owner</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Deadline</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">Teacher Ack</th>
+                      <th className="text-left px-3 py-2 border-b border-slate-800">ACOP Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewRows.map((r) => (
+                      <tr key={`${r.classLabel}-${r.no}`} className="odd:bg-slate-950 even:bg-slate-900/35">
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-400">{r.no}</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-white">{r.studentName}<div className="text-[10px] text-slate-500">{r.studentId || '—'}</div></td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-300">{r.parentName}<div className="text-[10px] text-slate-500 truncate">{r.parentPhone || r.parentEmail || '—'}</div></td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-300">{r.status}</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-400">{r.submittedAt}</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
+                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600 min-w-[160px]">________________________________</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPreviewSheet(null)}
+                className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 text-sm"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => exportClassCsv(previewSheet)}
+                className="px-3 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30 text-sm font-semibold"
+              >
+                <i className="ph ph-download-simple mr-1"></i>Download Class Template
+              </button>
+            </div>
           </div>
         </div>
       )}
