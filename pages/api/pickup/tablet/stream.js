@@ -35,7 +35,7 @@ export default async function handler(req, res) {
   const token = req.headers['x-tablet-device-token'] || req.query.deviceToken;
   if (!token) { res.status(401).json({ error: 'deviceToken required' }); return; }
 
-  let tid, terminalIds = [];
+  let tid, terminalIds = [], gradeScopes = [];
   try {
     initializeFirebase();
     const db = admin.firestore();
@@ -55,6 +55,23 @@ export default async function handler(req, res) {
     if (!groupSnap.exists) { res.status(404).json({ error: 'release group not found' }); return; }
     const group = groupSnap.data();
     terminalIds = Array.isArray(group.terminalIds) ? group.terminalIds : [];
+
+    // Union of the group's terminal gradeScopes — lets the bus drop
+    // wrong-gate cards (e.g. EY parent at a Grade 4/5 pole).
+    if (terminalIds.length > 0) {
+      try {
+        const termSnaps = await db.getAll(
+          ...terminalIds.slice(0, 30).map((tidx) => db.doc(tenancy.terminalDoc(tidx, tid)))
+        );
+        const set = new Set();
+        termSnaps.forEach((s) => {
+          if (!s.exists) return;
+          const sc = (s.data() || {}).gradeScopes;
+          if (Array.isArray(sc)) sc.forEach((g) => { const v = String(g).trim().toUpperCase(); if (v) set.add(v); });
+        });
+        gradeScopes = [...set];
+      } catch { gradeScopes = []; }
+    }
 
     // Touch lastSeenAt (best-effort, non-blocking).
     dev.ref.set({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
@@ -76,5 +93,5 @@ export default async function handler(req, res) {
   // arrives — send a small event so the EventSource transitions to OPEN.
   res.write(`event: hello\ndata: ${JSON.stringify({ tenantId: tid, terminalIds })}\n\n`);
 
-  bus.subscribe(tid, terminalIds, res);
+  bus.subscribe(tid, terminalIds, res, gradeScopes);
 }

@@ -65,19 +65,25 @@ async function handler(req, res) {
       });
     });
 
-    // For approved records, also pull final face paths from chaperones/{id}
+    // For approved records, also pull final face paths from chaperones/{id}.
+    // MUST be a single batched getAll — with 300+ approved chaperones the old
+    // one-await-per-doc loop exceeded the serverless timeout and the Approved
+    // tab rendered empty (pilot incident 2026-07-21).
     const approvedFacePaths = new Map();
     if (status === 'approved') {
-      const allocList = [];
-      rawRecords.forEach((r) => (r.allocatedChaperones || []).forEach((a) => allocList.push(a.chaperoneId)));
-      for (const chapId of allocList) {
+      const allocIds = [...new Set(
+        rawRecords.flatMap((r) => (r.allocatedChaperones || []).map((a) => a && a.chaperoneId)).filter(Boolean)
+      )];
+      for (let i = 0; i < allocIds.length; i += 100) {
+        const chunk = allocIds.slice(i, i + 100);
         try {
-          const cs = await db.doc(`${tenancy.chaperonesPath(tid)}/${chapId}`).get();
-          if (cs.exists) {
+          const snaps = await db.getAll(...chunk.map((id) => db.doc(`${tenancy.chaperonesPath(tid)}/${id}`)));
+          snaps.forEach((cs) => {
+            if (!cs.exists) return;
             const fp = (cs.data() || {}).facePaths || [];
-            approvedFacePaths.set(chapId, fp);
+            approvedFacePaths.set(cs.id, fp);
             fp.forEach((p) => allFacePaths.add(p));
-          }
+          });
         } catch {}
       }
     }

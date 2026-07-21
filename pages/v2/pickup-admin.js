@@ -430,7 +430,7 @@ export default function PickupAdminPage() {
   }, []);
 
   const fetchList = useCallback(async (status) => {
-    const r = await fetch(`/api/pickup/admin/onboarding-list?status=${status}&limit=100`, {
+    const r = await fetch(`/api/pickup/admin/onboarding-list?status=${status}&limit=200`, {
       credentials: 'include',
     });
     const j = await r.json();

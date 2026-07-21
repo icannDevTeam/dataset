@@ -19,7 +19,7 @@
 import admin from 'firebase-admin';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
-const { shapePickupEvent, SILENT_ON_IPAD } = require('../../../../lib/shape-pickup-event');
+const { shapePickupEvent, SILENT_ON_IPAD, eventMatchesScopes } = require('../../../../lib/shape-pickup-event');
 
 const WINDOW_MS = 30 * 60 * 1000;
 
@@ -68,6 +68,21 @@ export default async function handler(req, res) {
 
     // Touch lastSeenAt
     dev.ref.set({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+
+    // Union of gradeScopes across the group's terminals — used to hide
+    // wrong-gate cards (e.g. EY parent scanning at a Grade 4/5 pole) even if
+    // the edge writer didn't stamp decision='wrong_terminal'.
+    let groupScopes = new Set();
+    try {
+      const termSnaps = await db.getAll(
+        ...terminalIds.slice(0, 30).map((tidx) => db.doc(tenancy.terminalDoc(tidx, tid)))
+      );
+      termSnaps.forEach((s) => {
+        if (!s.exists) return;
+        const sc = (s.data() || {}).gradeScopes;
+        if (Array.isArray(sc)) sc.forEach((g) => { const v = String(g).trim().toUpperCase(); if (v) groupScopes.add(v); });
+      });
+    } catch { groupScopes = new Set(); }
 
     const sinceMs = req.query.since ? new Date(String(req.query.since)).getTime() : null;
     const cutoffMs = sinceMs && !Number.isNaN(sinceMs)
@@ -124,6 +139,7 @@ export default async function handler(req, res) {
       const data = doc.data();
       const status = data.status || 'pending';
       if (SILENT_ON_IPAD.has(data.decision)) continue;
+      if (!eventMatchesScopes(data, groupScopes)) continue; // wrong-gate: EY parent at a Grade 4/5 pole etc.
       if (status === 'pending' && active.length < 50) {
         active.push(doc);
       } else if (status === 'held') {
