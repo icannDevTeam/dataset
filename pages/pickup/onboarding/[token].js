@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { compressImageToJpegDataUrl } from '../../../lib/client-image';
 
 // ─── Brand tokens ────────────────────────────────────────────────────
 const BRAND = {
@@ -579,35 +580,20 @@ function ChaperoneFaceCapture({ tempId, token, initialPaths = [], onPhotos, disa
       const v = videoRef.current, c = canvasRef.current;
       c.width = v.videoWidth; c.height = v.videoHeight;
       c.getContext('2d').drawImage(v, 0, 0);
-      const dataUrl = c.toDataURL('image/jpeg', 0.85);
+      // Compress to ≤190KB — Hikvision terminals reject face photos >200KB.
+      const dataUrl = await compressImageToJpegDataUrl(
+        c.toDataURL('image/jpeg', 0.92),
+        { maxDim: 1024, maxBytes: 190 * 1024 },
+      );
       const path = await uploadDataUrl(dataUrl);
       setAndEmit([...photos, { path, dataUrl }]);
     } catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   }
 
-  // Downscale a File to max 800px width to fit under 600KB cap.
+  // Downscale + compress a File to ≤190KB (Hikvision terminal limit is 200KB).
   function fileToScaledDataUrl(file) {
-    return new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onerror = () => reject(new Error('cannot read file'));
-      fr.onload = () => {
-        const img = new Image();
-        img.onerror = () => reject(new Error('not a valid image'));
-        img.onload = () => {
-          const MAX_W = 800;
-          const scale = Math.min(1, MAX_W / img.width);
-          const w = Math.round(img.width * scale);
-          const h = Math.round(img.height * scale);
-          const c = document.createElement('canvas');
-          c.width = w; c.height = h;
-          c.getContext('2d').drawImage(img, 0, 0, w, h);
-          resolve(c.toDataURL('image/jpeg', 0.85));
-        };
-        img.src = fr.result;
-      };
-      fr.readAsDataURL(file);
-    });
+    return compressImageToJpegDataUrl(file, { maxDim: 1024, maxBytes: 190 * 1024 });
   }
 
   async function handleFiles(files) {

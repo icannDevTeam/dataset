@@ -23,6 +23,7 @@ import crypto from 'crypto';
 
 const tenancy = require('../../../../lib/tenancy');
 const { logAudit } = require('../../../../lib/audit-log');
+const { resolveStudentLinks } = require('../../../../lib/pickup-student-links');
 
 const FIRST_CHAPERONE_NO = 9000000000;
 const TEMPLATE_PICKUP_ONBOARDING_APPROVED = 'pickup_onboarding_approved';
@@ -149,7 +150,7 @@ async function handler(req, res) {
     const recRef = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
     const recSnap = await recRef.get();
     if (!recSnap.exists) return res.status(404).json({ error: 'record not found' });
-    const rec = recSnap.data();
+    let rec = recSnap.data();
     if (!['pending', 'changes_requested'].includes(rec.status)) {
       return res.status(409).json({ error: `record status is ${rec.status}, not pending` });
     }
@@ -164,6 +165,11 @@ async function handler(req, res) {
     if (recStudents.length === 0) {
       return res.status(400).json({ error: 'record has no students' });
     }
+
+    // Resolve tmp-* student tokens to real/synthetic roster IDs BEFORE
+    // creating chaperone docs, and make sure every referenced student has a
+    // resolvable doc — otherwise pole tablets show the raw tmp-... string.
+    rec = await resolveStudentLinks({ db, tid, rec, recRef });
 
     const now = new Date().toISOString();
     const created = [];
@@ -265,6 +271,10 @@ async function handler(req, res) {
         suspendedAt: null,
       };
       await db.doc(`${tenancy.chaperonesPath(tid)}/${chaperoneId}`).set(chapDoc, { merge: false });
+      // Root-collection mirror for legacy readers (tablets, listeners).
+      try {
+        await db.doc(`chaperones/${chaperoneId}`).set(chapDoc, { merge: false });
+      } catch (e) { console.error('[approve] root chaperone mirror', e.message); }
 
       for (const sid of (c.authorizedStudentIds || [])) {
         if (!studentDenorm.has(sid)) studentDenorm.set(sid, []);
@@ -291,13 +301,17 @@ async function handler(req, res) {
       await sref.set({ authorizedChaperones: merged }, { merge: true });
     }
 
-    await recRef.set({
+    const approvalPatch = {
       status: 'approved',
       reviewedAt: now,
       reviewedBy: req.headers['x-admin-user'] || 'api-key',
       approvalNotes: approvalNotes || null,
       allocatedChaperones: created,
-    }, { merge: true });
+    };
+    await recRef.set(approvalPatch, { merge: true });
+    try {
+      await db.doc(`pickup_onboarding/${recordId}`).set(approvalPatch, { merge: true });
+    } catch (e) { console.error('[approve] root form mirror', e.message); }
 
     // Phase 3: flip per-student locks to 'approved' so the form stays
     // permanently closed for these students. Best-effort.

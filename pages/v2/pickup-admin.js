@@ -20,6 +20,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/router';
 import V2Layout from '../../components/v2/V2Layout';
 import PageGuard from '../../components/v2/PageGuard';
+import { compressImageToJpegDataUrl } from '../../lib/client-image';
 
 const TABS = [
   { key: 'pending',  label: 'Pending',  badge: true },
@@ -564,16 +565,18 @@ export default function PickupAdminPage() {
       pushToast('error', 'Photo must be JPEG, PNG or WebP.');
       return;
     }
-    if (file.size > 800 * 1024) {
-      pushToast('error', 'Photo must be ≤ 800 KB.');
+    if (file.size > 8 * 1024 * 1024) {
+      pushToast('error', 'Photo must be ≤ 8 MB.');
       return;
     }
-    const reader = new FileReader();
-    const dataUrl = await new Promise((resolve, reject) => {
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
+    // Compress to ≤190KB — Hikvision terminals reject face photos >200KB.
+    let dataUrl;
+    try {
+      dataUrl = await compressImageToJpegDataUrl(file, { maxDim: 1024, maxBytes: 190 * 1024 });
+    } catch (e) {
+      pushToast('error', `Could not process image: ${e.message}`);
+      return;
+    }
     try {
       const r = await fetch('/api/pickup/admin/chaperone-photos', {
         method: 'POST',
@@ -632,17 +635,13 @@ export default function PickupAdminPage() {
       pushToast('error', 'Photo must be JPEG, PNG or WebP.');
       return false;
     }
-    if (file.size > 800 * 1024) {
-      pushToast('error', 'Photo must be ≤ 800 KB.');
+    if (file.size > 8 * 1024 * 1024) {
+      pushToast('error', 'Photo must be ≤ 8 MB.');
       return false;
     }
     try {
-      const dataUrl = await new Promise((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve(fr.result);
-        fr.onerror = () => reject(fr.error);
-        fr.readAsDataURL(file);
-      });
+      // Compress to ≤190KB — Hikvision terminals reject face photos >200KB.
+      const dataUrl = await compressImageToJpegDataUrl(file, { maxDim: 1024, maxBytes: 190 * 1024 });
       const r = await fetch('/api/pickup/admin/onboarding-edit', {
         method: 'PATCH',
         credentials: 'include',

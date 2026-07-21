@@ -31,6 +31,7 @@ import { enrollChaperones } from '../../../../lib/chaperone-enroll';
 
 const tenancy = require('../../../../lib/tenancy');
 const { can } = require('../../../../lib/rbac');
+const { resolveStudentLinks, gradeFromHomeroom, sortEyFirst } = require('../../../../lib/pickup-student-links');
 const FIRST_CHAPERONE_NO = 9000000000;
 const TEMPLATE_PICKUP_ONBOARDING_APPROVED = 'pickup_onboarding_approved';
 const TEMPLATE_PICKUP_ONBOARDING_REJECTED = 'pickup_onboarding_rejected';
@@ -153,7 +154,7 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
   const recRef = db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recordId}`);
   const recSnap = await recRef.get();
   if (!recSnap.exists) throw new Error('record not found');
-  const rec = recSnap.data();
+  let rec = recSnap.data();
   if (rec.status !== 'pending') throw new Error(`status=${rec.status}, not pending`);
   if (!Array.isArray(rec.chaperones) || rec.chaperones.length === 0) {
     throw new Error('no chaperones in record');
@@ -164,9 +165,20 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
   const recStudents = Array.isArray(rec.students) ? rec.students : [];
   if (recStudents.length === 0) throw new Error('no students in record');
 
+  // Resolve tmp-* student tokens before creating chaperone docs (see
+  // lib/pickup-student-links.js — prevents raw tmp-... IDs on pole tablets).
+  rec = await resolveStudentLinks({ db, tid, rec, recRef });
+
   const now = new Date().toISOString();
   const created = [];
   const studentDenorm = new Map();
+
+  // Form-supplied student meta, used to stamp classes/grades on chaperones
+  // (the Enroll board groups by these).
+  const studentMetaById = {};
+  (rec.students || []).forEach((s) => {
+    if (s && s.id) studentMetaById[String(s.id)] = s;
+  });
 
   for (const c of rec.chaperones) {
     const employeeNo = await allocateEmployeeNo(db, tid);
@@ -181,7 +193,18 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
     }
     if (finalFacePaths.length === 0) continue;
 
-    await db.doc(`${tenancy.chaperonesPath(tid)}/${chaperoneId}`).set({
+    const studentClassesSet = new Set();
+    const studentGradesSet = new Set();
+    for (const sid of (c.authorizedStudentIds || [])) {
+      const s = studentMetaById[sid];
+      if (!s) continue;
+      const hr = s.homeroom || s.className || null;
+      if (hr) studentClassesSet.add(String(hr));
+      const g = s.grade ? String(s.grade) : gradeFromHomeroom(hr);
+      if (g) studentGradesSet.add(g);
+    }
+
+    const chapDoc = {
       chaperoneId,
       employeeNo,
       tenantId: tid,
@@ -194,6 +217,8 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
       guardianEmail: rec.guardian.email,
       guardianPhone: rec.guardian.phone,
       authorizedStudentIds: c.authorizedStudentIds || [],
+      studentClasses: sortEyFirst(studentClassesSet),
+      studentGrades: sortEyFirst(studentGradesSet),
       facePaths: finalFacePaths,
       status: 'approved',
       deviceEnrolled: false,
@@ -202,7 +227,12 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
       approvedFromOnboarding: recordId,
       reEnrollDueAt: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
       suspendedAt: null,
-    }, { merge: false });
+    };
+    await db.doc(`${tenancy.chaperonesPath(tid)}/${chaperoneId}`).set(chapDoc, { merge: false });
+    // Root-collection mirror for legacy readers (tablets, listeners).
+    try {
+      await db.doc(`chaperones/${chaperoneId}`).set(chapDoc, { merge: false });
+    } catch (e) { console.error('[bulk-approve] root chaperone mirror', e.message); }
 
     for (const sid of (c.authorizedStudentIds || [])) {
       if (!studentDenorm.has(sid)) studentDenorm.set(sid, []);
@@ -221,13 +251,17 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
     await sref.set({ authorizedChaperones: merged }, { merge: true });
   }
 
-  await recRef.set({
+  const approvalPatch = {
     status: 'approved',
     reviewedAt: now,
     reviewedBy: reviewer,
     approvalNotes: approvalNotes || null,
     allocatedChaperones: created,
-  }, { merge: true });
+  };
+  await recRef.set(approvalPatch, { merge: true });
+  try {
+    await db.doc(`pickup_onboarding/${recordId}`).set(approvalPatch, { merge: true });
+  } catch (e) { console.error('[bulk-approve] root form mirror', e.message); }
 
   // Phase 3: flip per-student locks (best-effort).
   try {
