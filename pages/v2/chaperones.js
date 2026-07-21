@@ -144,6 +144,141 @@ function DeleteReasonModal({ open, chaperone, onCancel, onConfirm, busy }) {
   );
 }
 
+function EditChaperoneModal({ open, chaperone, onCancel, onSave, busy }) {
+  const [form, setForm] = useState({
+    name: '',
+    relation: 'other',
+    phone: '',
+    email: '',
+    idNumber: '',
+    status: 'approved_pending_faces',
+  });
+
+  useEffect(() => {
+    if (!open || !chaperone) return;
+    setForm({
+      name: chaperone.name || '',
+      relation: (chaperone.relationship || chaperone.relation || 'other').toLowerCase(),
+      phone: chaperone.phone || '',
+      email: chaperone.email || '',
+      idNumber: chaperone.idNumber || '',
+      status: chaperone.status || 'approved_pending_faces',
+    });
+  }, [open, chaperone]);
+
+  if (!open || !chaperone) return null;
+
+  const canSave = form.name.trim().length >= 2;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg p-5">
+        <h3 className="text-base font-semibold text-white flex items-center gap-2">
+          <i className="ph ph-pencil-simple text-brand-300" />
+          Edit chaperone
+        </h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+          <label className="text-xs text-slate-400">
+            Name
+            <input
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              className="mt-1 w-full text-sm bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-brand-400"
+              autoFocus
+            />
+          </label>
+
+          <label className="text-xs text-slate-400">
+            Relation
+            <select
+              value={form.relation}
+              onChange={(e) => setForm((f) => ({ ...f, relation: e.target.value }))}
+              className="mt-1 w-full text-sm bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-brand-400"
+            >
+              <option value="mother">Mother</option>
+              <option value="father">Father</option>
+              <option value="parent">Parent</option>
+              <option value="guardian">Guardian</option>
+              <option value="driver">Driver</option>
+              <option value="nanny">Nanny</option>
+              <option value="grandparent">Grandparent</option>
+              <option value="sibling">Sibling</option>
+              <option value="emergency">Emergency</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+
+          <label className="text-xs text-slate-400">
+            Phone
+            <input
+              value={form.phone}
+              onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+              className="mt-1 w-full text-sm bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-brand-400"
+            />
+          </label>
+
+          <label className="text-xs text-slate-400">
+            Email
+            <input
+              value={form.email}
+              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+              className="mt-1 w-full text-sm bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-brand-400"
+            />
+          </label>
+
+          <label className="text-xs text-slate-400">
+            ID Number
+            <input
+              value={form.idNumber}
+              onChange={(e) => setForm((f) => ({ ...f, idNumber: e.target.value }))}
+              className="mt-1 w-full text-sm bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-brand-400"
+            />
+          </label>
+
+          <label className="text-xs text-slate-400">
+            Status
+            <select
+              value={form.status}
+              onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
+              className="mt-1 w-full text-sm bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-200 focus:outline-none focus:border-brand-400"
+            >
+              <option value="pending">Pending</option>
+              <option value="approved_pending_faces">Approved pending faces</option>
+              <option value="approved">Approved</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-4 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="px-3 py-1.5 text-xs font-medium text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 hover:bg-slate-800 rounded-lg disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={busy || !canSave}
+            onClick={() => onSave(form)}
+            className="px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 rounded-lg disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {busy ? <><i className="ph ph-circle-notch animate-spin" /> Saving…</> : <><i className="ph ph-floppy-disk" /> Save</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ChaperonesPage() {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -158,6 +293,8 @@ export default function ChaperonesPage() {
   const [result, setResult] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
+  const [editBusy, setEditBusy] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -286,6 +423,52 @@ export default function ChaperonesPage() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ chaperoneId: c.id }),
+      });
+      const j = await r.json();
+      if (!r.ok) { setErr(j.error || `HTTP ${r.status}`); return; }
+      load();
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
+  const saveChaperoneEdit = async (form) => {
+    if (!editTarget) return;
+    setEditBusy(true);
+    try {
+      const r = await fetch('/api/pickup/admin/chaperone-update', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          chaperoneId: editTarget.id,
+          patch: {
+            name: form.name,
+            relation: form.relation,
+            phone: form.phone || null,
+            email: form.email || null,
+            idNumber: form.idNumber || null,
+            status: form.status,
+          },
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) { setErr(j.error || `HTTP ${r.status}`); return; }
+      setEditTarget(null);
+      load();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  const setPendingStatus = async (c) => {
+    if (!window.confirm(`Set ${c.name} status to PENDING before enrollment?`)) return;
+    try {
+      const r = await fetch('/api/pickup/admin/chaperone-update', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chaperoneId: c.id, patch: { status: 'pending' } }),
       });
       const j = await r.json();
       if (!r.ok) { setErr(j.error || `HTTP ${r.status}`); return; }
@@ -454,6 +637,7 @@ export default function ChaperonesPage() {
                         {c.name}
                       </Link>
                       {c.relationship && <span className="ml-2 text-[11px] text-slate-500">{c.relationship}</span>}
+                      {c.status === 'pending' && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-500/30">PENDING</span>}
                       {c.suspended && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">SUSPENDED</span>}
                       {isDeleted && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-200 border border-rose-500/30">DELETED</span>}
                       {isDeleted && c.deletedReason && (
@@ -501,14 +685,34 @@ export default function ChaperonesPage() {
                             <i className="ph ph-arrow-counter-clockwise mr-0.5" />Restore
                           </button>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTarget(c)}
-                            className="text-[11px] text-rose-300 hover:text-rose-200"
-                            title="Shadow-delete"
-                          >
-                            <i className="ph ph-trash mr-0.5" />Delete
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setEditTarget(c)}
+                              className="text-[11px] text-sky-300 hover:text-sky-200"
+                              title="Edit"
+                            >
+                              <i className="ph ph-pencil-simple mr-0.5" />Edit
+                            </button>
+                            {c.status !== 'pending' && (
+                              <button
+                                type="button"
+                                onClick={() => setPendingStatus(c)}
+                                className="text-[11px] text-amber-300 hover:text-amber-200"
+                                title="Set pending"
+                              >
+                                <i className="ph ph-clock mr-0.5" />Set pending
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(c)}
+                              className="text-[11px] text-rose-300 hover:text-rose-200"
+                              title="Shadow-delete"
+                            >
+                              <i className="ph ph-trash mr-0.5" />Delete
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -529,6 +733,14 @@ export default function ChaperonesPage() {
         busy={deleteBusy}
         onCancel={() => !deleteBusy && setDeleteTarget(null)}
         onConfirm={confirmDelete}
+      />
+
+      <EditChaperoneModal
+        open={!!editTarget}
+        chaperone={editTarget}
+        busy={editBusy}
+        onCancel={() => !editBusy && setEditTarget(null)}
+        onSave={saveChaperoneEdit}
       />
     </>
   );

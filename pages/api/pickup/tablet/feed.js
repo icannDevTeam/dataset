@@ -77,12 +77,23 @@ export default async function handler(req, res) {
     // Firestore IN supports up to 30 values; we only ever expect 1-3 terminals per group.
     // Fetch per-terminal with single equality (no composite index needed) and
     // filter/sort recordedAt in memory.
-    const perTerm = await Promise.all(
-      terminalIds.slice(0, 30).map((tidx) =>
-        db.collection(tenancy.pickupEventsPath(tid))
+    const fetchTerminalDocs = async (tidx) => {
+      try {
+        return await db.collection(tenancy.pickupEventsPath(tid))
           .where('terminalId', '==', tidx)
-          .limit(200).get()
-      )
+          .orderBy('recordedAt', 'desc')
+          .limit(200).get();
+      } catch (e) {
+        // Backward-compatible fallback for tenants that haven't created the
+        // composite index yet. Keeps the feed alive instead of 500ing.
+        return db.collection(tenancy.pickupEventsPath(tid))
+          .where('terminalId', '==', tidx)
+          .limit(200).get();
+      }
+    };
+
+    const perTerm = await Promise.all(
+      terminalIds.slice(0, 30).map((tidx) => fetchTerminalDocs(tidx))
     );
     const recordedMs = (d) => {
       const v = d.data().recordedAt;

@@ -12,22 +12,23 @@ async function handler(req, res) {
     initializeFirebase();
 
     const { studentId, studentName, className, gradeCode, gradeName } = req.body;
+    const normalizedClassName = String(className || '').trim();
 
-    if (!studentId || !studentName || !className) {
+    if (!studentId || !studentName) {
       return res.status(400).json({ 
-        error: 'Missing required fields: studentId, studentName, className' 
+        error: 'Missing required fields: studentId, studentName' 
       });
     }
 
     const metadata = {
       id: studentId,
       name: studentName,
-      homeroom: className,
+      homeroom: normalizedClassName || null,
       gradeCode: gradeCode || 'Unknown',
       gradeName: gradeName || 'Unknown',
       updated_at: new Date().toISOString(),
       // Display label for attendance: e.g. "Albert 3B"
-      displayLabel: `${studentName} ${className}`,
+      displayLabel: normalizedClassName ? `${studentName} ${normalizedClassName}` : studentName,
     };
 
     // Save to Firestore

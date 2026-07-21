@@ -61,7 +61,12 @@ async function handler(req, res) {
       id: d.id,
       employeeNo: c.employeeNo || null,
       name: c.name || '—',
+      relation: c.relation || c.relationship || null,
       relationship: c.relationship || c.relation || null,
+      phone: c.phone || null,
+      email: c.email || null,
+      idNumber: c.idNumber || null,
+      status: c.status || null,
       authorizedStudentIds,
       photoCount:
         (Array.isArray(c.facePaths) ? c.facePaths.length : 0) ||

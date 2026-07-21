@@ -127,6 +127,98 @@ function ErrBox({ message }) {
   );
 }
 
+function ListenerManagerPanel({ status, busy, showLog, onToggleLog, onStart, onStop, onRestart, onRefresh }) {
+  const running = status?.running === true;
+  const terminals = Array.isArray(status?.terminals) ? status.terminals : [];
+  const runningCount = terminals.filter((t) => t.running).length;
+  const stoppedCount = terminals.filter((t) => t.running === false).length;
+  const logText = status?.log || '';
+
+  return (
+    <Card
+      title="Listener Manager"
+      icon={running ? 'ph-broadcast' : 'ph-broadcast-slash'}
+      className={running ? 'border-emerald-200' : 'border-red-200'}
+      action={
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={onStart}
+            disabled={busy || running}
+            className="px-3 py-1.5 text-xs rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <i className="ph ph-play mr-1"></i>Start
+          </button>
+          <button
+            onClick={onRestart}
+            disabled={busy}
+            className="px-3 py-1.5 text-xs rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40"
+          >
+            <i className="ph ph-arrows-clockwise mr-1"></i>Restart
+          </button>
+          <button
+            onClick={onStop}
+            disabled={busy || !running}
+            className="px-3 py-1.5 text-xs rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <i className="ph ph-stop mr-1"></i>Stop
+          </button>
+          <button
+            onClick={onRefresh}
+            disabled={busy}
+            className="px-3 py-1.5 text-xs rounded-lg bg-gray-100 border border-gray-200 text-gray-700 hover:bg-gray-200 disabled:opacity-40"
+          >
+            <i className="ph ph-arrow-clockwise mr-1"></i>Refresh
+          </button>
+          <button
+            onClick={onToggleLog}
+            className="px-3 py-1.5 text-xs rounded-lg bg-gray-900 text-white hover:bg-gray-800"
+          >
+            <i className="ph ph-terminal-window mr-1"></i>{showLog ? 'Hide logs' : 'Show logs'}
+          </button>
+        </div>
+      }
+    >
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
+              running ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+            }`}>
+              <span className={`h-2 w-2 rounded-full ${running ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
+              {running ? 'Running' : 'Stopped'}
+            </span>
+            {status?.pid && <span className="text-xs text-gray-400 font-mono">PID {status.pid}</span>}
+            {status?.logUpdatedAt && <span className="text-xs text-gray-400">log {relTime(status.logUpdatedAt)}</span>}
+          </div>
+          <p className="text-sm text-gray-600 mt-2">
+            {runningCount}/{terminals.length || 10} terminal listeners running
+            {stoppedCount > 0 ? <span className="text-red-600"> · {stoppedCount} down</span> : null}
+          </p>
+          {status?.error && <p className="text-xs text-red-600 mt-1">{status.error}</p>}
+        </div>
+
+        {terminals.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 max-w-3xl">
+            {terminals.map((t) => (
+              <span key={`${t.name}-${t.pid || 'x'}`} className={`text-[10px] px-2 py-1 rounded-md border font-mono ${
+                t.running ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
+              }`} title={t.pid ? `PID ${t.pid}${t.uptime ? ` · up ${t.uptime}` : ''}` : ''}>
+                {t.running ? '●' : '○'} {t.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showLog && (
+        <pre className="mt-4 max-h-72 overflow-auto rounded-xl bg-gray-950 border border-gray-800 p-3 text-[11px] leading-relaxed text-gray-200 whitespace-pre-wrap font-mono">
+          {logText || 'No listener log yet. Start the listener manager to create backend/listeners.log.'}
+        </pre>
+      )}
+    </Card>
+  );
+}
+
 // Status badge variant by job status
 const JOB_VARIANT = { sent: 'green', failed: 'red', pending: 'amber', retrying: 'blue' };
 
@@ -184,6 +276,9 @@ export default function PickupMonitorPage() {
   const [refreshing, setRefreshing]   = useState(false);
   const [notifHours, setNotifHours]   = useState(48);
   const [notifStatusF, setNotifStatusF] = useState('');
+  const [listenerStatus, setListenerStatus] = useState(null);
+  const [listenerBusy, setListenerBusy] = useState(false);
+  const [showListenerLog, setShowListenerLog] = useState(false);
   const intervalRef = useRef(null);
 
   const fetchHealth = useCallback(async () => {
@@ -214,6 +309,17 @@ export default function PickupMonitorPage() {
     } catch { /* non-critical */ }
   }, []);
 
+  const fetchListeners = useCallback(async () => {
+    try {
+      const r = await fetch('/api/pickup/admin/listeners', { credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'failed loading listener status');
+      setListenerStatus(j.status || null);
+    } catch (e) {
+      setListenerStatus((prev) => ({ ...(prev || {}), error: e.message, running: false }));
+    }
+  }, []);
+
   const runProbes = useCallback(async () => {
     setProbing(true);
     setApiProbes(API_PROBES.map((p) => ({ ...p, status: 'checking' })));
@@ -224,10 +330,32 @@ export default function PickupMonitorPage() {
 
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true);
-    await Promise.all([fetchHealth(), fetchNotifLog(notifHours, notifStatusF), fetchSecurity()]);
+    await Promise.all([fetchHealth(), fetchNotifLog(notifHours, notifStatusF), fetchSecurity(), fetchListeners()]);
     setLastRefresh(new Date());
     if (!silent) setRefreshing(false);
-  }, [fetchHealth, fetchNotifLog, fetchSecurity, notifHours, notifStatusF]);
+  }, [fetchHealth, fetchNotifLog, fetchSecurity, fetchListeners, notifHours, notifStatusF]);
+
+  const controlListeners = async (action) => {
+    const label = action === 'start' ? 'start listeners' : action === 'stop' ? 'stop listeners' : 'restart listeners';
+    if (action !== 'start' && !confirm(`Are you sure you want to ${label}?`)) return;
+    setListenerBusy(true);
+    try {
+      const r = await fetch('/api/pickup/admin/listeners', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `${label} failed`);
+      setListenerStatus(j.status || null);
+      setTimeout(fetchListeners, 1500);
+    } catch (e) {
+      setListenerStatus((prev) => ({ ...(prev || {}), error: e.message }));
+    } finally {
+      setListenerBusy(false);
+    }
+  };
 
   // Initial load
   useEffect(() => {
@@ -363,8 +491,19 @@ export default function PickupMonitorPage() {
               />
             </div>
 
+            <ListenerManagerPanel
+              status={listenerStatus}
+              busy={listenerBusy}
+              showLog={showListenerLog}
+              onToggleLog={() => setShowListenerLog((v) => !v)}
+              onStart={() => controlListeners('start')}
+              onStop={() => controlListeners('stop')}
+              onRestart={() => controlListeners('restart')}
+              onRefresh={fetchListeners}
+            />
+
             {/* ── Row 2: Service health + API probes ────────────────────── */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5 mt-5">
 
               {/* Service health */}
               <Card title="Service Health" icon="ph-heartbeat">

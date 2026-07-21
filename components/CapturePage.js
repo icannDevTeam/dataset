@@ -306,7 +306,7 @@ export default function CapturePage({ studentData, onBack, onUploadComplete }) {
         const formData = new FormData();
         formData.append('studentId', studentData.studentId);
         formData.append('studentName', studentData.studentName);
-        formData.append('className', studentData.className);
+        formData.append('className', studentData.className || '');
         formData.append('gradeCode', studentData.gradeCode || '');
         formData.append('gradeName', studentData.gradeName || '');
         formData.append('photoNumber', String(i + 1));
@@ -349,7 +349,7 @@ export default function CapturePage({ studentData, onBack, onUploadComplete }) {
       <div className={styles.header}>
         <h1 className={styles.title}>Face Capture</h1>
         <p className={styles.subtitle}>
-          {studentData.studentName} — {studentData.className}
+          {[studentData.studentName, studentData.className].filter(Boolean).join(' — ')}
         </p>
       </div>
 

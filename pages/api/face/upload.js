@@ -91,6 +91,8 @@ async function handler(req, res) {
     const studentId = fields.studentId;
     const studentName = fields.studentName;
     const className = fields.className;
+    const normalizedClassName = String(className || '').trim();
+    const storageClassName = normalizedClassName || 'UNASSIGNED';
     const gradeCode = fields.gradeCode || '';
     const gradeName = fields.gradeName || '';
     const photoNumber = fields.photoNumber || '1';
@@ -98,12 +100,12 @@ async function handler(req, res) {
     const imageFile = files.image;
 
     // Build the display label for attendance (e.g. "Albert Arthur 3B")
-    const displayLabel = `${studentName} ${className}`;
+    const displayLabel = normalizedClassName ? `${studentName} ${normalizedClassName}` : studentName;
 
     // F-011 fix: do not log PII (student name/class) in production logs.
     console.log(`Upload: studentId=${studentId} photo=${photoNumber}/${totalPhotos} size=${imageFile ? imageFile.size : 0}`);
 
-    if (!studentId || !studentName || !className || !imageFile) {
+    if (!studentId || !studentName || !imageFile) {
       console.error('Missing required fields:', { studentId, studentName, className, hasImage: !!imageFile });
       return res.status(400).json({ 
         error: 'Missing required fields',
@@ -150,7 +152,7 @@ async function handler(req, res) {
     let safeStudentName, safeClassName, safeStudentId;
     try {
       safeStudentName = safeName(studentName, 'studentName');
-      safeClassName   = safeName(className,   'className');
+      safeClassName   = safeName(storageClassName, 'className');
       safeStudentId   = safeName(studentId,   'studentId');
     } catch (e) {
       return res.status(400).json({ error: 'invalid_input', details: e.message });
@@ -181,7 +183,7 @@ async function handler(req, res) {
       const meta = {
         contentType: 'image/jpeg',
         metadata: {
-          studentId, studentName, className, gradeCode, gradeName, displayLabel,
+          studentId, studentName, className: normalizedClassName || null, gradeCode, gradeName, displayLabel,
           photoNumber, totalPhotos,
           capturedAt: new Date().toISOString(),
           tenantId: tenancy.getTenantId(),
@@ -221,12 +223,12 @@ async function handler(req, res) {
         uploadedAt: new Date().toISOString(),
         storageUrl,
         uploadMethod,
-        studentId, studentName, className, gradeCode, gradeName, displayLabel,
+        studentId, studentName, className: normalizedClassName || null, gradeCode, gradeName, displayLabel,
       };
       const studentDoc = {
         id: studentId,
         name: studentName,
-        homeroom: className,
+        homeroom: normalizedClassName || null,
         gradeCode,
         gradeName,
         displayLabel,
@@ -267,7 +269,7 @@ async function handler(req, res) {
       data: {
         studentId,
         studentName,
-        className,
+        className: normalizedClassName || null,
         gradeCode,
         gradeName,
         displayLabel,

@@ -69,8 +69,8 @@ export default function EnrollmentPage({ onStudentData }) {
   const handleManualSubmit = async (e) => {
     e.preventDefault();
 
-    if (!manualName.trim() || !manualClass.trim()) {
-      setError('Name and Class are required');
+    if (!manualName.trim()) {
+      setError('Name is required');
       return;
     }
 
@@ -218,7 +218,7 @@ export default function EnrollmentPage({ onStudentData }) {
                 <div className={styles.formRow}>
                   <div className={styles.formGroup}>
                     <label htmlFor="manualClass" className={styles.label}>
-                      Class / Homeroom <span className={styles.required}>*</span>
+                      Class / Homeroom
                     </label>
                     <input
                       id="manualClass"
@@ -250,7 +250,7 @@ export default function EnrollmentPage({ onStudentData }) {
                 <button
                   type="submit"
                   className={styles.button}
-                  disabled={!manualName.trim() || !manualClass.trim()}
+                  disabled={!manualName.trim()}
                 >
                   Confirm Details
                 </button>
@@ -282,7 +282,7 @@ export default function EnrollmentPage({ onStudentData }) {
               <div className={styles.infoRow}>
                 <span className={styles.label}>Attendance Label:</span>
                 <span className={styles.value} style={{ color: '#667eea', fontWeight: 700 }}>
-                  {studentInfo.name} {studentInfo.homeroom}
+                  {[studentInfo.name, studentInfo.homeroom].filter(Boolean).join(' ')}
                 </span>
               </div>
             </div>
