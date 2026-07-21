@@ -80,11 +80,26 @@ async function enqueueApprovalNotification(db, tid, recordId, rec, reviewer, app
   }, { merge: false });
 }
 
-// Extract grade ('1'…'12') from a homeroom string like '4A', '12-IB', etc.
+// Extract grade ('1'…'12', or 'EY') from a homeroom string like '4A',
+// '12-IB', 'EY2', etc.
 function gradeFromHomeroom(hr) {
   if (!hr) return null;
-  const m = String(hr).match(/^(\d{1,2})/);
+  const s = String(hr).trim().toUpperCase();
+  if (s.startsWith('EY')) return 'EY'; // Early Years: EY1 / EY2 / EY3
+  const m = s.match(/^(\d{1,2})/);
   return m ? m[1] : null;
+}
+
+// EY classes first, then everything else in insertion order. Keeps the EY
+// class as studentClasses[0] so legacy consumers that only read the first
+// entry (older Enroll-board builds, terminal-picker defaults) still surface
+// Early Years chaperones during the EY pilot.
+function sortEyFirst(values) {
+  return [...values].sort((a, b) => {
+    const ae = String(a).toUpperCase().startsWith('EY') ? 0 : 1;
+    const be = String(b).toUpperCase().startsWith('EY') ? 0 : 1;
+    return ae - be;
+  });
 }
 
 /**
@@ -235,8 +250,8 @@ async function handler(req, res) {
         guardianEmail: rec.guardian.email,
         guardianPhone: rec.guardian.phone,
         authorizedStudentIds: c.authorizedStudentIds || [],
-        studentClasses: [...studentClassesSet],
-        studentGrades: [...studentGradesSet],
+        studentClasses: sortEyFirst(studentClassesSet),
+        studentGrades: sortEyFirst(studentGradesSet),
         facePaths: finalFacePaths,
         // 'approved_pending_faces' = chaperone is allocated and authorized but
         // cannot be enrolled on the Hikvision device until an admin uploads

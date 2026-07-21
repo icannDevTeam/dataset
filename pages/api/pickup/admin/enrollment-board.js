@@ -48,14 +48,24 @@ const SIGNED_TTL_MS = 10 * 60 * 1000;
 
 function gradeFromHomeroom(hr) {
   if (!hr) return null;
-  const m = String(hr).match(/^(\d{1,2})/);
+  const s = String(hr).trim().toUpperCase();
+  if (s.startsWith('EY')) return 'EY'; // Early Years: EY1 / EY2 / EY3
+  const m = s.match(/^(\d{1,2})/);
   return m ? m[1] : null;
 }
 
 function deviceMatchesGrades(device, grades) {
   if (!device.gradeScopes || device.gradeScopes.length === 0) return true;
   if (!grades || grades.length === 0) return false;
-  return device.gradeScopes.some((g) => grades.includes(String(g)));
+  const norm = (v) => String(v).trim().toUpperCase();
+  const gradeSet = new Set(grades.map(norm));
+  return device.gradeScopes.some((g) => {
+    const scope = norm(g);
+    if (gradeSet.has(scope)) return true;
+    // An 'EY1'/'EY2'/'EY3' device scope matches the generic 'EY' grade.
+    if (scope.startsWith('EY') && gradeSet.has('EY')) return true;
+    return false;
+  });
 }
 
 function preferredChaperonePhotoRef(chaperone) {
@@ -278,20 +288,30 @@ async function handler(req, res) {
         suspended: !!c.suspendedAt,
       };
 
-      // Use first authorized student's homeroom as the group key. If none,
-      // bucket under '— Unassigned'.
-      const homeroom = (studentClasses[0] || '— Unassigned').toUpperCase();
-      const grade = gradeFromHomeroom(homeroom) || '?';
-      if (!groupsMap.has(homeroom)) {
-        groupsMap.set(homeroom, { homeroom, grade, chaperones: [] });
+      // Group the card under EVERY class of the chaperone's authorized
+      // students — a chaperone with siblings in 2A + EY3 must appear under
+      // BOTH groups (previously only studentClasses[0] was used, which hid
+      // mixed-sibling chaperones from the class listed second on the form).
+      // If no class is known, bucket under '— Unassigned'.
+      const homerooms = [...new Set(
+        studentClasses.map((h) => String(h).trim().toUpperCase()).filter(Boolean)
+      )];
+      if (homerooms.length === 0) homerooms.push('— UNASSIGNED');
+      for (const homeroom of homerooms) {
+        const grade = gradeFromHomeroom(homeroom) || '?';
+        if (!groupsMap.has(homeroom)) {
+          groupsMap.set(homeroom, { homeroom, grade, chaperones: [] });
+        }
+        groupsMap.get(homeroom).chaperones.push(item);
       }
-      groupsMap.get(homeroom).chaperones.push(item);
     }
 
-    // Sort: by grade asc, homeroom asc; chaperones inside by name
+    // Sort: EY first, then grade asc, homeroom asc; chaperones inside by name
+    const gradeOrder = (g) =>
+      String(g).toUpperCase() === 'EY' ? 0 : (parseInt(g, 10) || 999);
     const groups = [...groupsMap.values()].sort((a, b) => {
-      const ga = parseInt(a.grade, 10) || 999;
-      const gb = parseInt(b.grade, 10) || 999;
+      const ga = gradeOrder(a.grade);
+      const gb = gradeOrder(b.grade);
       if (ga !== gb) return ga - gb;
       return a.homeroom.localeCompare(b.homeroom);
     });
