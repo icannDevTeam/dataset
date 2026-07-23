@@ -23,6 +23,12 @@ const TOKEN_KEY = 'pickup.tablet.deviceToken';
 const IDENTITY_KEY = 'pickup.tablet.identity';
 const BINUS_MAROON = '#8B1538';
 const BINUS_GOLD = '#FCBF11';
+const ACTIVE_GAP = 12;
+const ACTIVE_MIN_W_WITH_HELD = 240;
+const ACTIVE_MIN_W_NO_HELD = 220;
+const ACTIVE_CARD_MIN_H_WITH_HELD = 252;
+const ACTIVE_CARD_MIN_H_NO_HELD = 272;
+const HELD_CARD_MIN_H = 188;
 
 // BINUS spirit values — rotated on the standby hero so the iPad doubles as
 // a brand ambassador when the gate is idle. Each value pairs an icon glyph
@@ -97,41 +103,54 @@ function StudentChip({ s }) {
 // Teacher-first: students are the focus, the chaperone is the proof.
 function StudentList({ students = [], compact = false }) {
   if (students.length === 0) return null;
-  // Scale name size by count so 1 student feels huge, 5 still readable.
+  // Keep sizing tight so cards look consistent in dense tablet grids.
   const scale = compact
-    ? (students.length <= 2 ? 22 : students.length <= 4 ? 18 : 15)
-    : (students.length === 1 ? 38 : students.length <= 2 ? 30 : students.length <= 4 ? 24 : 20);
+    ? 13
+    : (students.length <= 1 ? 16 : students.length <= 3 ? 15 : 14);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 4 : 8, minWidth: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 3 : 6, minWidth: 0 }}>
       <div style={{
-        fontSize: compact ? 10 : 11, color: '#92400e', fontWeight: 800,
-        letterSpacing: 1.5, textTransform: 'uppercase',
+        fontSize: 10, color: '#92400e', fontWeight: 700,
+        letterSpacing: 1.2, lineHeight: 1.2, textTransform: 'uppercase',
       }}>
         Picking up · {students.length}
       </div>
       <div style={{
         display: 'flex', flexDirection: 'column',
-        gap: compact ? 2 : 4,
+        gap: compact ? 2 : 3,
       }}>
         {students.map((s, i) => (
           <div key={i} style={{
-            display: 'flex', alignItems: 'baseline', gap: 10,
-            paddingTop: i === 0 ? 0 : (compact ? 4 : 6),
+            display: 'flex', alignItems: 'baseline', gap: 8,
+            paddingTop: i === 0 ? 0 : (compact ? 3 : 4),
             borderTop: i === 0 ? 'none' : '1px dashed #fcd34d',
           }}>
             <div style={{
-              fontSize: scale, fontWeight: 900, color: '#0f172a',
-              lineHeight: 1.05, letterSpacing: -0.3,
-              wordBreak: 'break-word',
-            }}>
+              fontSize: scale,
+              fontWeight: 700,
+              color: '#0f172a',
+              lineHeight: 1.28,
+              letterSpacing: '-0.01em',
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: compact ? 1 : 3,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              overflowWrap: 'normal',
+              wordBreak: 'keep-all',
+            }} title={s.name}>
               {s.name}
             </div>
             {s.homeroom && (
               <div style={{
-                fontSize: Math.max(11, Math.round(scale * 0.45)),
+                fontSize: 10,
                 fontWeight: 700, color: '#92400e',
                 background: '#fff7ea', border: '1px solid #FFD86A',
-                borderRadius: 8, padding: '1px 7px',
+                height: 20,
+                borderRadius: 999,
+                padding: '0 7px',
+                display: 'inline-flex',
+                alignItems: 'center',
                 whiteSpace: 'nowrap',
               }}>
                 {s.homeroom}
@@ -216,7 +235,7 @@ function PairingScreen({ onPaired }) {
   );
 }
 
-function Card({ ev, onAction, busy, exiting, big = true }) {
+function Card({ ev, onAction, busy, exiting, big = true, minHeight = ACTIVE_CARD_MIN_H_WITH_HELD }) {
   const blocked = ev.blocked || ev.cardState === 'red';
   const ring = blocked ? '#EF4444' : ev.cardState === 'yellow' ? '#FCBF11' : '#22C55E';
   const label = blocked ? 'BLOCKED — NOT IN SYSTEM'
@@ -237,6 +256,8 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
       background: '#fff', borderRadius: 20,
       border: `4px solid ${ring}`, boxShadow: `0 12px 40px ${ring}33`,
       padding: big ? 22 : 14,
+      minHeight,
+      height: '100%',
       display: 'flex', flexDirection: 'column', gap: 14,
       transition: 'transform 180ms cubic-bezier(0.4, 0, 0.2, 1), opacity 180ms ease',
       transformOrigin: 'center top',
@@ -260,8 +281,8 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
           "who is being picked up" from "who is doing the pickup". */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 1.6fr) 1px minmax(120px, 0.6fr)',
-        gap: blocked ? 0 : 18, alignItems: 'stretch',
+        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 2.2fr) 1px minmax(80px, 0.38fr)',
+        gap: blocked ? 0 : 12, alignItems: 'stretch',
         padding: '4px 0',
       }}>
         <div style={{ minWidth: 0, paddingRight: blocked ? 0 : 4 }}>
@@ -285,8 +306,8 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
         {!blocked && (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-            paddingLeft: 14,
-            minWidth: big ? 130 : 100,
+            paddingLeft: 8,
+            minWidth: big ? 108 : 84,
           }}>
             <div style={{
               fontSize: 9, color: '#94a3b8', fontWeight: 800,
@@ -294,10 +315,16 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
             }}>Picked up by</div>
             <Avatar src={chap.photoUrl} name={chap.name} size={big ? 96 : 70} ring={ring} />
             <div style={{
-              fontSize: big ? 13 : 11, fontWeight: 700, color: '#334155',
-              textAlign: 'center', lineHeight: 1.15, maxWidth: big ? 140 : 110,
-              wordBreak: 'break-word',
-            }}>
+              fontSize: big ? 12 : 10, fontWeight: 700, color: '#334155',
+              textAlign: 'center', lineHeight: 1.2, maxWidth: big ? 126 : 96,
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 2,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              overflowWrap: 'normal',
+              wordBreak: 'keep-all',
+            }} title={chap.name || 'Unknown'}>
               {chap.name || 'Unknown'}
             </div>
             {chap.relation && (
@@ -314,7 +341,7 @@ function Card({ ev, onAction, busy, exiting, big = true }) {
       </div>
 
       {/* Divider line above the action buttons */}
-      <div style={{ height: 1, background: '#e2e8f0', margin: '4px -4px 0' }} />
+      <div style={{ height: 1, background: '#e2e8f0', margin: '4px -4px 0', marginTop: 'auto' }} />
 
       <div style={{ display: 'flex', gap: 10 }}>
         <button
@@ -374,7 +401,9 @@ function HeldCard({ ev, onAction, busy, exiting }) {
       background: '#fff', borderRadius: 16,
       border: `3px solid ${ring}`,
       boxShadow: `0 6px 20px ${ring}22, 0 2px 6px rgba(0,0,0,0.15)`,
-      padding: 14,
+      padding: 12,
+      minHeight: HELD_CARD_MIN_H,
+      height: '100%',
       display: 'flex', flexDirection: 'column', gap: 10,
       transition: 'transform 180ms cubic-bezier(0.4, 0, 0.2, 1), opacity 180ms ease',
       animation: 'pickupHeldIn 180ms cubic-bezier(0.4, 0, 0.2, 1)',
@@ -396,8 +425,8 @@ function HeldCard({ ev, onAction, busy, exiting }) {
           vertical divider so the teacher can scan name-first. */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 1.6fr) 1px minmax(72px, 0.55fr)',
-        gap: blocked ? 0 : 12, alignItems: 'stretch',
+        gridTemplateColumns: blocked ? '1fr' : 'minmax(0, 1.7fr) 1px minmax(72px, 0.5fr)',
+        gap: blocked ? 0 : 10, alignItems: 'stretch',
       }}>
         <div style={{ minWidth: 0 }}>
           {!blocked && <StudentList students={ev.students || []} compact />}
@@ -421,7 +450,7 @@ function HeldCard({ ev, onAction, busy, exiting }) {
         {!blocked && (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-            paddingLeft: 8,
+            paddingLeft: 6,
             minWidth: 72,
           }}>
             <div style={{
@@ -430,10 +459,16 @@ function HeldCard({ ev, onAction, busy, exiting }) {
             }}>Pickup by</div>
             <Avatar src={chap.photoUrl} name={chap.name} size={56} ring={ring} />
             <div style={{
-              fontSize: 11, fontWeight: 700, color: '#334155',
-              textAlign: 'center', lineHeight: 1.1, maxWidth: 90,
-              wordBreak: 'break-word',
-            }}>
+              fontSize: 10, fontWeight: 700, color: '#334155',
+              textAlign: 'center', lineHeight: 1.2, maxWidth: 80,
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 2,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              overflowWrap: 'normal',
+              wordBreak: 'keep-all',
+            }} title={chap.name || 'Unknown'}>
               {chap.name || 'Unknown'}
             </div>
             {chap.relation && (
@@ -449,7 +484,7 @@ function HeldCard({ ev, onAction, busy, exiting }) {
       </div>
 
       {/* Divider above the action button */}
-      <div style={{ height: 1, background: '#e2e8f0', margin: '2px -2px 0' }} />
+      <div style={{ height: 1, background: '#e2e8f0', margin: '2px -2px 0', marginTop: 'auto' }} />
 
       <button
         type="button"
@@ -560,9 +595,10 @@ function HeldRow({ ev, onAction, busy, exiting }) {
 }
 
 function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
-  const [now, setNow] = useState(() => new Date());
+  const [now, setNow] = useState(null);
   const [valueIdx, setValueIdx] = useState(0);
   useEffect(() => {
+    setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
@@ -576,17 +612,23 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
   }, []);
   const spirit = BINUS_SPIRIT_VALUES[valueIdx];
 
-  const wibTime = (() => {
-    const wib = new Date(now.getTime() + (now.getTimezoneOffset() + 7 * 60) * 60 * 1000);
-    const hh = String(wib.getHours()).padStart(2, '0');
-    const mm = String(wib.getMinutes()).padStart(2, '0');
-    const ss = String(wib.getSeconds()).padStart(2, '0');
-    return { hh, mm, ss };
-  })();
-  const wibDate = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const wibTime = now
+    ? (() => {
+        const wib = new Date(now.getTime() + (now.getTimezoneOffset() + 7 * 60) * 60 * 1000);
+        const hh = String(wib.getHours()).padStart(2, '0');
+        const mm = String(wib.getMinutes()).padStart(2, '0');
+        const ss = String(wib.getSeconds()).padStart(2, '0');
+        return { hh, mm, ss };
+      })()
+    : { hh: '--', mm: '--', ss: '--' };
+  const wibDate = now
+    ? new Intl.DateTimeFormat('en-GB', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta',
+      }).format(now)
+    : '—';
 
   const terminals = identity?.terminalIds?.length || 0;
-  const lastSeenAgo = lastEventAt ? timeAgo(lastEventAt) : null;
+  const lastSeenAgo = now && lastEventAt ? timeAgo(lastEventAt) : null;
 
   return (
     <div style={{
@@ -771,31 +813,205 @@ export default function TeacherTabletPage() {
   const [identity, setIdentity] = useState(null);   // whoami payload
   const [feed, setFeed] = useState({ active: [], held: [], todayReleased: 0 });
   const [lastEventAt, setLastEventAt] = useState(null);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState({});
   const [exiting, setExiting] = useState({}); // id → 'release' | 'hold'
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
   const [sseLive, setSseLive] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
   const pollRef = useRef(null);
-  const activeCarouselRef = useRef(null);
+  const isPreviewRef = useRef(false);
 
-  // Load token + last-known identity from localStorage so the iPad reopens
-  // straight to its assigned class — no code re-entry between launches.
+  // Bootstrap preview/local token before first render to avoid pair-screen flash.
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const isPreview = new URLSearchParams(window.location.search).has('preview');
+    if (isPreview) {
+      const now = Date.now();
+      isPreviewRef.current = true;
+      setErr(null);
+      setToken('preview-token');
+      setIdentity({
+        releaseGroupId: 'preview-rg',
+        releaseGroupName: 'Preview • Grade 2 & EY',
+        gradeLabel: 'Grade 2 / EY',
+        terminalIds: ['term-g2-a', 'term-ey-a', 'term-ey-b'],
+      });
+      setFeed({
+        active: [
+          {
+            id: 'pv-active-1',
+            eventId: 'pv-active-1',
+            status: 'pending',
+            cardState: 'green',
+            scannedAt: new Date(now - 35 * 1000).toISOString(),
+            recordedAt: new Date(now - 35 * 1000).toISOString(),
+            students: [{ name: 'ANAYA PUTRI', homeroom: '2A' }],
+            chaperone: { name: 'Ibu Rahma', relation: 'Mother', photoUrl: null },
+          },
+          {
+            id: 'pv-active-2',
+            eventId: 'pv-active-2',
+            status: 'pending',
+            cardState: 'yellow',
+            scannedAt: new Date(now - 58 * 1000).toISOString(),
+            recordedAt: new Date(now - 58 * 1000).toISOString(),
+            students: [{ name: 'JAYDEN LEE', homeroom: '2B' }, { name: 'MILA TAN', homeroom: 'EY2' }],
+            chaperone: { name: 'Pending verification', relation: 'Father', photoUrl: null },
+          },
+          {
+            id: 'pv-active-3',
+            eventId: 'pv-active-3',
+            status: 'pending',
+            cardState: 'green',
+            scannedAt: new Date(now - 75 * 1000).toISOString(),
+            recordedAt: new Date(now - 75 * 1000).toISOString(),
+            students: [{ name: 'CLARA NUGROHO', homeroom: 'EY1' }],
+            chaperone: { name: 'Pak Dewa', relation: 'Driver', photoUrl: null },
+          },
+          {
+            id: 'pv-active-4',
+            eventId: 'pv-active-4',
+            status: 'pending',
+            cardState: 'green',
+            scannedAt: new Date(now - 92 * 1000).toISOString(),
+            recordedAt: new Date(now - 92 * 1000).toISOString(),
+            students: [{ name: 'ELLA MAHESA', homeroom: '2C' }, { name: 'ARVIN PUTRA', homeroom: '2C' }],
+            chaperone: { name: 'Ibu Sinta', relation: 'Aunt', photoUrl: null },
+          },
+          {
+            id: 'pv-active-5',
+            eventId: 'pv-active-5',
+            status: 'pending',
+            cardState: 'yellow',
+            scannedAt: new Date(now - 110 * 1000).toISOString(),
+            recordedAt: new Date(now - 110 * 1000).toISOString(),
+            students: [{ name: 'KAYLA PUTRANTO', homeroom: 'EY2' }],
+            chaperone: { name: 'Pending verification', relation: 'Guardian', photoUrl: null },
+          },
+          {
+            id: 'pv-active-6',
+            eventId: 'pv-active-6',
+            status: 'pending',
+            cardState: 'green',
+            scannedAt: new Date(now - 130 * 1000).toISOString(),
+            recordedAt: new Date(now - 130 * 1000).toISOString(),
+            students: [{ name: 'NATHAN AZIZ', homeroom: '2A' }],
+            chaperone: { name: 'Pak Gilang', relation: 'Father', photoUrl: null },
+          },
+          {
+            id: 'pv-active-7',
+            eventId: 'pv-active-7',
+            status: 'pending',
+            cardState: 'green',
+            scannedAt: new Date(now - 150 * 1000).toISOString(),
+            recordedAt: new Date(now - 150 * 1000).toISOString(),
+            students: [{ name: 'SAMUEL ADITYA', homeroom: '2C' }],
+            chaperone: { name: 'Ibu Dini', relation: 'Mother', photoUrl: null },
+          },
+          {
+            id: 'pv-active-8',
+            eventId: 'pv-active-8',
+            status: 'pending',
+            cardState: 'yellow',
+            scannedAt: new Date(now - 170 * 1000).toISOString(),
+            recordedAt: new Date(now - 170 * 1000).toISOString(),
+            students: [{ name: 'LUCAS MAULANA', homeroom: 'EY2' }],
+            chaperone: { name: 'Pending verification', relation: 'Guardian', photoUrl: null },
+          },
+          {
+            id: 'pv-active-9',
+            eventId: 'pv-active-9',
+            status: 'pending',
+            cardState: 'green',
+            scannedAt: new Date(now - 190 * 1000).toISOString(),
+            recordedAt: new Date(now - 190 * 1000).toISOString(),
+            students: [{ name: 'AURELIA KARTIKA', homeroom: '2B' }],
+            chaperone: { name: 'Pak Arya', relation: 'Father', photoUrl: null },
+          },
+          {
+            id: 'pv-active-10',
+            eventId: 'pv-active-10',
+            status: 'pending',
+            cardState: 'yellow',
+            scannedAt: new Date(now - 210 * 1000).toISOString(),
+            recordedAt: new Date(now - 210 * 1000).toISOString(),
+            students: [{ name: 'MARCO SANTOSO', homeroom: '2A' }],
+            chaperone: { name: 'Pending verification', relation: 'Uncle', photoUrl: null },
+          },
+          {
+            id: 'pv-active-11',
+            eventId: 'pv-active-11',
+            status: 'pending',
+            cardState: 'green',
+            scannedAt: new Date(now - 230 * 1000).toISOString(),
+            recordedAt: new Date(now - 230 * 1000).toISOString(),
+            students: [{ name: 'GISELLE CHANDRA', homeroom: 'EY1' }],
+            chaperone: { name: 'Ibu Sari', relation: 'Mother', photoUrl: null },
+          },
+          {
+            id: 'pv-active-12',
+            eventId: 'pv-active-12',
+            status: 'pending',
+            cardState: 'green',
+            scannedAt: new Date(now - 250 * 1000).toISOString(),
+            recordedAt: new Date(now - 250 * 1000).toISOString(),
+            students: [{ name: 'RYAN PRATAMA', homeroom: 'EY2' }],
+            chaperone: { name: 'Pak Surya', relation: 'Guardian', photoUrl: null },
+          },
+        ],
+        held: [
+          {
+            id: 'pv-held-1',
+            eventId: 'pv-held-1',
+            status: 'held',
+            cardState: 'yellow',
+            scannedAt: new Date(now - 6 * 60 * 1000).toISOString(),
+            recordedAt: new Date(now - 6 * 60 * 1000).toISOString(),
+            students: [{ name: 'RANIA KUSUMA', homeroom: 'EY1' }],
+            chaperone: { name: 'Ibu Maya', relation: 'Mother', photoUrl: null },
+          },
+          {
+            id: 'pv-held-2',
+            eventId: 'pv-held-2',
+            status: 'held',
+            cardState: 'green',
+            scannedAt: new Date(now - 8 * 60 * 1000).toISOString(),
+            recordedAt: new Date(now - 8 * 60 * 1000).toISOString(),
+            students: [{ name: 'OMAR FADLI', homeroom: '2B' }],
+            chaperone: { name: 'Pak Rudi', relation: 'Grandfather', photoUrl: null },
+          },
+        ],
+        todayReleased: 27,
+      });
+      setLastEventAt(new Date(now - 35 * 1000).toISOString());
+      setIsBootstrapping(false);
+      return;
+    }
+
     const t = localStorage.getItem(TOKEN_KEY);
     if (t) setToken(t);
     try {
       const cached = localStorage.getItem(IDENTITY_KEY);
       if (cached) setIdentity(JSON.parse(cached));
     } catch {}
+    setIsBootstrapping(false);
   }, []);
 
   // PWA: register service worker + install prompt
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    const isPreview = new URLSearchParams(window.location.search).has('preview');
+    if (isPreview) {
+      // Preview should be deterministic and not influenced by stale SW caches.
+      navigator.serviceWorker.getRegistrations()
+        .then((regs) => regs.forEach((reg) => {
+          if (reg.scope.includes('/pickup/teacher')) reg.unregister();
+        }))
+        .catch(() => {});
+      return;
+    }
     navigator.serviceWorker.register('/teacher-sw.js', { scope: '/pickup/teacher' }).catch(() => {});
     const onBip = (e) => { e.preventDefault(); setInstallPromptEvent(e); setShowInstall(true); };
     const onInstalled = () => { setShowInstall(false); setInstallPromptEvent(null); };
@@ -847,7 +1063,7 @@ export default function TeacherTabletPage() {
   // unpaired the device from the dashboard). Network errors / 5xx leave
   // the cached identity in place so the iPad keeps working offline-ish.
   useEffect(() => {
-    if (!token) return;
+    if (!token || isPreviewRef.current) return;
     let cancelled = false;
     (async () => {
       try {
@@ -882,17 +1098,11 @@ export default function TeacherTabletPage() {
     return () => { cancelled = true; };
   }, [token]);
 
-  // Keep the carousel index in range as active cards change.
-  useEffect(() => {
-    const maxIdx = Math.max(0, (feed.active || []).length - 1);
-    setActiveIndex((idx) => Math.min(idx, maxIdx));
-  }, [feed.active]);
-
   // Poll feed
   const pollFeed = useCallback(async () => {
-    if (!token) return;
+    if (!token || isPreviewRef.current) return;
     try {
-      const r = await fetch(`/api/pickup/tablet/feed?max=4&t=${Date.now()}`, {
+      const r = await fetch(`/api/pickup/tablet/feed?max=8&t=${Date.now()}`, {
         headers: { 'x-tablet-device-token': token },
         cache: 'no-store',
       });
@@ -913,7 +1123,7 @@ export default function TeacherTabletPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || !identity) return;
+    if (!token || !identity || isPreviewRef.current) return;
     pollFeed();
     // Cadence depends on SSE health: 2.5s when offline (fallback), 15s when
     // the SSE channel is delivering live events. The SSE effect below adjusts
@@ -928,7 +1138,7 @@ export default function TeacherTabletPage() {
   // centralized in the feed endpoint. Falls back transparently to polling if
   // the connection drops or Vercel idles us out.
   useEffect(() => {
-    if (!token || !identity) return;
+    if (!token || !identity || isPreviewRef.current) return;
     let es = null;
     let reconnectTimer = null;
     let cancelled = false;
@@ -1011,6 +1221,7 @@ export default function TeacherTabletPage() {
       held: f.held.filter((x) => x.id !== id),
     }));
     try {
+      if (isPreviewRef.current) return;
       const r = await fetch(`/api/pickup/tablet/release`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-tablet-device-token': token },
@@ -1057,6 +1268,16 @@ export default function TeacherTabletPage() {
     setIdentity(null);
     setFeed({ active: [], held: [], todayReleased: 0 });
   };
+
+  if (isBootstrapping) {
+    return <div style={{ minHeight: '100vh', background: '#0f172a' }} />;
+  }
+
+  const hasHeld = (feed.held?.length || 0) > 0;
+  const activeLimit = hasHeld ? 8 : 12;
+  const activeCards = (feed.active || []).slice(0, activeLimit);
+  const activeCardMinHeight = hasHeld ? ACTIVE_CARD_MIN_H_WITH_HELD : ACTIVE_CARD_MIN_H_NO_HELD;
+  const noHeldDense = !hasHeld && activeCards.length >= 9;
 
   if (!token) {
     return (
@@ -1120,6 +1341,45 @@ export default function TeacherTabletPage() {
             100% { background-position: 200% 0; }
           }
           button:active { filter: brightness(0.95); }
+
+          @media (min-width: 1024px) and (orientation: landscape) {
+            .activeCardsGrid--withHeld {
+              grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+            }
+            .activeCardsGrid--noHeldSparse {
+              grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+            }
+            .activeCardsGrid--noHeldDense {
+              grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+            }
+            .heldCardsGrid {
+              grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+            }
+          }
+
+          @media (max-width: 1023px) {
+            .activeCardsGrid--withHeld {
+              grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            }
+            .activeCardsGrid--noHeldSparse,
+            .activeCardsGrid--noHeldDense {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+            .heldCardsGrid {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+          }
+
+          @media (max-width: 860px) {
+            .activeCardsGrid--withHeld,
+            .activeCardsGrid--noHeldSparse,
+            .activeCardsGrid--noHeldDense {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+            .heldCardsGrid {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+          }
         `}</style>
         <div style={{
           background: BINUS_MAROON, padding: '14px 22px',
@@ -1157,11 +1417,10 @@ export default function TeacherTabletPage() {
           </div>
         )}
 
-        {/* Active panel: swipe-first carousel */}
-        <div style={{ padding: '22px', maxWidth: 1400, margin: '0 auto' }}>
+        {/* Active panel: compact grid for fast landscape scanning */}
+        <div style={{ padding: '22px', maxWidth: 1440, margin: '0 auto' }}>
           {(() => {
-            const activeFour = (feed.active || []).slice(0, 4);
-            if (activeFour.length === 0) {
+            if (activeCards.length === 0) {
               return (
                 <StandbyHero
                   identity={identity}
@@ -1182,7 +1441,7 @@ export default function TeacherTabletPage() {
                       Active pickup
                     </div>
                     <div style={{ fontSize: 13, color: '#64748b', fontWeight: 600, marginTop: 2 }}>
-                      Swipe either direction to review cards. Hold when pickup is not ready.
+                      Live queue shown side by side for faster student lookup.
                     </div>
                   </div>
                   <div style={{
@@ -1191,62 +1450,41 @@ export default function TeacherTabletPage() {
                     background: 'rgba(252,191,17,0.10)', border: '1px solid rgba(252,191,17,0.28)',
                     color: BINUS_MAROON, fontSize: 12, fontWeight: 800,
                   }}>
-                    {activeFour.length} active
+                    {activeCards.length} active
                   </div>
                 </div>
 
                 <div
-                  ref={activeCarouselRef}
-                  onScroll={(e) => {
-                    const w = e.currentTarget.clientWidth || 1;
-                    const idx = Math.round(e.currentTarget.scrollLeft / w);
-                    setActiveIndex(Math.max(0, Math.min(idx, activeFour.length - 1)));
-                  }}
+                  className={
+                    hasHeld
+                      ? 'activeCardsGrid activeCardsGrid--withHeld'
+                      : noHeldDense
+                        ? 'activeCardsGrid activeCardsGrid--noHeldDense'
+                        : 'activeCardsGrid activeCardsGrid--noHeldSparse'
+                  }
                   style={{
-                    display: 'flex',
-                    gap: 14,
-                    overflowX: 'auto',
-                    padding: '4px 2px 10px',
-                    scrollSnapType: 'x mandatory',
-                    WebkitOverflowScrolling: 'touch',
-                    touchAction: 'pan-x',
-                    scrollbarWidth: 'none',
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(auto-fill, minmax(${hasHeld ? ACTIVE_MIN_W_WITH_HELD : ACTIVE_MIN_W_NO_HELD}px, 1fr))`,
+                    gap: ACTIVE_GAP,
+                    gridAutoRows: '1fr',
+                    alignItems: 'stretch',
+                    minHeight: hasHeld ? undefined : 'calc(100vh - 178px)',
+                    alignContent: 'start',
                   }}
                 >
-                  {activeFour.map((ev) => (
-                    <div
-                      key={ev.id}
-                      style={{
-                        flex: '0 0 100%',
-                        display: 'flex',
-                        justifyContent: 'center',
-                        scrollSnapAlign: 'center',
-                      }}
-                    >
-                      <div style={{ width: 'min(900px, 100%)' }}>
-                        <Card ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} big />
-                      </div>
+                  {activeCards.map((ev) => (
+                    <div key={ev.id} style={{ height: '100%' }}>
+                      <Card
+                        ev={ev}
+                        onAction={onAction}
+                        busy={busy}
+                        exiting={exiting[ev.id]}
+                        big={false}
+                        minHeight={activeCardMinHeight}
+                      />
                     </div>
                   ))}
                 </div>
-
-                {activeFour.length > 1 && (
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 10 }}>
-                    {activeFour.map((ev, idx) => (
-                      <div
-                        key={ev.id}
-                        aria-hidden
-                        style={{
-                          width: idx === activeIndex ? 18 : 8,
-                          height: 8,
-                          borderRadius: 999,
-                          background: idx === activeIndex ? BINUS_MAROON : '#cbd5e1',
-                          transition: 'width 180ms ease, background 180ms ease',
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
               </div>
             );
           })()}
@@ -1286,20 +1524,23 @@ export default function TeacherTabletPage() {
                 }} />
               </div>
 
-              {/* First 4 held: full mini-cards in a 4-up grid.
-                  5+ overflow into a compact one-line list below. */}
+              {/* Compact held cards are secondary; keep them visible but dense. */}
               {(() => {
-                const heldCards = feed.held.slice(0, 4);
-                const heldList = feed.held.slice(4);
+                const heldCards = feed.held.slice(0, 6);
+                const heldList = feed.held.slice(6);
                 return (
                   <>
                     <div style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-                      gap: 14,
-                    }}>
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                      gap: 10,
+                      gridAutoRows: '1fr',
+                      alignItems: 'stretch',
+                    }} className="heldCardsGrid">
                       {heldCards.map((ev) => (
-                        <HeldCard key={ev.id} ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} />
+                        <div key={ev.id} style={{ height: '100%' }}>
+                          <HeldCard ev={ev} onAction={onAction} busy={busy} exiting={exiting[ev.id]} />
+                        </div>
                       ))}
                     </div>
                     {heldList.length > 0 && (
