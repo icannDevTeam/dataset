@@ -5,12 +5,12 @@
  * scoped to the bound release group's terminalIds.
  *
  * Auth:  x-tablet-device-token header (or ?deviceToken=)
- * Query: ?since=ISO  ?max=2  (active limit)
+ * Query: ?since=ISO  ?max=12 (active limit)
  *
  * Response:
  *   {
  *     ok, now, releaseGroup: { id, name, gradeLabel, terminalIds },
- *     active:  [...],   // status='pending', up to maxActive (default 2)
+ *     active:  [...],   // status='pending', up to maxActive (default 12)
  *     held:    [...],   // status='held'
  *   }
  *
@@ -122,7 +122,7 @@ export default async function handler(req, res) {
     allDocs.sort((a, b) => recordedMs(b) - recordedMs(a));
     const snap = { docs: allDocs.slice(0, 80) };
 
-    const maxActive = Math.max(1, Math.min(4, parseInt(req.query.max, 10) || 2));
+    const maxActive = Math.max(1, Math.min(12, parseInt(req.query.max, 10) || 12));
     const active = [];
     const held = [];
     let todayReleased = 0;
