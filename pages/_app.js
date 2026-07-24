@@ -1,5 +1,4 @@
 import '../styles/globals.css';
-import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { useEffect, useRef, useState } from 'react';
 import { Toaster } from 'sonner';
@@ -154,9 +153,6 @@ function AuthGate({ Component, pageProps }) {
 export default function App({ Component, pageProps }) {
   return (
     <>
-      <Head>
-        <script dangerouslySetInnerHTML={{ __html: `document.documentElement.classList.add('dark');document.documentElement.dataset.theme='dark';` }} />
-      </Head>
       <ErrorBoundary>
         <AuthProvider>
           <AuthGate Component={Component} pageProps={pageProps} />

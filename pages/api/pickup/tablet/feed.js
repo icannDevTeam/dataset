@@ -50,10 +50,31 @@ export default async function handler(req, res) {
     const devData = dev.data();
     if (devData.status !== 'paired') return res.status(401).json({ error: 'not paired' });
 
-    const releaseGroupId = devData.releaseGroupId;
+    let releaseGroupId = devData.releaseGroupId;
+    let groupSnap = releaseGroupId ? await db.doc(tenancy.releaseGroupDoc(releaseGroupId, tid)).get() : null;
+    if (!groupSnap?.exists) {
+      const candidates = ['tabletDeviceId', 'tabletId', 'pairedTabletDeviceId', 'deviceId'];
+      let recovered = null;
+      for (const field of candidates) {
+        try {
+          const snap = await db.collection(tenancy.releaseGroupsPath(tid))
+            .where(field, '==', dev.id)
+            .limit(1)
+            .get();
+          if (!snap.empty) {
+            recovered = snap.docs[0];
+            break;
+          }
+        } catch {}
+      }
+      if (recovered) {
+        groupSnap = recovered;
+        releaseGroupId = recovered.id;
+        dev.ref.set({ releaseGroupId }, { merge: true }).catch(() => {});
+      }
+    }
     if (!releaseGroupId) return res.status(409).json({ error: 'no release group bound' });
-    const groupSnap = await db.doc(tenancy.releaseGroupDoc(releaseGroupId, tid)).get();
-    if (!groupSnap.exists) return res.status(404).json({ error: 'release group not found' });
+    if (!groupSnap?.exists) return res.status(404).json({ error: 'release group not found' });
     const group = groupSnap.data();
     const terminalIds = Array.isArray(group.terminalIds) ? group.terminalIds : [];
     if (terminalIds.length === 0) {
@@ -110,6 +131,24 @@ export default async function handler(req, res) {
     const perTerm = await Promise.all(
       terminalIds.slice(0, 30).map((tidx) => fetchTerminalDocs(tidx))
     );
+    const releaseGroupDocs = await (async () => {
+      try {
+        return await db.collection(tenancy.pickupEventsPath(tid))
+          .where('releaseGroupId', '==', releaseGroupId)
+          .orderBy('recordedAt', 'desc')
+          .limit(200)
+          .get();
+      } catch {
+        try {
+          return await db.collection(tenancy.pickupEventsPath(tid))
+            .where('releaseGroupId', '==', releaseGroupId)
+            .limit(200)
+            .get();
+        } catch {
+          return { docs: [] };
+        }
+      }
+    })();
     const recordedMs = (d) => {
       const v = d.data().recordedAt;
       if (!v) return 0;
@@ -118,7 +157,12 @@ export default async function handler(req, res) {
       if (v instanceof Date) return v.getTime();
       return 0;
     };
-    const allDocs = perTerm.flatMap((s) => s.docs).filter((d) => recordedMs(d) > cutoffMs);
+    const byId = new Map();
+    [...perTerm.flatMap((s) => s.docs), ...(releaseGroupDocs.docs || [])].forEach((d) => {
+      if (recordedMs(d) <= cutoffMs) return;
+      byId.set(d.id, d);
+    });
+    const allDocs = [...byId.values()];
     allDocs.sort((a, b) => recordedMs(b) - recordedMs(a));
     const snap = { docs: allDocs.slice(0, 80) };
 

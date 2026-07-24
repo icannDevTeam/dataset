@@ -1166,7 +1166,10 @@ export default function TeacherTabletPage() {
               if (dupe) return prev;
               const status = ev.status || 'pending';
               if (status === 'pending') {
-                return { ...prev, active: [ev, ...(prev.active || [])].slice(0, 4) };
+                const nextHeld = prev.held || [];
+                const nextActive = [ev, ...(prev.active || [])];
+                const liveLimit = nextHeld.length > 0 ? 8 : 12;
+                return { ...prev, active: nextActive.slice(0, liveLimit) };
               }
               if (status === 'held') {
                 return { ...prev, held: [ev, ...(prev.held || [])] };

@@ -46,6 +46,10 @@ const tenancy = require('../../../../lib/tenancy');
 
 const SIGNED_TTL_MS = 10 * 60 * 1000;
 
+function isTmpId(value) {
+  return /^tmp-[a-z0-9]/i.test(String(value || '').trim());
+}
+
 function gradeFromHomeroom(hr) {
   if (!hr) return null;
   const s = String(hr).trim().toUpperCase();
@@ -154,30 +158,28 @@ async function handler(req, res) {
     const studentMeta = Object.fromEntries(studentEntries);
     const photoUrlByRef = new Map(signedEntries);
 
-    // Backfill: any chaperone with empty studentClasses/Grades AND a known
-    // approvedFromOnboarding record has the homeroom info on the parent's
-    // original form. Fetch those records once and patch studentMeta in
-    // memory so existing chaperones (allocated before the approve.js fix)
-    // group correctly on the Enroll board instead of bucketing under
-    // '— Unassigned'.
+    // Backfill: for legacy approved records, enrich student names/homerooms
+    // from the original onboarding form when student docs are missing or
+    // when a chaperone still references tmp-* IDs.
     const onboardingIdsToFetch = new Set();
     for (const c of chaperones) {
-      const hasClasses = Array.isArray(c.studentClasses) && c.studentClasses.length > 0;
-      if (hasClasses) continue;
       const recId = c.approvedFromOnboarding;
       if (!recId) continue;
-      // Only fetch if at least one authorized student is missing a homeroom.
-      const needsLookup = (c.authorizedStudentIds || []).some(
-        (sid) => !(studentMeta[sid] && studentMeta[sid].homeroom)
-      );
+      const needsLookup = (c.authorizedStudentIds || []).some((sid) => {
+        const meta = studentMeta[sid];
+        return isTmpId(sid) || !meta || !meta.name || !meta.homeroom;
+      });
       if (needsLookup) onboardingIdsToFetch.add(recId);
     }
+    const onboardingCache = new Map();
     if (onboardingIdsToFetch.size > 0) {
       await Promise.all([...onboardingIdsToFetch].map(async (recId) => {
         try {
           const snap = await db.doc(`${tenancy.pickupOnboardingPath(tid)}/${recId}`).get();
           if (!snap.exists) return;
-          const recStudents = (snap.data() || {}).students || [];
+          const recData = snap.data() || {};
+          onboardingCache.set(recId, recData);
+          const recStudents = recData.students || [];
           recStudents.forEach((s) => {
             if (!s || !s.id) return;
             const cur = studentMeta[s.id] || {};
@@ -211,11 +213,38 @@ async function handler(req, res) {
         ? c.studentGrades.map(String)
         : [...new Set(studentClasses.map(gradeFromHomeroom).filter(Boolean))];
 
-      const authorizedStudents = (c.authorizedStudentIds || []).map((sid) => ({
-        id: sid,
-        name: studentMeta[sid]?.name || sid,
-        homeroom: studentMeta[sid]?.homeroom || null,
-      }));
+      // Resolve authorized student labels with robust fallback order:
+      // 1) tenant/root students doc
+      // 2) onboarding students by same ID
+      // 3) onboarding chaperone row mapped by allocated chaperoneId + index
+      // This keeps legacy tmp-* chaperones readable on the Enroll board.
+      const rec = c.approvedFromOnboarding ? onboardingCache.get(c.approvedFromOnboarding) : null;
+      const recStudents = Array.isArray(rec?.students) ? rec.students : [];
+      const recStudentsById = new Map(
+        recStudents
+          .filter((s) => s && s.id)
+          .map((s) => [String(s.id), s])
+      );
+      let matchedFormChaperone = null;
+      if (rec && Array.isArray(rec.allocatedChaperones) && Array.isArray(rec.chaperones)) {
+        const allocIdx = rec.allocatedChaperones.findIndex((a) => a && a.chaperoneId === c.id);
+        if (allocIdx >= 0 && rec.chaperones[allocIdx]) matchedFormChaperone = rec.chaperones[allocIdx];
+      }
+      const formAuthorized = Array.isArray(matchedFormChaperone?.authorizedStudentIds)
+        ? matchedFormChaperone.authorizedStudentIds.map((x) => String(x))
+        : [];
+
+      const authorizedStudents = (c.authorizedStudentIds || []).map((sidRaw, idx) => {
+        const sid = String(sidRaw || '');
+        const directMeta = studentMeta[sid] || null;
+        let fallbackStudent = recStudentsById.get(sid) || null;
+        if (!fallbackStudent && sid && formAuthorized[idx] && recStudentsById.has(formAuthorized[idx])) {
+          fallbackStudent = recStudentsById.get(formAuthorized[idx]);
+        }
+        const name = directMeta?.name || fallbackStudent?.name || sid;
+        const homeroom = directMeta?.homeroom || fallbackStudent?.homeroom || null;
+        return { id: sid, name, homeroom };
+      });
 
       // Build per-device enrollment view. The UI now lets the operator
       // pick ANY configured terminal (not just grade-matching ones), so we

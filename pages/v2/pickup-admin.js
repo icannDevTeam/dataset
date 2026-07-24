@@ -86,16 +86,7 @@ function deriveGradeSelectionFromStudent(student) {
 }
 
 function derivePathwayFromStudent(student) {
-  const gradeSelection = deriveGradeSelectionFromStudent(student);
-  if (!gradeSelection || EY_GRADE_SET.has(gradeSelection)) return '';
-  const className = String(student?.className || '').trim().toUpperCase();
-  if (className && !EY_GRADE_SET.has(className)) {
-    if (className.startsWith(gradeSelection)) return className.slice(gradeSelection.length);
-    return className.replace(/^[1-5]/, '');
-  }
-  const homeroom = String(student?.homeroom || '').trim().toUpperCase();
-  const m = homeroom.match(/^[1-5](.+)$/);
-  return m ? m[1] : '';
+  return '';
 }
 
 function buildStudentDisplayName(student) {
@@ -114,9 +105,7 @@ function formatStudentGradeBadge(student) {
 function formatStudentFinalClass(student) {
   const selection = deriveGradeSelectionFromStudent(student);
   if (!selection) return null;
-  if (EY_GRADE_SET.has(selection)) return selection;
-  const pathway = derivePathwayFromStudent(student);
-  return pathway ? `${selection}${pathway}` : null;
+  return selection;
 }
 
 function compareClassLabel(a, b) {
@@ -2822,7 +2811,6 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
     firstName: s.firstName || '',
     nickname: s.nickname || '',
     gradeSelection: deriveGradeSelectionFromStudent(s),
-    pathway: derivePathwayFromStudent(s),
   });
   const [savingEdit, setSavingEdit] = useState(false);
 
@@ -2838,7 +2826,6 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
     if ((editForm.firstName || '').trim() !== (s.firstName || '')) patch.firstName = (editForm.firstName || '').trim();
     if ((editForm.nickname || '').trim() !== (s.nickname || '')) patch.nickname = (editForm.nickname || '').trim();
     if ((editForm.gradeSelection || '').trim() !== deriveGradeSelectionFromStudent(s)) patch.gradeSelection = (editForm.gradeSelection || '').trim();
-    if ((editForm.pathway || '').trim().toUpperCase() !== derivePathwayFromStudent(s)) patch.homeroom = (editForm.pathway || '').trim().toUpperCase();
     if (Object.keys(patch).length === 0) { setEditOpen(false); return; }
     setSavingEdit(true);
     try {
@@ -2914,13 +2901,6 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
                 className="w-full bg-slate-900/60 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300"
               />
             </label>
-            <label className="block">
-              <div className="text-[10px] text-slate-500 mb-0.5">Homeroom</div>
-              <input value={editForm.pathway} onChange={(e) => setEditForm((f) => ({ ...f, pathway: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') }))}
-                disabled={EY_GRADE_SET.has(editForm.gradeSelection)}
-                placeholder={EY_GRADE_SET.has(editForm.gradeSelection) ? 'Not needed for EY' : 'A, B, C'}
-                className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-            </label>
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={() => {
@@ -2930,7 +2910,6 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
                 firstName: s.firstName || '',
                 nickname: s.nickname || '',
                 gradeSelection: deriveGradeSelectionFromStudent(s),
-                pathway: derivePathwayFromStudent(s),
               });
             }}
               className="text-[11px] px-2 py-1 rounded bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">Cancel</button>
@@ -2981,11 +2960,7 @@ function StudentTile({ s, index, total, canEdit, canDelete, onEdit, onDelete }) 
               <i className="ph ph-chalkboard-teacher"></i>
               Final class {formatStudentFinalClass(s)}
             </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800/40 border border-slate-700/50 text-[10px] text-slate-500 italic">
-              pathway pending
-            </span>
-          )}
+          ) : null}
         </div>
         <div className="text-[10px] text-slate-500 mt-0.5">Academic Year {ACADEMIC_YEAR_LABEL}</div>
       </div>

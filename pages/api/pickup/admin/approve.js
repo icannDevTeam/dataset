@@ -91,6 +91,17 @@ function gradeFromHomeroom(hr) {
   return m ? m[1] : null;
 }
 
+function normalizeHomeroomNoPathway(raw) {
+  const s = String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!s) return '';
+  if (s.startsWith('EY')) {
+    const eyNum = (s.slice(2).match(/^(\d+)/) || [])[1];
+    return eyNum ? `EY${eyNum}` : 'EY';
+  }
+  const m = s.match(/^(\d{1,2})/);
+  return m ? m[1] : s;
+}
+
 // EY classes first, then everything else in insertion order. Keeps the EY
 // class as studentClasses[0] so legacy consumers that only read the first
 // entry (older Enroll-board builds, terminal-picker defaults) still surface
@@ -191,7 +202,7 @@ async function handler(req, res) {
       if (!s || !s.id) return;
       studentMetaById[String(s.id)] = {
         name: s.name || null,
-        homeroom: s.homeroom || null,
+        homeroom: normalizeHomeroomNoPathway(s.homeroom || s.className || s.gradeSelection || s.grade),
         grade: s.grade || null,
       };
     });
@@ -203,11 +214,12 @@ async function handler(req, res) {
         const data = fsData || (legacy && legacy.exists ? (legacy.data() || {}) : null);
         if (!data) return;
         const cur = studentMetaById[sid] || {};
+        const normalizedFsHomeroom = normalizeHomeroomNoPathway(data.homeroom || data.className || data.class || data.gradeSelection || data.grade);
         studentMetaById[sid] = {
           ...data,
           // Form-supplied homeroom wins over Firestore - parent is the
           // source of truth for which class their child is in today.
-          homeroom: cur.homeroom || data.homeroom || null,
+          homeroom: cur.homeroom || normalizedFsHomeroom || null,
           grade: cur.grade || data.grade || null,
           name: cur.name || data.name || null,
         };
@@ -238,8 +250,9 @@ async function handler(req, res) {
       for (const sid of (c.authorizedStudentIds || [])) {
         const s = studentMetaById[sid];
         if (!s) continue;
-        if (s.homeroom) studentClassesSet.add(String(s.homeroom));
-        const g = s.grade ? String(s.grade) : gradeFromHomeroom(s.homeroom);
+        const normalizedHomeroom = normalizeHomeroomNoPathway(s.homeroom || s.className || s.gradeSelection || s.grade);
+        if (normalizedHomeroom) studentClassesSet.add(normalizedHomeroom);
+        const g = s.grade ? String(s.grade) : gradeFromHomeroom(normalizedHomeroom);
         if (g) studentGradesSet.add(g);
       }
 

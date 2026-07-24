@@ -2,8 +2,8 @@
  * PATCH /api/pickup/admin/onboarding-edit
  *
  * Edit / delete a chaperone or student inside a pickup_onboarding record
- * BEFORE approval. Approved records are read-only (use re-enroll / device
- * unenroll flows for those — keeps the audit chain clean).
+ * BEFORE approval. Approved records are mostly read-only; the only
+ * post-approval student mutation allowed is correcting class/grade fields.
  *
  * Body shapes:
  *  { recordId, target:'chaperone', tempId, action:'update', patch:{name,phone,email,idNumber,relation,authorizedStudentIds} }
@@ -51,16 +51,15 @@ function sanitizeGradeSelection(raw) {
   return String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
 }
 
-function sanitizePathway(raw) {
-  return String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-}
-
-function extractPathway(raw, gradeSelection) {
-  const cleaned = sanitizePathway(raw);
-  if (!cleaned) return '';
-  if (!gradeSelection) return cleaned;
-  if (cleaned.startsWith(gradeSelection)) return cleaned.slice(gradeSelection.length);
-  return cleaned.replace(/^[1-5]/, '');
+function normalizeHomeroomNoPathway(raw) {
+  const value = String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!value) return '';
+  if (value.startsWith('EY')) {
+    const eyNum = (value.slice(2).match(/^(\d+)/) || [])[1];
+    return eyNum ? `EY${eyNum}` : 'EY';
+  }
+  const m = value.match(/^(\d{1,2})/);
+  return m ? m[1] : value;
 }
 
 function composeStudentName(firstName, nickname, fallbackName) {
@@ -93,15 +92,11 @@ function normalizeStudentGradeFields(source, original) {
     };
   }
   if (!NUMERIC_GRADE_OPTIONS.has(gradeSelection)) return null;
-  const pathway = extractPathway(
-    source.homeroom ?? source.className ?? original.homeroom ?? original.className,
-    gradeSelection
-  );
   return {
     gradeSelection,
     grade: gradeSelection,
-    className: pathway || '',
-    homeroom: `${gradeSelection}${pathway || ''}`,
+    className: '',
+    homeroom: gradeSelection,
   };
 }
 
@@ -109,6 +104,56 @@ function gradeFromHomeroom(hr) {
   if (!hr) return null;
   const m = String(hr).match(/^(\d{1,2})/);
   return m ? m[1] : null;
+}
+
+function sortEyFirst(values) {
+  return [...values].sort((a, b) => {
+    const ae = String(a || '').toUpperCase().startsWith('EY') ? 0 : 1;
+    const be = String(b || '').toUpperCase().startsWith('EY') ? 0 : 1;
+    return ae - be;
+  });
+}
+
+async function syncApprovedChaperoneScopes(db, tid, recordId, students) {
+  const studentMetaById = {};
+  (students || []).forEach((s) => {
+    if (!s || !s.id) return;
+    studentMetaById[String(s.id)] = {
+      homeroom: s.homeroom || null,
+      grade: s.grade || null,
+    };
+  });
+
+  const snap = await db.collection(tenancy.chaperonesPath(tid))
+    .where('approvedFromOnboarding', '==', recordId)
+    .get();
+
+  const writes = [];
+  snap.forEach((doc) => {
+    const data = doc.data() || {};
+    const studentClassesSet = new Set();
+    const studentGradesSet = new Set();
+    (data.authorizedStudentIds || []).forEach((sidRaw) => {
+      const sid = String(sidRaw || '');
+      const meta = studentMetaById[sid];
+      if (!meta) return;
+      const normalizedHomeroom = normalizeHomeroomNoPathway(meta.homeroom);
+      if (normalizedHomeroom) studentClassesSet.add(normalizedHomeroom);
+      const g = meta.grade ? String(meta.grade) : gradeFromHomeroom(normalizedHomeroom);
+      if (g) studentGradesSet.add(g);
+    });
+
+    const patch = {
+      studentClasses: sortEyFirst(studentClassesSet),
+      studentGrades: sortEyFirst(studentGradesSet),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    writes.push(doc.ref.set(patch, { merge: true }));
+    writes.push(db.doc(`chaperones/${doc.id}`).set(patch, { merge: true }).catch(() => null));
+  });
+
+  await Promise.all(writes);
+  return snap.size;
 }
 
 // Mirror of approve.js / bulk-action.js. Atomically reserve the next
@@ -186,13 +231,14 @@ async function handler(req, res) {
 
     // 'changes_requested' is still an editable pre-approval state — ACOP
     // applies fixes the parent sent via email/WhatsApp directly on the form.
+    const isApprovedStudentClassEdit = rec.status === 'approved' && target === 'student' && action === 'update';
     if (!['pending', 'changes_requested'].includes(rec.status)) {
       // The only post-approval mutation we allow is admin appending a
       // brand-new chaperone (e.g. parent asked the school to add a
       // replacement). Everything else stays locked to preserve the audit
       // trail and force admins through re-enroll / revoke flows.
       const isAddChaperone = target === 'record' && action === 'add-chaperone';
-      if (!isAddChaperone) {
+      if (!isAddChaperone && !isApprovedStudentClassEdit) {
         return res.status(409).json({
           error: 'record_not_editable',
           message: `Cannot edit a ${rec.status} record. Re-enroll or revoke instead.`,
@@ -494,6 +540,16 @@ async function handler(req, res) {
 
       if (action === 'update') {
         const cleaned = clean(patch, ALLOWED_STUDENT_FIELDS);
+        if (rec.status === 'approved') {
+          const approvedEditable = new Set(['gradeSelection', 'grade', 'className', 'homeroom']);
+          const invalidApprovedKeys = Object.keys(cleaned).filter((k) => !approvedEditable.has(k));
+          if (invalidApprovedKeys.length > 0) {
+            return res.status(409).json({
+              error: 'approved_student_fields_locked',
+              message: `Approved records can only edit class fields: gradeSelection/className/homeroom.`,
+            });
+          }
+        }
         if (cleaned.id) {
           cleaned.id = String(cleaned.id).trim();
           if (!cleaned.id) {
@@ -595,6 +651,9 @@ async function handler(req, res) {
           students: list,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
+        if (rec.status === 'approved') {
+          await syncApprovedChaperoneScopes(db, tid, recordId, list);
+        }
       }
       if (afterSnap && afterSnap.__idRemapHandled) delete afterSnap.__idRemapHandled;
     }

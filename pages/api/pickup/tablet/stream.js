@@ -35,7 +35,7 @@ export default async function handler(req, res) {
   const token = req.headers['x-tablet-device-token'] || req.query.deviceToken;
   if (!token) { res.status(401).json({ error: 'deviceToken required' }); return; }
 
-  let tid, terminalIds = [], gradeScopes = [];
+  let tid, terminalIds = [], gradeScopes = [], releaseGroupId = null;
   try {
     initializeFirebase();
     const db = admin.firestore();
@@ -49,10 +49,31 @@ export default async function handler(req, res) {
     const devData = dev.data();
     if (devData.status !== 'paired') { res.status(401).json({ error: 'not paired' }); return; }
 
-    const releaseGroupId = devData.releaseGroupId;
+    releaseGroupId = devData.releaseGroupId;
+    let groupSnap = releaseGroupId ? await db.doc(tenancy.releaseGroupDoc(releaseGroupId, tid)).get() : null;
+    if (!groupSnap?.exists) {
+      const candidates = ['tabletDeviceId', 'tabletId', 'pairedTabletDeviceId', 'deviceId'];
+      let recovered = null;
+      for (const field of candidates) {
+        try {
+          const snap = await db.collection(tenancy.releaseGroupsPath(tid))
+            .where(field, '==', dev.id)
+            .limit(1)
+            .get();
+          if (!snap.empty) {
+            recovered = snap.docs[0];
+            break;
+          }
+        } catch {}
+      }
+      if (recovered) {
+        groupSnap = recovered;
+        releaseGroupId = recovered.id;
+        dev.ref.set({ releaseGroupId }, { merge: true }).catch(() => {});
+      }
+    }
     if (!releaseGroupId) { res.status(409).json({ error: 'no release group bound' }); return; }
-    const groupSnap = await db.doc(tenancy.releaseGroupDoc(releaseGroupId, tid)).get();
-    if (!groupSnap.exists) { res.status(404).json({ error: 'release group not found' }); return; }
+    if (!groupSnap?.exists) { res.status(404).json({ error: 'release group not found' }); return; }
     const group = groupSnap.data();
     terminalIds = Array.isArray(group.terminalIds) ? group.terminalIds : [];
 
@@ -93,5 +114,5 @@ export default async function handler(req, res) {
   // arrives — send a small event so the EventSource transitions to OPEN.
   res.write(`event: hello\ndata: ${JSON.stringify({ tenantId: tid, terminalIds })}\n\n`);
 
-  bus.subscribe(tid, terminalIds, res, gradeScopes);
+  bus.subscribe(tid, terminalIds, res, gradeScopes, releaseGroupId);
 }

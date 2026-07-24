@@ -40,6 +40,7 @@ const tenancy = require('../../../../lib/tenancy');
 const { verifyPickupOnboardingToken } = require('../../../../lib/pickup-token');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
 const inviteLinks = require('../../../../lib/onboarding-invites');
+const { syntheticStudentId, isTmpId } = require('../../../../lib/pickup-student-links');
 
 const MAX_CHAPERONES = 5;
 const MAX_STUDENTS = 10;
@@ -138,7 +139,10 @@ function normalizeStudentRecord(raw, idx) {
     return { ok: false, field: 'gradeSelection', message: `Student #${idx + 1}: Academic year grade must be EY1, EY2, EY3, or 1–5.` };
   }
 
-  const resolvedId = String(raw?.id || '').trim() || `tmp-${crypto.randomBytes(6).toString('hex')}`;
+  const incomingId = String(raw?.id || '').trim();
+  const resolvedId = incomingId && !isTmpId(incomingId)
+    ? incomingId
+    : syntheticStudentId(composeStudentName(firstName, nickname), gradeSelection, EY_GRADE_SET.has(gradeSelection) ? 'EY' : gradeSelection);
   const name = composeStudentName(firstName, nickname);
 
   if (EY_GRADE_SET.has(gradeSelection)) {

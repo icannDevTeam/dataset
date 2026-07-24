@@ -36,6 +36,17 @@ const FIRST_CHAPERONE_NO = 9000000000;
 const TEMPLATE_PICKUP_ONBOARDING_APPROVED = 'pickup_onboarding_approved';
 const TEMPLATE_PICKUP_ONBOARDING_REJECTED = 'pickup_onboarding_rejected';
 
+function normalizeHomeroomNoPathway(raw) {
+  const s = String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!s) return '';
+  if (s.startsWith('EY')) {
+    const eyNum = (s.slice(2).match(/^(\d+)/) || [])[1];
+    return eyNum ? `EY${eyNum}` : 'EY';
+  }
+  const m = s.match(/^(\d{1,2})/);
+  return m ? m[1] : s;
+}
+
 function queueJobId(tid, recordId, templateType) {
   const safe = `${tid}-${recordId}-${templateType}`.replace(/[^A-Za-z0-9_-]/g, '_');
   return safe.slice(0, 180);
@@ -177,7 +188,11 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
   // (the Enroll board groups by these).
   const studentMetaById = {};
   (rec.students || []).forEach((s) => {
-    if (s && s.id) studentMetaById[String(s.id)] = s;
+    if (!s || !s.id) return;
+    studentMetaById[String(s.id)] = {
+      ...s,
+      homeroom: normalizeHomeroomNoPathway(s.homeroom || s.className || s.gradeSelection || s.grade),
+    };
   });
 
   for (const c of rec.chaperones) {
@@ -198,7 +213,7 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
     for (const sid of (c.authorizedStudentIds || [])) {
       const s = studentMetaById[sid];
       if (!s) continue;
-      const hr = s.homeroom || s.className || null;
+      const hr = normalizeHomeroomNoPathway(s.homeroom || s.className || s.gradeSelection || s.grade);
       if (hr) studentClassesSet.add(String(hr));
       const g = s.grade ? String(s.grade) : gradeFromHomeroom(hr);
       if (g) studentGradesSet.add(g);
