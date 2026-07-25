@@ -370,7 +370,7 @@ export default function PickupEnrollPage() {
               <header className="px-5 py-3.5 flex items-center justify-between gap-3 flex-wrap bg-gradient-to-r from-brand-500/10 to-transparent border-b border-slate-800">
                 <button
                   onClick={() => setCollapsed((s) => ({ ...s, [group.homeroom]: !isCollapsed }))}
-                  className="flex items-center gap-3 group flex-1 min-w-0 text-left"
+                  className="flex items-center gap-3 group flex-1 min-w-[220px] text-left"
                 >
                   <i className={`ph ph-caret-down text-slate-400 transition-transform ${isCollapsed ? '-rotate-90' : ''}`}></i>
                   {(() => {
@@ -383,7 +383,7 @@ export default function PickupEnrollPage() {
                           <span className="truncate px-1">{badge}</span>
                         </div>
                         <div className="min-w-0">
-                          <div className="text-lg font-bold text-white truncate">
+                          <div className="text-lg font-bold text-white leading-tight break-words">
                             Class {label}
                             {!isUnassigned && (
                               <span className="ml-2 text-xs font-normal text-slate-400">Grade {group.grade}</span>
