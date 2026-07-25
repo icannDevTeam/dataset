@@ -64,14 +64,19 @@ function sanitizeRelation(raw) {
   return s;
 }
 
-function sanitizeChaperone(c, validStudentIds) {
+function sanitizeChaperone(c, validStudentIds, studentIdRemap = new Map()) {
   if (!c || typeof c !== 'object') return null;
   const name = String(c.name || '').trim();
   const relation = sanitizeRelation(c.relation);
   if (relation === null) return null;
   if (!name || name.length < 2 || name.length > 80) return null;
   const auth = Array.isArray(c.authorizedStudentIds)
-    ? c.authorizedStudentIds.filter((s) => validStudentIds.has(String(s)))
+    ? [...new Set(
+      c.authorizedStudentIds
+        .map((s) => String(s || '').trim())
+        .map((s) => studentIdRemap.get(s) || s)
+        .filter((s) => s && validStudentIds.has(String(s)))
+    )]
     : [];
   if (auth.length === 0) return null;
   const facePaths = Array.isArray(c.facePaths)
@@ -216,6 +221,7 @@ export default async function handler(req, res) {
   }
 
   const cleanStudents = [];
+  const studentIdRemap = new Map();
   for (let i = 0; i < students.length; i += 1) {
     const checked = validateStudent(students[i], i);
     if (!checked.ok) {
@@ -225,6 +231,11 @@ export default async function handler(req, res) {
         index: i,
         message: checked.message,
       });
+    }
+    const incomingId = String(students[i]?.id || '').trim();
+    const resolvedId = String(checked.student?.id || '').trim();
+    if (incomingId && resolvedId && incomingId !== resolvedId) {
+      studentIdRemap.set(incomingId, resolvedId);
     }
     cleanStudents.push(checked.student);
   }
@@ -255,7 +266,7 @@ export default async function handler(req, res) {
   }
 
   const cleanChaperones = chaperones
-    .map((c) => sanitizeChaperone(c, validStudentIds))
+    .map((c) => sanitizeChaperone(c, validStudentIds, studentIdRemap))
     .filter(Boolean);
   if (cleanChaperones.length === 0) {
     return res.status(400).json({ error: 'at least one valid chaperone required' });
