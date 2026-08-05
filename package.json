@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "export": "next export",
-    "test": "node --test 'tests/**/*.test.cjs'"
+    "test": "node --test 'tests/**/*.test.cjs'",
+    "emulate:mobile": "node scripts/mobile-emulator.js"
   },
   "dependencies": {
     "@google-cloud/firestore": "^8.0.0",
@@ -30,10 +31,12 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "resend": "^6.12.3",
+    "sharp": "^0.35.3",
     "sonner": "^2.0.7"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.27",
+    "playwright": "^1.55.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19"
   }

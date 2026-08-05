@@ -62,7 +62,7 @@ async function handler(req, res) {
   try {
     const snap = await db.collection(tenancy.pickupOnboardingPath(tid))
       .where('status', '==', 'pending')
-      .limit(50)
+      .limit(20)
       .get();
     const pending = [];
     snap.forEach((doc) => {
@@ -85,7 +85,7 @@ async function handler(req, res) {
     const snap = await db.collection('email_queue')
       .where('createdAt', '>=', admin.firestore.Timestamp.fromDate(new Date(since24h)))
       .orderBy('createdAt', 'desc')
-      .limit(200)
+      .limit(80)
       .get();
     let n = 0;
     snap.forEach((doc) => {

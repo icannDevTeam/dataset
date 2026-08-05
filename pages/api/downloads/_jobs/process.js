@@ -5,6 +5,15 @@ import {
   sendExportFailureEmail,
 } from '../../../../lib/exports-notifications';
 
+const MUST_HAVE_CARD_IDS = new Set([
+  'attendance',
+  'pickup-events',
+  'students-roster',
+  'class-directory',
+  'security-incidents',
+  'audit-log',
+]);
+
 /**
  * POST /api/downloads/_jobs/process
  *
@@ -49,6 +58,15 @@ export default async function handler(req, res) {
 
     const jobData = jobDoc.data();
     const { tenantId, actor, cardId, format, from, to, filters } = jobData;
+
+    if (!MUST_HAVE_CARD_IDS.has(cardId)) {
+      await jobRef.update({
+        status: 'failed',
+        failedAt: new Date(),
+        lastError: `export_not_allowed: ${cardId}`,
+      });
+      return res.status(403).json({ error: 'export_not_allowed', cardId });
+    }
 
     // Mark job as 'running'
     const now = new Date();

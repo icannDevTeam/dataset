@@ -15,8 +15,11 @@ const tenancy = require('../../../../lib/tenancy');
 const td = require('../../../../lib/tv-devices');
 const kp = require('../../../../lib/kiosk-profiles');
 
+const TV_ENABLED = String(process.env.PICKUP_TV_FEED_ENABLED || 'false').toLowerCase() !== 'false';
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
+  if (!TV_ENABLED) return res.status(503).json({ error: 'tv_disabled' });
   const token = req.headers['x-tv-device-token'] || req.query.deviceToken;
   if (!token) return res.status(400).json({ error: 'deviceToken required' });
 

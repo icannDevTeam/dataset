@@ -17,7 +17,7 @@ async function handler(req, res) {
   if (!db) return res.status(500).json({ error: 'firestore_unavailable' });
 
   const tid = tenancy.getTenantId();
-  const limit = Math.max(1, Math.min(500, parseInt(req.query.limit || '200', 10)));
+  const limit = Math.max(1, Math.min(200, parseInt(req.query.limit || '100', 10)));
   const kind   = (req.query.kind   || '').trim();
   const from   = (req.query.from   || '').trim();   // YYYY-MM-DD
   const to     = (req.query.to     || '').trim();

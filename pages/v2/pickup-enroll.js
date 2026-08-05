@@ -103,7 +103,7 @@ export default function PickupEnrollPage() {
     const matched = all.filter((d) =>
       !d.gradeScopes || d.gradeScopes.length === 0 || d.gradeScopes.map(String).includes(grade)
     );
-    return (matched.length ? matched : all).map((d) => d.ip);
+    return matched.map((d) => d.ip);
   }, [board]);
 
   // Resolve which terminals will be hit for a given chaperone. Driven by
@@ -114,9 +114,10 @@ export default function PickupEnrollPage() {
     let ips = classTerminalOverrides[homeroom];
     if (ips === undefined || ips === null) {
       // Compute defaults: terminals whose gradeScopes match this chaperone's
-      // grades, falling back to every available device.
+      // grades. Strict mode avoids enrolling on the wrong pole when the
+      // mapping is incomplete.
       const matched = all.filter((d) => d.isMatched);
-      ips = (matched.length ? matched : all).map((d) => d.ip);
+      ips = matched.map((d) => d.ip);
     }
     const ipSet = new Set(ips);
     return all.filter((d) => ipSet.has(d.ip)).map((d) => ({
@@ -216,11 +217,7 @@ export default function PickupEnrollPage() {
                 <h1 className="text-2xl font-bold text-white">Chaperone Enrolment</h1>
                 <p className="text-sm text-slate-300 mt-1 max-w-2xl">
                   Push <strong className="text-orange-300">approved chaperones</strong> (parents, drivers, nannies)
-                  onto the right grade-level Hikvision terminal. One card per chaperone — green check = enrolled.
-                </p>
-                <p className="text-[11px] text-slate-500 mt-1.5 flex items-center gap-1.5">
-                  <i className="ph ph-info"></i>
-                  Students are enrolled separately via the BINUS class roster — this page is chaperones only.
+                  onto the correct grade-level Hikvision terminals. One card per chaperone, and shared siblings can still span multiple grades when the student records justify it.
                 </p>
               </div>
             </div>
@@ -404,7 +401,7 @@ export default function PickupEnrollPage() {
                   {groupAllDevices.length > 0 && (
                     <div className="flex items-center gap-2">
                       <span className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold hidden sm:inline">
-                        <i className="ph ph-cpu mr-1"></i>Terminals
+                        <i className="ph ph-cpu mr-1"></i>Grade terminals
                       </span>
                       <TerminalPicker
                         allDevices={groupAllDevices}

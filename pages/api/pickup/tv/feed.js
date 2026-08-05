@@ -24,6 +24,7 @@ const kp = require('../../../../lib/kiosk-profiles');
 const td = require('../../../../lib/tv-devices');
 
 const KIOSK_TOKEN = process.env.PICKUP_TV_TOKEN || '';
+const TV_FEED_ENABLED = String(process.env.PICKUP_TV_FEED_ENABLED || 'false').toLowerCase() !== 'false';
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 60;
 const WINDOW_MS = 30 * 60 * 1000;
@@ -87,6 +88,7 @@ function isSameOrigin(req) {
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
+  if (!TV_FEED_ENABLED) return res.status(503).json({ error: 'tv feed disabled' });
 
   const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
   const gateOverride = req.query.gate ? String(req.query.gate) : null;

@@ -22,6 +22,8 @@ const tenancy = require('../../../../lib/tenancy');
 const { shapePickupEvent, SILENT_ON_IPAD, eventMatchesScopes } = require('../../../../lib/shape-pickup-event');
 
 const WINDOW_MS = 30 * 60 * 1000;
+const TERMINAL_REF_TTL_MS = 30 * 1000;
+const TERMINAL_REF_CACHE = new Map();
 
 function toIso(v) {
   if (!v) return null;
@@ -30,10 +32,102 @@ function toIso(v) {
   try { return new Date(v).toISOString(); } catch { return null; }
 }
 
+function normalizeToken(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function collectTerminalRefs(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (raw == null) return [];
+  return [raw];
+}
+
+function terminalAliases(id, data) {
+  const out = new Set();
+  [
+    id,
+    data?.terminalId,
+    data?.name,
+    data?.deviceName,
+    data?.ip,
+  ].forEach((v) => {
+    const s = String(v || '').trim();
+    if (s) out.add(s);
+  });
+  return out;
+}
+
+async function resolveGroupTerminalRefs(db, tid, rawRefs) {
+  const cacheHit = TERMINAL_REF_CACHE.get(tid);
+  const now = Date.now();
+  let terminals = cacheHit?.terminals || null;
+  if (!terminals || (now - cacheHit.at) > TERMINAL_REF_TTL_MS) {
+    const docs = await db.collection(tenancy.terminalsPath(tid)).get();
+    terminals = docs.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    TERMINAL_REF_CACHE.set(tid, { at: now, terminals });
+  }
+
+  const aliasToId = new Map();
+  const aliasesById = new Map();
+  for (const t of terminals) {
+    const aliases = terminalAliases(t.id, t);
+    aliasesById.set(t.id, aliases);
+    for (const a of aliases) aliasToId.set(normalizeToken(a), t.id);
+  }
+
+  const terminalIds = [];
+  const terminalIdSet = new Set();
+  const terminalKeys = new Set();
+
+  for (const raw of collectTerminalRefs(rawRefs)) {
+    const token = String(raw || '').trim();
+    if (!token) continue;
+    const matchedId = aliasToId.get(normalizeToken(token));
+    if (matchedId) {
+      if (!terminalIdSet.has(matchedId)) {
+        terminalIdSet.add(matchedId);
+        terminalIds.push(matchedId);
+      }
+      for (const k of aliasesById.get(matchedId) || []) terminalKeys.add(k);
+    } else {
+      terminalKeys.add(token);
+    }
+  }
+
+  if (terminalIds.length === 0) {
+    for (const raw of collectTerminalRefs(rawRefs)) {
+      const token = String(raw || '').trim();
+      if (!token || terminalIdSet.has(token)) continue;
+      terminalIdSet.add(token);
+      terminalIds.push(token);
+      terminalKeys.add(token);
+    }
+  }
+
+  return { terminalIds, terminalKeys: [...terminalKeys] };
+}
+
+const DISMISSAL_START_MIN = 13 * 60; // 13:00 WIB
+const DISMISSAL_END_MIN   = 17 * 60; // 17:00 WIB
+const DISMISSAL_WINDOW_ENABLED = true;
+
+function currentWibMinutes() {
+  const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  return now.getUTCHours() * 60 + now.getUTCMinutes();
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
   const token = req.headers['x-tablet-device-token'] || req.query.deviceToken;
   if (!token) return res.status(401).json({ error: 'deviceToken required' });
+
+  const wibMin = currentWibMinutes();
+  if (!DISMISSAL_WINDOW_ENABLED || wibMin < DISMISSAL_START_MIN || wibMin >= DISMISSAL_END_MIN) {
+    return res.status(200).json({
+      ok: true, inWindow: false, now: new Date().toISOString(),
+      active: [], held: [], todayReleased: 0, releaseGroup: null,
+    });
+  }
 
   try {
     initializeFirebase();
@@ -76,7 +170,9 @@ export default async function handler(req, res) {
     if (!releaseGroupId) return res.status(409).json({ error: 'no release group bound' });
     if (!groupSnap?.exists) return res.status(404).json({ error: 'release group not found' });
     const group = groupSnap.data();
-    const terminalIds = Array.isArray(group.terminalIds) ? group.terminalIds : [];
+    const resolvedRefs = await resolveGroupTerminalRefs(db, tid, group.terminalIds);
+    const terminalIds = resolvedRefs.terminalIds;
+    const terminalKeys = resolvedRefs.terminalKeys;
     if (terminalIds.length === 0) {
       return res.status(200).json({
         ok: true,
@@ -106,46 +202,76 @@ export default async function handler(req, res) {
     } catch { groupScopes = new Set(); }
 
     const sinceMs = req.query.since ? new Date(String(req.query.since)).getTime() : null;
+    const wibNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    const wibStartUtcMs = Date.UTC(
+      wibNow.getUTCFullYear(),
+      wibNow.getUTCMonth(),
+      wibNow.getUTCDate(),
+      0, 0, 0, 0,
+    ) - (7 * 60 * 60 * 1000);
+    // Hydrate from start-of-day WIB so already-scanned chaperones still show
+    // during active dismissal windows (e.g. Friday early release), even when
+    // there was no new scan in the last 30 minutes.
     const cutoffMs = sinceMs && !Number.isNaN(sinceMs)
-      ? Math.max(sinceMs, Date.now() - WINDOW_MS)
-      : Date.now() - WINDOW_MS;
+      ? Math.max(sinceMs, wibStartUtcMs, Date.now() - WINDOW_MS)
+      : wibStartUtcMs;
 
-    // Firestore IN supports up to 30 values; we only ever expect 1-3 terminals per group.
-    // Fetch per-terminal with single equality (no composite index needed) and
-    // filter/sort recordedAt in memory.
+    // Push the time filter into Firestore so we only read today's docs
+    // instead of fetching a large chunk and discarding in memory.
+    // The (terminalId, recordedAt) and (releaseGroupId, recordedAt) composite
+    // indexes already exist to support the orderBy — the range clause reuses them.
+    const cutoffTs = admin.firestore.Timestamp.fromMillis(cutoffMs);
+
     const fetchTerminalDocs = async (tidx) => {
       try {
         return await db.collection(tenancy.pickupEventsPath(tid))
           .where('terminalId', '==', tidx)
+          .where('recordedAt', '>=', cutoffTs)
           .orderBy('recordedAt', 'desc')
-          .limit(200).get();
+          .limit(50).get();
       } catch (e) {
-        // Backward-compatible fallback for tenants that haven't created the
-        // composite index yet. Keeps the feed alive instead of 500ing.
-        return db.collection(tenancy.pickupEventsPath(tid))
-          .where('terminalId', '==', tidx)
-          .limit(200).get();
+        // Composite index might not exist yet on older tenants — fall back
+        // without the time range so the feed still works.
+        try {
+          return await db.collection(tenancy.pickupEventsPath(tid))
+            .where('terminalId', '==', tidx)
+            .orderBy('recordedAt', 'desc')
+            .limit(50).get();
+        } catch {
+          return db.collection(tenancy.pickupEventsPath(tid))
+            .where('terminalId', '==', tidx)
+            .limit(50).get();
+        }
       }
     };
 
     const perTerm = await Promise.all(
-      terminalIds.slice(0, 30).map((tidx) => fetchTerminalDocs(tidx))
+      terminalKeys.slice(0, 50).map((tidx) => fetchTerminalDocs(tidx))
     );
     const releaseGroupDocs = await (async () => {
       try {
         return await db.collection(tenancy.pickupEventsPath(tid))
           .where('releaseGroupId', '==', releaseGroupId)
+          .where('recordedAt', '>=', cutoffTs)
           .orderBy('recordedAt', 'desc')
-          .limit(200)
+          .limit(50)
           .get();
       } catch {
         try {
           return await db.collection(tenancy.pickupEventsPath(tid))
             .where('releaseGroupId', '==', releaseGroupId)
-            .limit(200)
+            .orderBy('recordedAt', 'desc')
+            .limit(50)
             .get();
         } catch {
-          return { docs: [] };
+          try {
+            return await db.collection(tenancy.pickupEventsPath(tid))
+              .where('releaseGroupId', '==', releaseGroupId)
+              .limit(50)
+              .get();
+          } catch {
+            return { docs: [] };
+          }
         }
       }
     })();

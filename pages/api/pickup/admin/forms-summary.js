@@ -6,7 +6,7 @@
  * Used by the dashboard and analytics pages for the forms overview widget.
  *
  * Response:
- *   { ok, counts: { pending, approved, rejected, total },
+ *   { ok, counts: { pending, changes_requested, approved, rejected, archived, total },
  *     recentPending: [{ id, submittedAt, guardianName, studentNames[], status }] }
  */
 import admin from 'firebase-admin';
@@ -23,16 +23,28 @@ async function handler(req, res) {
     const db = admin.firestore();
     const col = db.collection(tenancy.pickupOnboardingPath(tid));
 
-    // Fetch pending (with docs), approved + rejected counts only
-    const [pendingSnap, approvedSnap, rejectedSnap] = await Promise.all([
-      col.where('status', '==', 'pending').limit(20).get(),
-      col.where('status', '==', 'approved').limit(500).get(),
-      col.where('status', '==', 'rejected').limit(500).get(),
+    // Use aggregate count() for status counters to avoid large document reads.
+    const [
+      pendingSnap,
+      pendingCountAgg,
+      changesCountAgg,
+      approvedCountAgg,
+      rejectedCountAgg,
+      archivedCountAgg,
+    ] = await Promise.all([
+      col.where('status', '==', 'pending').limit(10).get(),
+      col.where('status', '==', 'pending').count().get(),
+      col.where('status', '==', 'changes_requested').count().get(),
+      col.where('status', '==', 'approved').count().get(),
+      col.where('status', '==', 'rejected').count().get(),
+      col.where('status', '==', 'archived').count().get(),
     ]);
 
-    const pending  = pendingSnap.size;
-    const approved = approvedSnap.size;
-    const rejected = rejectedSnap.size;
+    const pending = Number(pendingCountAgg.data().count || 0);
+    const changes_requested = Number(changesCountAgg.data().count || 0);
+    const approved = Number(approvedCountAgg.data().count || 0);
+    const rejected = Number(rejectedCountAgg.data().count || 0);
+    const archived = Number(archivedCountAgg.data().count || 0);
 
     function toIso(ts) {
       if (!ts) return null;
@@ -59,7 +71,14 @@ async function handler(req, res) {
 
     return res.status(200).json({
       ok: true,
-      counts: { pending, approved, rejected, total: pending + approved + rejected },
+      counts: {
+        pending,
+        changes_requested,
+        approved,
+        rejected,
+        archived,
+        total: pending + changes_requested + approved + rejected + archived,
+      },
       recentPending,
     });
   } catch (err) {

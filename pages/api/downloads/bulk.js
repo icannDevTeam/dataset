@@ -35,6 +35,15 @@ const { canAll, canAny } = require('../../../lib/rbac');
 const { logAudit } = require('../../../lib/audit-log');
 const { verifyReauth } = require('../../../lib/reauth');
 
+const MUST_HAVE_CARD_IDS = new Set([
+  'attendance',
+  'pickup-events',
+  'students-roster',
+  'class-directory',
+  'security-incidents',
+  'audit-log',
+]);
+
 // Force-load every per-card endpoint module so its `runDownload(...)` side
 // effect registers the runner with the in-process RUNNERS map. In a
 // serverless cold start this file would otherwise see an empty registry.
@@ -110,6 +119,9 @@ async function handler(req, res) {
   // ── Validate every card up front ─────────────────────────────────
   const configs = [];
   for (const id of cardIds) {
+    if (!MUST_HAVE_CARD_IDS.has(id)) {
+      return res.status(403).json({ error: 'export_not_allowed', cardId: id });
+    }
     const cfg = RUNNERS.get(id);
     if (!cfg) return res.status(400).json({ error: 'unknown_card', cardId: id });
     if (!CARD_PERMISSIONS[id]) return res.status(400).json({ error: 'unmapped_card', cardId: id });

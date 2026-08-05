@@ -90,7 +90,12 @@ async function handler(req, res) {
         const g = await db.doc(tenancy.releaseGroupDoc(updated.releaseGroupId, tid)).get();
         if (g.exists) groupData = g.data();
       }
-      const eff = effectiveGateStatus(updated, groupData);
+      let settingsData = null;
+      try {
+        const s = await db.doc(tenancy.pickupSettingsDoc(tid)).get();
+        if (s.exists) settingsData = s.data();
+      } catch { settingsData = null; }
+      const eff = effectiveGateStatus(updated, groupData, new Date(), settingsData);
       return res.status(200).json({
         ok: true,
         terminalId: tidParam,
@@ -108,11 +113,16 @@ async function handler(req, res) {
     const groupsSnap = await db.collection(tenancy.releaseGroupsPath(tid)).get();
     const groupById = new Map();
     groupsSnap.docs.forEach((g) => groupById.set(g.id, g.data()));
+    let settingsData = null;
+    try {
+      const s = await db.doc(tenancy.pickupSettingsDoc(tid)).get();
+      if (s.exists) settingsData = s.data();
+    } catch { settingsData = null; }
     const profiles = snap.docs.map((d) => {
       const t = d.data();
       if (t.enabled === false) return null;
       const groupData = t.releaseGroupId ? (groupById.get(t.releaseGroupId) || null) : null;
-      const status = effectiveGateStatus(t, groupData);
+      const status = effectiveGateStatus(t, groupData, new Date(), settingsData);
       return {
         id: d.id,
         name: t.name || d.id,

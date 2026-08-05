@@ -30,12 +30,101 @@ export const config = {
   api: { bodyParser: false, externalResolver: true },
 };
 
+const TERMINAL_REF_TTL_MS = 30 * 1000;
+const TERMINAL_REF_CACHE = new Map();
+
+function normalizeToken(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function collectTerminalRefs(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (raw == null) return [];
+  return [raw];
+}
+
+function terminalAliases(id, data) {
+  const out = new Set();
+  [
+    id,
+    data?.terminalId,
+    data?.name,
+    data?.deviceName,
+    data?.ip,
+  ].forEach((v) => {
+    const s = String(v || '').trim();
+    if (s) out.add(s);
+  });
+  return out;
+}
+
+async function resolveGroupTerminalRefs(db, tid, rawRefs) {
+  const cacheHit = TERMINAL_REF_CACHE.get(tid);
+  const now = Date.now();
+  let terminals = cacheHit?.terminals || null;
+  if (!terminals || (now - cacheHit.at) > TERMINAL_REF_TTL_MS) {
+    const docs = await db.collection(tenancy.terminalsPath(tid)).get();
+    terminals = docs.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    TERMINAL_REF_CACHE.set(tid, { at: now, terminals });
+  }
+
+  const aliasToId = new Map();
+  const aliasesById = new Map();
+  for (const t of terminals) {
+    const aliases = terminalAliases(t.id, t);
+    aliasesById.set(t.id, aliases);
+    for (const a of aliases) aliasToId.set(normalizeToken(a), t.id);
+  }
+
+  const terminalIds = [];
+  const terminalIdSet = new Set();
+  const terminalKeys = new Set();
+
+  for (const raw of collectTerminalRefs(rawRefs)) {
+    const token = String(raw || '').trim();
+    if (!token) continue;
+    const matchedId = aliasToId.get(normalizeToken(token));
+    if (matchedId) {
+      if (!terminalIdSet.has(matchedId)) {
+        terminalIdSet.add(matchedId);
+        terminalIds.push(matchedId);
+      }
+      for (const k of aliasesById.get(matchedId) || []) terminalKeys.add(k);
+    } else {
+      terminalKeys.add(token);
+    }
+  }
+
+  if (terminalIds.length === 0) {
+    for (const raw of collectTerminalRefs(rawRefs)) {
+      const token = String(raw || '').trim();
+      if (!token || terminalIdSet.has(token)) continue;
+      terminalIdSet.add(token);
+      terminalIds.push(token);
+      terminalKeys.add(token);
+    }
+  }
+
+  return { terminalIds, terminalKeys: [...terminalKeys] };
+}
+
+const DISMISSAL_START_MIN = 13 * 60; // 13:00 WIB
+const DISMISSAL_END_MIN   = 17 * 60; // 17:00 WIB
+const DISMISSAL_WINDOW_ENABLED = true;
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') { res.status(405).json({ error: 'method' }); return; }
   const token = req.headers['x-tablet-device-token'] || req.query.deviceToken;
   if (!token) { res.status(401).json({ error: 'deviceToken required' }); return; }
 
-  let tid, terminalIds = [], gradeScopes = [], releaseGroupId = null;
+  const wibNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  const wibMin = wibNow.getUTCHours() * 60 + wibNow.getUTCMinutes();
+  if (!DISMISSAL_WINDOW_ENABLED || wibMin < DISMISSAL_START_MIN || wibMin >= DISMISSAL_END_MIN) {
+    res.status(200).json({ ok: false, inWindow: false });
+    return;
+  }
+
+  let tid, terminalIds = [], terminalKeys = [], gradeScopes = [], releaseGroupId = null;
   try {
     initializeFirebase();
     const db = admin.firestore();
@@ -75,7 +164,9 @@ export default async function handler(req, res) {
     if (!releaseGroupId) { res.status(409).json({ error: 'no release group bound' }); return; }
     if (!groupSnap?.exists) { res.status(404).json({ error: 'release group not found' }); return; }
     const group = groupSnap.data();
-    terminalIds = Array.isArray(group.terminalIds) ? group.terminalIds : [];
+    const resolvedRefs = await resolveGroupTerminalRefs(db, tid, group.terminalIds);
+    terminalIds = resolvedRefs.terminalIds;
+    terminalKeys = resolvedRefs.terminalKeys;
 
     // Union of the group's terminal gradeScopes — lets the bus drop
     // wrong-gate cards (e.g. EY parent at a Grade 4/5 pole).
@@ -114,5 +205,5 @@ export default async function handler(req, res) {
   // arrives — send a small event so the EventSource transitions to OPEN.
   res.write(`event: hello\ndata: ${JSON.stringify({ tenantId: tid, terminalIds })}\n\n`);
 
-  bus.subscribe(tid, terminalIds, res, gradeScopes, releaseGroupId);
+  bus.subscribe(tid, terminalKeys, res, gradeScopes, releaseGroupId);
 }

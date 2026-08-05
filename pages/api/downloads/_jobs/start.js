@@ -29,6 +29,15 @@ const { getRunner, writeReportRun } = require('../../../../lib/download-runner')
 const tenancy = require('../../../../lib/tenancy');
 const { logAudit } = require('../../../../lib/audit-log');
 
+const MUST_HAVE_CARD_IDS = new Set([
+  'attendance',
+  'pickup-events',
+  'students-roster',
+  'class-directory',
+  'security-incidents',
+  'audit-log',
+]);
+
 export const config = { api: { bodyParser: { sizeLimit: '128kb' } } };
 
 const DOWNLOAD_KEYS = [
@@ -44,6 +53,9 @@ async function handler(req, res) {
   const { cardId, format, from, to, filters } = req.body || {};
   if (!cardId || typeof cardId !== 'string') {
     return res.status(400).json({ error: 'bad_cardId' });
+  }
+  if (!MUST_HAVE_CARD_IDS.has(cardId)) {
+    return res.status(403).json({ error: 'export_not_allowed', cardId });
   }
   const runnerCfg = getRunner(cardId);
   if (!runnerCfg) {

@@ -43,6 +43,14 @@ const TIMEZONES = [
   { id: 'America/New_York',     label: 'America/New_York' },
 ];
 const ALLOWED_TZ = new Set(TIMEZONES.map((t) => t.id));
+const MUST_HAVE_CARD_IDS = new Set([
+  'attendance',
+  'pickup-events',
+  'students-roster',
+  'class-directory',
+  'security-incidents',
+  'audit-log',
+]);
 
 function dateInTz(tz, offsetDays = 0) {
   try {
@@ -378,6 +386,14 @@ const SECTIONS = [
   },
 ];
 
+// Cost-control policy: only these cards remain enabled in the hub UI.
+const POLICY_SECTIONS = SECTIONS
+  .map((section) => ({
+    ...section,
+    cards: section.cards.filter((card) => MUST_HAVE_CARD_IDS.has(card.id)),
+  }))
+  .filter((section) => section.cards.length > 0);
+
 const TONES = {
   teal:    { ring: 'border-teal-500/30',    bg: 'bg-teal-500/10',    fg: 'text-teal-300',    btn: 'bg-teal-600 hover:bg-teal-500' },
   green:   { ring: 'border-emerald-500/30', bg: 'bg-emerald-500/10', fg: 'text-emerald-300', btn: 'bg-emerald-600 hover:bg-emerald-500' },
@@ -389,7 +405,7 @@ const TONES = {
 
 // Flat lookup so the recently-run rail (which only knows cardId) can
 // render the human-facing card title without re-walking SECTIONS.
-const CARD_BY_ID = SECTIONS.flatMap((s) => s.cards).reduce((acc, c) => {
+const CARD_BY_ID = POLICY_SECTIONS.flatMap((s) => s.cards).reduce((acc, c) => {
   acc[c.id] = c; return acc;
 }, {});
 
@@ -1207,7 +1223,7 @@ function MyPresetsRail({ presets, loading, onRun, onDelete, canManage }) {
         <div className="text-[11px] text-slate-500 italic">Loading…</div>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
-          {presets.map((p) => {
+          {presets.filter((p) => !!CARD_BY_ID[p.cardId]).map((p) => {
             const card = CARD_BY_ID[p.cardId];
             const tone = TONES[card?.tone] || TONES.teal;
             const sched = p.schedule && p.schedule.enabled ? p.schedule : null;
@@ -1285,7 +1301,7 @@ function RecentlyRunRail({ runs, loading, onShare, canShare }) {
         </div>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
-          {runs.map((r) => {
+          {runs.filter((r) => !!CARD_BY_ID[r.cardId]).map((r) => {
             const card = CARD_BY_ID[r.cardId];
             const tone = TONES[card?.tone] || TONES.teal;
             const title = card?.title || r.cardId;
@@ -1358,7 +1374,7 @@ export default function DownloadsPage() {
   // Filter SECTIONS through RBAC. Owners see everything (every action true);
   // others see only the cards backed by a permission they hold.
   const visibleSections = useMemo(() => {
-    return SECTIONS.map((s) => ({
+    return POLICY_SECTIONS.map((s) => ({
       ...s,
       cards: s.cards.filter((c) => cardVisible(c, can)),
     }));
@@ -1669,6 +1685,7 @@ export default function DownloadsPage() {
   // preview / dry-run noise.
   const recentRuns = useMemo(
     () => runs
+      .filter((r) => MUST_HAVE_CARD_IDS.has(r.cardId))
       .filter((r) => r.status === 'completed' && (r.mode === 'sync' || r.mode === 'async' || r.mode === 'bulk'))
       .slice(0, 5),
     [runs],

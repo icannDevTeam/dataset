@@ -47,6 +47,16 @@ const OVERRIDES = {
   '2dc4c6f35f89': ['1', '2', '3', '4', '5'], // PYP Lobby
   '875e8b213c76': [],                          // Basement Terminal (shared)
   'cf18e11f9d8e': ['5'],                       // "GRADE 5" (formerly MYP Tower)
+  '472a2370ca48': ['EY1', 'EY2', 'EY3'],       // Pole 1 / Terminal 01 — all Early Years
+  'f462250f7ca3': ['EY1', 'EY2', 'EY3'],       // Pole 1 / Terminal 02 — all Early Years
+  '455b597cf22f': ['1', '2'],                  // Pole 2 / Terminal 03 — Grades 1-2
+  'c318f11f62be': ['1', '2'],                  // Pole 2 / Terminal 04 — Grades 1-2
+  'cf24a199e5b6': ['3'],                       // Pole 3 / Terminal 05 — Grade 3
+  'ddbb94f15ae0': ['3'],                       // Pole 3 / Terminal 06 — Grade 3
+  '5ecd40a48e49': ['4'],                       // Pole 4 / Terminal 07
+  '0d847419cf16': ['4'],                       // Pole 4 / Terminal 08
+  '30754945c9eb': ['5'],                       // Pole 5 / Terminal 09
+  'ed53afa9b079': ['5'],                       // Pole 5 / Terminal 10
 };
 
 (async () => {

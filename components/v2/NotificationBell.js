@@ -32,6 +32,7 @@ export default function NotificationBell({ className = '' }) {
   useEffect(() => {
     let stop = false;
     const load = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       try {
         const r = await fetch('/api/pickup/admin/notifications', { credentials: 'include' });
         if (r.status === 401 || r.status === 403) { if (!stop) setAllowed(false); return; }
@@ -41,8 +42,18 @@ export default function NotificationBell({ className = '' }) {
       } catch { /* ignore */ }
     };
     load();
-    const t = setInterval(load, 30000);
-    return () => { stop = true; clearInterval(t); };
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    const t = setInterval(load, 90000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   useEffect(() => {

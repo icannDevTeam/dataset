@@ -22,6 +22,11 @@ import { withApi } from '../../../../lib/api-auth';
 import { hikRequest, isAllowedDeviceIP } from '../../../../lib/hikvision';
 const tenancy = require('../../../../lib/tenancy');
 
+const CACHE_TTL_MS = 15 * 1000;
+const MAX_EMAIL_QUEUE_ROWS = 300;
+const MAX_PICKUP_EVENT_ROWS = 1500;
+const _cache = new Map(); // key=tenantId -> { at:number, payload:object }
+
 // ─── Key masking ──────────────────────────────────────────────────────────────
 function maskKey(raw) {
   if (!raw) return null;
@@ -75,6 +80,11 @@ async function handler(req, res) {
   initializeFirebase();
   const db = admin.firestore();
   const tid = tenancy.getTenantId(req.query.tenant);
+  const cached = _cache.get(tid);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    return res.status(200).json(cached.payload);
+  }
+
   const now = Date.now();
   const cut24h = new Date(now - 24 * 3600 * 1000);
   const cut5m  = now - 5 * 60 * 1000;
@@ -97,7 +107,7 @@ async function handler(req, res) {
       const snap = await db.collection('email_queue')
         .where('createdAt', '>=', admin.firestore.Timestamp.fromDate(cut24h))
         .orderBy('createdAt', 'desc')
-        .limit(500)
+        .limit(MAX_EMAIL_QUEUE_ROWS)
         .get();
       let pending = 0, sent = 0, failed = 0, retrying = 0, resets = 0;
       let sent5m = 0, sent1h = 0;
@@ -121,7 +131,7 @@ async function handler(req, res) {
       const snap = await db.collection(tenancy.pickupEventsPath(tid))
         .where('recordedAt', '>=', admin.firestore.Timestamp.fromDate(cut24h))
         .orderBy('recordedAt', 'desc')
-        .limit(3000)
+        .limit(MAX_PICKUP_EVENT_ROWS)
         .get();
       let total24h = 0, total5m = 0, total1h = 0;
       snap.forEach((doc) => {
@@ -435,7 +445,7 @@ async function handler(req, res) {
   const hikReachable = termResults.filter((t) => t.status === 'up').length;
   const keyConfigured = Object.values(keys).filter((k) => k.status === 'ok' || k.status === 'configured').length;
 
-  return res.status(200).json({
+  const payload = {
     ok: true,
     generatedAt: new Date().toISOString(),
     summary: {
@@ -449,7 +459,9 @@ async function handler(req, res) {
     },
     interfaces,
     keys,
-  });
+  };
+  _cache.set(tid, { at: Date.now(), payload });
+  return res.status(200).json(payload);
 }
 
 export default withApi(handler, { methods: ['GET'], permission: 'analytics.view' });

@@ -7,12 +7,6 @@ import { useRouter } from 'next/router';
 
 const TABS = [
   {
-    href: '/v2/pickup-monitor',
-    icon: 'ph-heartbeat',
-    label: 'System Health',
-    sub: 'APIs · Email · Security',
-  },
-  {
     href: '/v2/pickup-ops',
     icon: 'ph-terminal-window',
     label: 'Operations & Interfaces',

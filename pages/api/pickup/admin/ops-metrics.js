@@ -38,6 +38,10 @@ import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 
 const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 15 * 1000;
+const MAX_PICKUP_EVENTS = 1500;
+const MAX_SECURITY_INCIDENTS = 300;
+const _cache = new Map(); // key=tenantId -> { at:number, payload:object }
 
 function tsMs(v) {
   if (!v) return null;
@@ -83,6 +87,11 @@ async function handler(req, res) {
   initializeFirebase();
   const db = admin.firestore();
   const tid = tenancy.getTenantId(req.query.tenant);
+  const cached = _cache.get(tid);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    return res.status(200).json(cached.payload);
+  }
+
   const now = Date.now();
   const cut24h = new Date(now - 24 * 3600 * 1000);
   const cut1h  = now - 3600 * 1000;
@@ -115,7 +124,7 @@ async function handler(req, res) {
   const evSnap = await db.collection(tenancy.pickupEventsPath(tid))
     .where('recordedAt', '>=', admin.firestore.Timestamp.fromDate(cut24h))
     .orderBy('recordedAt', 'desc')
-    .limit(3000)
+    .limit(MAX_PICKUP_EVENTS)
     .get();
 
   evSnap.forEach((doc) => {
@@ -180,7 +189,7 @@ async function handler(req, res) {
   try {
     const secSnap = await db.collection(tenancy.securityIncidentsPath(tid))
       .where('createdAt', '>=', cut24h.toISOString())
-      .limit(500)
+      .limit(MAX_SECURITY_INCIDENTS)
       .get();
     secSnap.forEach((doc) => {
       const s = doc.data();
@@ -241,11 +250,13 @@ async function handler(req, res) {
 
   interfaces.sort((a, b) => terminalNaturalCompare(a.name, b.name));
 
-  return res.status(200).json({
+  const payload = {
     ok: true,
     generatedAt: new Date().toISOString(),
     interfaces,
-  });
+  };
+  _cache.set(tid, { at: Date.now(), payload });
+  return res.status(200).json(payload);
 }
 
 export default withApi(handler, { methods: ['GET'], permission: 'analytics.view' });

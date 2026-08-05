@@ -20,8 +20,46 @@ import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase
 import admin from 'firebase-admin';
 
 const tenancy = require('../../../../lib/tenancy');
+const { deriveGradeBucket, normalizeClassLabel, normalizeHomeroom } = require('../../../../lib/grade-utils');
 
 const URL_TTL_MS = 30 * 60 * 1000;
+
+function normalizeText(value) {
+  return String(value || '').toLowerCase().trim();
+}
+
+function recordMatchesQuery(record, query) {
+  if (!query) return true;
+  const q = normalizeText(query);
+  if (!q) return true;
+  const hay = [
+    record?.id,
+    record?.formNumber,
+    record?.guardian?.name,
+    record?.guardian?.email,
+    record?.guardian?.phone,
+    ...(record?.students || []).flatMap((s) => [
+      s?.id,
+      s?.studentId,
+      s?.name,
+      s?.firstName,
+      s?.nickname,
+      s?.homeroom,
+      s?.className,
+      s?.grade,
+      s?.gradeSelection,
+    ]),
+    ...(record?.chaperones || []).flatMap((c) => [
+      c?.name,
+      c?.relation,
+      c?.relationship,
+      c?.email,
+      c?.phone,
+      c?.idNumber,
+    ]),
+  ].filter(Boolean).map(normalizeText).join(' ');
+  return hay.includes(q);
+}
 
 async function signPath(bucket, path) {
   if (!path) return null;
@@ -39,7 +77,12 @@ async function signPath(bucket, path) {
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   const status = String(req.query.status || 'pending');
-  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 250);
+  const q = String(req.query.q || '').trim();
+  const scanCap = Math.min(
+    Math.max(parseInt(req.query.scanCap, 10) || (q ? 2000 : limit), limit),
+    5000,
+  );
   const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
   if (!['pending', 'approved', 'rejected', 'archived', 'changes_requested'].includes(status)) {
     return res.status(400).json({ error: 'invalid status' });
@@ -48,22 +91,39 @@ async function handler(req, res) {
     initializeFirebase();
     const db = admin.firestore();
     const bucket = getFirebaseStorage().bucket();
-    const snap = await db.collection(tenancy.pickupOnboardingPath(tid))
-      .where('status', '==', status)
-      .limit(limit)
-      .get();
-
     const studentIds = new Set();
     const allFacePaths = new Set();
     const rawRecords = [];
-    snap.forEach((d) => {
-      const data = { id: d.id, ...d.data() };
-      rawRecords.push(data);
-      (data.students || []).forEach((s) => s && s.id && studentIds.add(s.id));
-      (data.chaperones || []).forEach((c) => {
-        (c.facePaths || []).forEach((p) => allFacePaths.add(p));
-      });
-    });
+
+    const batchSize = Math.min(Math.max(limit * 2, 100), 500);
+    let scanned = 0;
+    let cursor = null;
+    while (scanned < scanCap && rawRecords.length < limit) {
+      const roundLimit = Math.min(batchSize, scanCap - scanned);
+      let qry = db.collection(tenancy.pickupOnboardingPath(tid))
+        .where('status', '==', status)
+        .limit(roundLimit);
+      if (cursor) qry = qry.startAfter(cursor);
+
+      const snap = await qry.get();
+      if (snap.empty) break;
+
+      for (const d of snap.docs) {
+        scanned += 1;
+        const data = { id: d.id, ...d.data() };
+        if (recordMatchesQuery(data, q)) {
+          rawRecords.push(data);
+          (data.students || []).forEach((s) => s && s.id && studentIds.add(s.id));
+          (data.chaperones || []).forEach((c) => {
+            (c.facePaths || []).forEach((p) => allFacePaths.add(p));
+          });
+          if (rawRecords.length >= limit) break;
+        }
+      }
+
+      cursor = snap.docs[snap.docs.length - 1];
+      if (snap.size < roundLimit) break;
+    }
 
     // For approved records, also pull final face paths from chaperones/{id}.
     // MUST be a single batched getAll — with 300+ approved chaperones the old
@@ -106,11 +166,25 @@ async function handler(req, res) {
     const records = rawRecords.map((r) => {
       const students = (r.students || []).map((s) => {
         const doc = studentMap.get(s.id);
+        const dbHomeroom = doc?.homeroom || null;
+        const formHomeroom = s?.homeroom || null;
+        const effectiveHomeroom = dbHomeroom || formHomeroom || null;
+        const normalizedDb = normalizeHomeroom(dbHomeroom || '');
+        const normalizedForm = normalizeHomeroom(formHomeroom || '');
         return {
           ...s,
           photoUrl: doc?.photoUrl || null,
           dbName: doc?.name || null,
-          dbHomeroom: doc?.homeroom || null,
+          dbHomeroom,
+          effectiveHomeroom,
+          effectiveClassLabel: normalizeClassLabel({ homeroom: effectiveHomeroom }),
+          effectiveGradeBucket: deriveGradeBucket({
+            gradeSelection: s?.gradeSelection,
+            grade: doc?.grade || s?.grade,
+            className: s?.className,
+            homeroom: effectiveHomeroom,
+          }),
+          homeroomMismatch: Boolean(normalizedDb && normalizedForm && normalizedDb !== normalizedForm),
         };
       });
       const chaperones = (r.chaperones || []).map((c, idx) => {

@@ -21,19 +21,26 @@ const STATUS_PILL = (d) => {
 export default function TerminalPicker({
   allDevices = [],
   selectedIps,         // controlled; null/undefined → defaults from isMatched (or defaultIps)
-  defaultIps,          // optional override for defaults; e.g. class-level picker passes all enabled IPs
+  defaultIps,          // optional override for defaults; class-level picker passes grade-matched IPs
   onChange,            // (ips: string[]) => void
   align = 'right',     // 'right' | 'left' — popover horizontal anchor
 }) {
   const [open, setOpen] = useState(false);
   const popRef = useRef(null);
 
-  // Compute defaults: caller override wins, otherwise grade-matched, otherwise all.
+  const formatGradeScope = (d) => {
+    const scopes = Array.isArray(d?.gradeScopes) ? d.gradeScopes.map(String).map((s) => s.trim()).filter(Boolean) : [];
+    if (scopes.length === 0) return 'all grades';
+    if (scopes.length === 1) return `grade ${scopes[0]}`;
+    return `grades ${scopes.join(', ')}`;
+  };
+
+  // Compute defaults: caller override wins, otherwise grade-matched only.
   const defaults = Array.isArray(defaultIps)
     ? defaultIps
     : (allDevices.some((d) => d.isMatched)
         ? allDevices.filter((d) => d.isMatched).map((d) => d.ip)
-        : allDevices.map((d) => d.ip));
+        : []);
   const effective = selectedIps !== undefined && selectedIps !== null ? selectedIps : defaults;
   const selectedSet = new Set(effective);
 
@@ -57,7 +64,6 @@ export default function TerminalPicker({
     onChange([...next]);
   };
 
-  const setAll = () => onChange(allDevices.map((d) => d.ip));
   const setNone = () => onChange([]);
   const setDefaults = () => onChange(defaults);
 
@@ -135,13 +141,6 @@ export default function TerminalPicker({
               </button>
               <button
                 type="button"
-                onClick={setAll}
-                className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800/60 border border-slate-700 text-slate-300 hover:bg-slate-800"
-              >
-                All
-              </button>
-              <button
-                type="button"
                 onClick={setNone}
                 className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800/60 border border-slate-700 text-slate-300 hover:bg-slate-800"
               >
@@ -173,10 +172,12 @@ export default function TerminalPicker({
                           <span className="text-[8px] uppercase tracking-wider px-1 py-0 rounded bg-violet-500/15 text-violet-300 border border-violet-500/30">override</span>
                         )}
                       </div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center gap-2 flex-wrap">
-                        <span>{d.ip}</span>
-                        {d.section && <span>· {d.section}</span>}
-                        <span>· {d.gradeScopes.length === 0 ? 'all grades' : `g${d.gradeScopes.join(',')}`}</span>
+                      <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                        <span className="px-1.5 py-0.5 rounded bg-brand-500/10 text-brand-200 border border-brand-500/20">
+                          {formatGradeScope(d)}
+                        </span>
+                        {d.section && <span>{d.section}</span>}
+                        <span className="font-mono">{d.ip}</span>
                       </div>
                       {d.attempted && (
                         <div className={`mt-1 text-[10px] inline-flex items-center gap-1 px-1 py-0 rounded border ${pill.cls}`}>
@@ -191,7 +192,7 @@ export default function TerminalPicker({
             })}
           </ul>
           <div className="px-3 py-2 border-t border-slate-800 text-[10px] text-slate-500">
-            Tip: defaults match the chaperone's authorised grades. Pick more to enrol on extra gates.
+            Tip: defaults match the chaperone's authorised grades only. Add extra terminals only when a sibling needs them.
           </div>
         </div>
       )}

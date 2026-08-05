@@ -51,6 +51,20 @@ function relativeTime(iso) {
   return `${d}d ago`;
 }
 
+function terminalGradeLabel(t) {
+  const label = String(t?.gradeLabel || '').trim();
+  if (label) return label;
+  const scopes = Array.isArray(t?.gradeScopes) ? t.gradeScopes.map(String).map((s) => s.trim()).filter(Boolean) : [];
+  if (scopes.length === 0) return 'All grades';
+  return scopes.length === 1 ? `Grade ${scopes[0]}` : `Grades ${scopes.join(', ')}`;
+}
+
+function terminalLocationLabel(t) {
+  const parts = [t?.gateLabel || null, t?.name || null].filter(Boolean);
+  if (parts.length === 0) return 'Terminal';
+  return parts.join(' · ');
+}
+
 export default function TerminalsPage() {
   const [terminals, setTerminals] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -528,7 +542,12 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
             )}
           </div>
           <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-            <span className="font-mono"><i className="ph ph-globe text-slate-500 mr-0.5"></i>{t.ip || '—'}</span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-brand-500/30 bg-brand-500/10 text-brand-200">
+                <i className="ph ph-chalkboard-teacher text-[10px]"></i>{terminalGradeLabel(t)}
+              </span>
+              <span className="text-slate-300 truncate" title={t.ip || ''}>
+                <i className="ph ph-buildings text-slate-500 mr-0.5"></i>{terminalLocationLabel(t)}
+              </span>
             {lastSeen && (
               <span className="text-slate-500">
                 <i className="ph ph-clock-clockwise mr-0.5"></i>seen {lastSeen}

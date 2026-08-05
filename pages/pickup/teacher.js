@@ -19,6 +19,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const POLL_MS = 2500;            // when SSE is offline
 const POLL_MS_LIVE = 15_000;     // when SSE is healthy (just a safety net)
 const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
+
+// SO dismissal polling window — active only between these WIB times.
+// 30-min buffer before 13:30 dismissal, 1-hr buffer after 16:00 end.
+const DISMISSAL_START_HHMM = '13:00';
+const DISMISSAL_END_HHMM   = '17:00';
+
+function wibMinutes() {
+  const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  return now.getUTCHours() * 60 + now.getUTCMinutes();
+}
+function hhmmToMinutes(s) {
+  const [h, m] = s.split(':').map(Number);
+  return h * 60 + m;
+}
+function isInDismissalWindow() {
+  const cur = wibMinutes();
+  return cur >= hhmmToMinutes(DISMISSAL_START_HHMM) && cur < hhmmToMinutes(DISMISSAL_END_HHMM);
+}
 const TOKEN_KEY = 'pickup.tablet.deviceToken';
 const IDENTITY_KEY = 'pickup.tablet.identity';
 const BINUS_MAROON = '#8B1538';
@@ -820,6 +838,7 @@ export default function TeacherTabletPage() {
   const [installPromptEvent, setInstallPromptEvent] = useState(null);
   const [showInstall, setShowInstall] = useState(false);
   const [sseLive, setSseLive] = useState(false);
+  const [inWindow, setInWindow] = useState(isInDismissalWindow);
   const pollRef = useRef(null);
   const isPreviewRef = useRef(false);
 
@@ -1098,6 +1117,12 @@ export default function TeacherTabletPage() {
     return () => { cancelled = true; };
   }, [token]);
 
+  // Re-check dismissal window every 30s so the UI wakes up automatically at 13:00.
+  useEffect(() => {
+    const t = setInterval(() => setInWindow(isInDismissalWindow()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
   // Poll feed
   const pollFeed = useCallback(async () => {
     if (!token || isPreviewRef.current) return;
@@ -1123,7 +1148,7 @@ export default function TeacherTabletPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || !identity || isPreviewRef.current) return;
+    if (!token || !identity || !inWindow || isPreviewRef.current) return;
     pollFeed();
     // Cadence depends on SSE health: 2.5s when offline (fallback), 15s when
     // the SSE channel is delivering live events. The SSE effect below adjusts
@@ -1131,14 +1156,14 @@ export default function TeacherTabletPage() {
     const interval = sseLive ? POLL_MS_LIVE : POLL_MS;
     pollRef.current = setInterval(pollFeed, interval);
     return () => clearInterval(pollRef.current);
-  }, [token, identity, pollFeed, sseLive]);
+  }, [token, identity, pollFeed, sseLive, inWindow]);
 
   // ── Live SSE channel ────────────────────────────────────────────────
   // Each `pickup_event` message wakes pollFeed() so shape/merge logic stays
   // centralized in the feed endpoint. Falls back transparently to polling if
   // the connection drops or Vercel idles us out.
   useEffect(() => {
-    if (!token || !identity || isPreviewRef.current) return;
+    if (!token || !identity || !inWindow || isPreviewRef.current) return;
     let es = null;
     let reconnectTimer = null;
     let cancelled = false;
@@ -1209,7 +1234,7 @@ export default function TeacherTabletPage() {
       try { es && es.close(); } catch {}
       setSseLive(false);
     };
-  }, [token, identity, pollFeed]);
+  }, [token, identity, pollFeed, inWindow]);
 
   const onAction = async (ev, action) => {
     const id = ev.id;
@@ -1281,6 +1306,41 @@ export default function TeacherTabletPage() {
   const activeCards = (feed.active || []).slice(0, activeLimit);
   const activeCardMinHeight = hasHeld ? ACTIVE_CARD_MIN_H_WITH_HELD : ACTIVE_CARD_MIN_H_NO_HELD;
   const noHeldDense = !hasHeld && activeCards.length >= 9;
+
+  if (token && !inWindow) {
+    return (
+      <>
+        <Head>
+          <title>{identity?.releaseGroupName || 'Teacher'} · BINUS Pick-Up System</title>
+          <link rel="manifest" href="/teacher-manifest.webmanifest" />
+          <meta name="theme-color" content={BINUS_MAROON} />
+          <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        </Head>
+        <div style={{
+          minHeight: '100vh', background: '#0f172a',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+        }}>
+          <div style={{ textAlign: 'center', padding: 32 }}>
+            <div style={{ fontSize: 56, marginBottom: 20, color: '#334155' }}>&#x23F0;</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>
+              Dismissal not active
+            </div>
+            <div style={{ fontSize: 15, color: '#64748b', marginBottom: 4 }}>
+              Active window: {DISMISSAL_START_HHMM} &ndash; {DISMISSAL_END_HHMM} WIB
+            </div>
+            {identity?.releaseGroupName && (
+              <div style={{ fontSize: 13, color: '#475569', marginTop: 12 }}>
+                {identity.releaseGroupName}
+              </div>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
 
   if (!token) {
     return (

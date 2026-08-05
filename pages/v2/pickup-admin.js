@@ -21,6 +21,9 @@ import { useRouter } from 'next/router';
 import V2Layout from '../../components/v2/V2Layout';
 import PageGuard from '../../components/v2/PageGuard';
 import { compressImageToJpegDataUrl } from '../../lib/client-image';
+import gradeUtils from '../../lib/grade-utils';
+
+const { deriveGradeBucket, normalizeClassLabel } = gradeUtils;
 
 const TABS = [
   { key: 'pending',  label: 'Pending',  badge: true },
@@ -55,11 +58,11 @@ const SORT_OPTIONS = [
 ];
 
 const ACADEMIC_YEAR_LABEL = '2026/2027';
+// Temporary cost-control switch: disable TV-feed tile in pickup-admin.
+const ENABLE_PICKUP_TV_TILE = false;
 const EY_GRADE_OPTIONS = ['EY1', 'EY2', 'EY3'];
 const NUMERIC_GRADE_OPTIONS = ['1', '2', '3', '4', '5'];
 const GRADE_SELECTION_OPTIONS = [...EY_GRADE_OPTIONS, ...NUMERIC_GRADE_OPTIONS];
-const EY_GRADE_SET = new Set(EY_GRADE_OPTIONS);
-const NUMERIC_GRADE_SET = new Set(NUMERIC_GRADE_OPTIONS);
 
 function isTemporaryStudentId(value) {
   return String(value || '').startsWith('tmp-');
@@ -73,16 +76,13 @@ function getStoredStudentId(student) {
 }
 
 function deriveGradeSelectionFromStudent(student) {
-  const explicit = String(student?.gradeSelection || '').trim().toUpperCase();
-  if (explicit) return explicit;
-  const className = String(student?.className || '').trim().toUpperCase();
-  const homeroom = String(student?.homeroom || '').trim().toUpperCase();
-  const grade = String(student?.grade || '').trim().toUpperCase();
-  if (grade === 'EY' && EY_GRADE_SET.has(className)) return className;
-  if (EY_GRADE_SET.has(homeroom)) return homeroom;
-  if (NUMERIC_GRADE_SET.has(grade)) return grade;
-  const m = homeroom.match(/^([1-5])/);
-  return m ? m[1] : '';
+  const bucket = deriveGradeBucket({
+    gradeSelection: student?.gradeSelection,
+    grade: student?.grade,
+    className: student?.className,
+    homeroom: student?.effectiveHomeroom || student?.dbHomeroom || student?.homeroom,
+  });
+  return bucket === 'UNASSIGNED' ? '' : bucket;
 }
 
 function derivePathwayFromStudent(student) {
@@ -103,9 +103,13 @@ function formatStudentGradeBadge(student) {
 }
 
 function formatStudentFinalClass(student) {
-  const selection = deriveGradeSelectionFromStudent(student);
-  if (!selection) return null;
-  return selection;
+  const label = normalizeClassLabel({
+    className: student?.className,
+    homeroom: student?.effectiveHomeroom || student?.dbHomeroom || student?.homeroom,
+    gradeSelection: student?.gradeSelection,
+    grade: student?.grade,
+  });
+  return label === 'UNASSIGNED' ? null : label;
 }
 
 function compareClassLabel(a, b) {
@@ -201,6 +205,33 @@ function summarizeClassSubmissions(records = []) {
     .sort((a, b) => compareClassLabel(a.classLabel, b.classLabel));
 }
 
+// Rebuild onboarding-record shapes from the flat per-student rows returned by
+// the grade-workbook endpoint (?format=json) so the class tracker can cover
+// ALL forms across every status, not just the currently open tab.
+function recordsFromFlatRows(flatRows = []) {
+  const map = new Map();
+  flatRows.forEach((r) => {
+    const id = String(r.submissionId || '');
+    if (!id) return;
+    if (!map.has(id)) {
+      map.set(id, {
+        id,
+        status: r.statusRaw || r.status || 'pending',
+        submittedAt: r.submittedAt || null,
+        guardian: { name: r.guardianName || '', email: r.guardianEmail || '', phone: r.guardianPhone || '' },
+        students: [],
+      });
+    }
+    map.get(id).students.push({
+      id: r.studentId || null,
+      name: r.studentName || '',
+      homeroom: r.sourceHomeroom || '',
+      effectiveHomeroom: r.effectiveHomeroom || '',
+    });
+  });
+  return [...map.values()];
+}
+
 function fmtTime(iso) {
   if (!iso) return '—';
   try {
@@ -273,7 +304,13 @@ export default function PickupAdminPage() {
   const [lightbox, setLightbox] = useState(null);
   const [thumbnails, setThumbnails] = useState({});
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sort, setSort] = useState('newest');
+    useEffect(() => {
+      const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+      return () => clearTimeout(t);
+    }, [search]);
+
   const [selected, setSelected] = useState({});     // recordId -> bool
   const [bulkBusy, setBulkBusy] = useState(false);
   const [printRec, setPrintRec] = useState(null);
@@ -418,8 +455,10 @@ export default function PickupAdminPage() {
       .catch(() => {});
   }, []);
 
-  const fetchList = useCallback(async (status) => {
-    const r = await fetch(`/api/pickup/admin/onboarding-list?status=${status}&limit=200`, {
+  const fetchList = useCallback(async (status, queryText = '') => {
+    const params = new URLSearchParams({ status, limit: queryText ? '150' : '100' });
+    if (queryText) params.set('q', queryText);
+    const r = await fetch(`/api/pickup/admin/onboarding-list?${params.toString()}`, {
       credentials: 'include',
     });
     const j = await r.json();
@@ -427,35 +466,47 @@ export default function PickupAdminPage() {
     return j.records || [];
   }, []);
 
+  const fetchCounts = useCallback(async () => {
+    const r = await fetch('/api/pickup/admin/forms-summary', { credentials: 'include' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || j.message || 'count fetch failed');
+    const c = j.counts || {};
+    return {
+      pending: Number(c.pending || 0),
+      changes_requested: Number(c.changes_requested || 0),
+      approved: Number(c.approved || 0),
+      rejected: Number(c.rejected || 0),
+      archived: Number(c.archived || 0),
+    };
+  }, []);
+
+  const fetchTracker = useCallback(async () => {
+    const r = await fetch('/api/pickup/admin/onboarding-grade-workbook?status=all&format=json', {
+      credentials: 'include',
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || j.message || 'tracker fetch failed');
+    return j.rows || [];
+  }, []);
+
   const reload = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      // Always fetch all tabs in parallel so the stat strip is accurate
-      const [pendingL, changesL, approvedL, rejectedL, archivedL] = await Promise.all([
-        fetchList('pending').catch(() => []),
-        fetchList('changes_requested').catch(() => []),
-        fetchList('approved').catch(() => []),
-        fetchList('rejected').catch(() => []),
-        fetchList('archived').catch(() => []),
+      const [tabRows, nextCounts, trackerRows] = await Promise.all([
+        fetchList(tab, debouncedSearch).catch(() => []),
+        fetchCounts().catch(() => null),
+        fetchTracker().catch(() => null),
       ]);
-      setCounts({
-        pending: pendingL.length,
-        changes_requested: changesL.length,
-        approved: approvedL.length,
-        rejected: rejectedL.length,
-        archived: archivedL.length,
-      });
-      const byTab = { pending: pendingL, changes_requested: changesL, approved: approvedL, rejected: rejectedL, archived: archivedL };
-      setSubmissionTracker(summarizeClassSubmissions([
-        ...pendingL,
-        ...changesL,
-        ...approvedL,
-        ...rejectedL,
-      ]));
-      setRecords(byTab[tab] || []);
+
+      if (nextCounts) setCounts(nextCounts);
+      setRecords(tabRows);
+      // Prefer the all-status tracker; fall back to current tab rows if it fails.
+      setSubmissionTracker(summarizeClassSubmissions(
+        trackerRows ? recordsFromFlatRows(trackerRows) : tabRows,
+      ));
     } catch (e) { setErr(e.message); }
     finally { setLoading(false); }
-  }, [tab, fetchList]);
+  }, [tab, debouncedSearch, fetchList, fetchCounts, fetchTracker]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -463,13 +514,18 @@ export default function PickupAdminPage() {
   useEffect(() => {
     const t = setInterval(async () => {
       try {
-        const list = await fetchList('pending');
-        setCounts((c) => ({ ...c, pending: list.length }));
-        if (tab === 'pending') setRecords(list);
+        const nextCounts = await fetchCounts();
+        setCounts(nextCounts);
+        if (tab === 'pending') {
+          const list = await fetchList('pending', debouncedSearch);
+          setRecords(list);
+          // NOTE: do NOT rebuild the tracker from pending-only rows — it covers
+          // all statuses and is refreshed by reload().
+        }
       } catch {}
     }, 15000);
     return () => clearInterval(t);
-  }, [tab, fetchList]);
+  }, [tab, debouncedSearch, fetchList, fetchCounts]);
 
   // Clear selection when tab changes
   useEffect(() => { setSelected({}); setRejectingId(null); setMessagingId(null); }, [tab]);
@@ -658,6 +714,8 @@ export default function PickupAdminPage() {
     if (q) {
       list = list.filter((r) => {
         const hay = [
+          r.id,
+          r.formNumber,
           r.guardian?.name, r.guardian?.email, r.guardian?.phone,
           ...(r.students || []).flatMap((s) => [s.name, s.firstName, s.nickname, s.dbName, s.id, s.studentId, s.homeroom, deriveGradeSelectionFromStudent(s), formatStudentFinalClass(s)]),
           ...(r.chaperones || []).flatMap((c) => [c.name, c.phone, c.email, c.idNumber]),
@@ -1109,9 +1167,8 @@ export default function PickupAdminPage() {
           ) : (
           <>
 
-          {/* #13 — Live "now at the gate" tile so admins see incoming pickups
-              without having to open the TV display. Polls the same TV feed. */}
-          <LiveGateTile />
+            {/* TV feed tile intentionally disabled for now (cost optimization). */}
+            {ENABLE_PICKUP_TV_TILE ? <LiveGateTile /> : null}
 
           {/* Stat strip */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -1141,7 +1198,7 @@ export default function PickupAdminPage() {
             )}
           </div>
 
-          <SubmissionTrackerPanel rows={submissionTracker} />
+          <SubmissionTrackerPanel rows={submissionTracker} onToast={pushToast} />
 
           {/* Tabs + search + sort row */}
           <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
@@ -1372,8 +1429,20 @@ function LiveGateTile() {
 
   useEffect(() => {
     let stop = false;
-    let timer = null;
+    let fallbackTimer = null;
+    let stream = null;
+    let reconnectTimer = null;
+    let recycleTimer = null;
+
+    const mergeEvent = (nextEvent) => {
+      setEvents((prev) => {
+        const next = [nextEvent, ...prev.filter((e) => e.id !== nextEvent.id)];
+        return next.slice(0, 6);
+      });
+    };
+
     const load = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       try {
         const r = await fetch('/api/pickup/tv/feed?limit=6');
         const j = await r.json();
@@ -1383,13 +1452,83 @@ function LiveGateTile() {
         setEvents(Array.isArray(j.events) ? j.events.slice(0, 6) : []);
       } catch (e) {
         if (!stop) setErr(e.message);
-      } finally {
-        if (!stop) timer = setTimeout(load, 4000);
       }
     };
+
+    const closeStream = () => {
+      if (stream) {
+        stream.close();
+        stream = null;
+      }
+    };
+
+    const scheduleReconnect = () => {
+      if (stop) return;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        connectStream();
+      }, 5000);
+    };
+
+    const connectStream = () => {
+      if (stop) return;
+      closeStream();
+
+      try {
+        stream = new EventSource('/api/pickup/admin/admin-event-stream');
+      } catch {
+        scheduleReconnect();
+        return;
+      }
+
+      stream.addEventListener('pickup_event', (ev) => {
+        if (stop) return;
+        try {
+          const data = JSON.parse(ev.data || '{}');
+          if (!data || !data.id) return;
+          mergeEvent(data);
+          setErr(null);
+        } catch {}
+      });
+
+      stream.onerror = () => {
+        if (stop) return;
+        scheduleReconnect();
+      };
+
+      // Recycle before serverless stream timeout to avoid silent stalls.
+      clearTimeout(recycleTimer);
+      recycleTimer = setTimeout(() => {
+        if (stop) return;
+        connectStream();
+      }, 4 * 60 * 1000);
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        load();
+        connectStream();
+      } else {
+        closeStream();
+      }
+    };
+
     load();
+    connectStream();
+    document.addEventListener('visibilitychange', onVisible);
+
+    // Safety-net hydration in case events are missed during reconnects.
+    fallbackTimer = setInterval(load, 30000);
     const tickInt = setInterval(() => setTick((n) => n + 1), 1000);
-    return () => { stop = true; if (timer) clearTimeout(timer); clearInterval(tickInt); };
+    return () => {
+      stop = true;
+      clearInterval(tickInt);
+      clearInterval(fallbackTimer);
+      clearTimeout(reconnectTimer);
+      clearTimeout(recycleTimer);
+      document.removeEventListener('visibilitychange', onVisible);
+      closeStream();
+    };
   }, []);
 
   const flagged = useMemo(
@@ -1846,345 +1985,56 @@ function StatCard({ label, value, hint, tone = 'slate', icon }) {
   );
 }
 
-function SubmissionTrackerPanel({ rows }) {
-  if (!rows?.length) return null;
+function SubmissionTrackerPanel({ onToast }) {
+  const [downloadingWb, setDownloadingWb] = useState(false);
 
-  const STATUS_LABEL = {
-    pending: 'Pending',
-    changes_requested: 'Awaiting parent',
-    approved: 'Approved',
-    rejected: 'Rejected',
+  const downloadWorkbook = async () => {
+    if (downloadingWb) return;
+    setDownloadingWb(true);
+    try {
+      const r = await fetch('/api/pickup/admin/onboarding-grade-workbook?status=all', { credentials: 'include' });
+      if (!r.ok) {
+        let msg = `export failed (${r.status})`;
+        try { const j = await r.json(); msg = j.message || j.error || msg; } catch {}
+        throw new Error(msg);
+      }
+      const blob = await r.blob();
+      const cd = r.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename="([^"]+)"/);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = m ? m[1] : 'BINUS-pickup-forms-by-class.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      onToast?.({ kind: 'ok', text: 'Workbook downloaded — one sheet per class.' });
+    } catch (e) {
+      onToast?.({ kind: 'err', text: e.message });
+    } finally {
+      setDownloadingWb(false);
+    }
   };
-
-  const [classFilter, setClassFilter] = useState('ALL');
-  const [statusFilter, setStatusFilter] = useState('ALL');
-  const [query, setQuery] = useState('');
-  const [previewSheet, setPreviewSheet] = useState(null);
-
-  const classOptions = useMemo(() => {
-    const uniq = Array.from(new Set(rows.map((r) => r.classLabel).filter(Boolean)));
-    return ['ALL', ...uniq.sort((a, b) => String(a).localeCompare(String(b)))];
-  }, [rows]);
-
-  const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return rows
-      .filter((row) => classFilter === 'ALL' || row.classLabel === classFilter)
-      .map((row) => {
-        const entries = row.entries.filter((entry) => {
-          if (statusFilter !== 'ALL' && entry.status !== statusFilter) return false;
-          if (!q) return true;
-          const hay = [
-            entry.studentName,
-            entry.parentName,
-            entry.parentEmail,
-            entry.parentPhone,
-            entry.studentId,
-            entry.classLabel,
-          ].filter(Boolean).join(' ').toLowerCase();
-          return hay.includes(q);
-        });
-        const uniqueForms = new Set(entries.map((e) => e.recordId));
-        const uniqueStudents = new Set(entries.map((e) => e.studentId || `${e.studentName}::${e.classLabel}`));
-        return {
-          ...row,
-          formsCount: uniqueForms.size,
-          studentsCount: uniqueStudents.size,
-          entries,
-        };
-      })
-      .filter((row) => row.entries.length > 0);
-  }, [rows, classFilter, statusFilter, query]);
-
-  const exportRowsCsv = (rowsToExport, filenamePrefix = 'pickup-class-sheet') => {
-    const csvEscape = (value) => {
-      const raw = String(value ?? '');
-      if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
-      return raw;
-    };
-
-    const header = [
-      'No',
-      'Class',
-      'Student Name',
-      'Student ID',
-      'Parent Name',
-      'Parent Phone',
-      'Parent Email',
-      'Current Submission Status',
-      'Submitted At',
-      'Follow-up Priority',
-      'Contact Attempt 1',
-      'Contact Attempt 2',
-      'Parent Response',
-      'Required Docs Missing',
-      'Action Owner',
-      'Action Deadline',
-      'Teacher Acknowledged',
-      'ACOP Note',
-    ];
-
-    const lines = [header.join(',')];
-    let seq = 1;
-    rowsToExport.forEach((row) => {
-      row.entries.forEach((entry) => {
-        lines.push([
-          seq++,
-          row.classLabel,
-          entry.studentName,
-          entry.studentId || '',
-          entry.parentName,
-          entry.parentPhone || '',
-          entry.parentEmail || '',
-          STATUS_LABEL[entry.status] || entry.status,
-          fmtTime(entry.submittedAt),
-          '',
-          '',
-          '',
-          '',
-          '',
-          '',
-          '',
-          '',
-          '',
-        ].map(csvEscape).join(','));
-      });
-    });
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportClassCsv = (row) => {
-    const cls = String(row.classLabel || 'class').replace(/[^A-Za-z0-9_-]+/g, '-');
-    exportRowsCsv([row], `pickup-class-sheet-${cls}`);
-  };
-
-  const previewRows = useMemo(() => {
-    if (!previewSheet) return [];
-    return (previewSheet.entries || []).map((entry, idx) => ({
-      no: idx + 1,
-      classLabel: previewSheet.classLabel,
-      studentName: entry.studentName,
-      studentId: entry.studentId || '',
-      parentName: entry.parentName,
-      parentPhone: entry.parentPhone || '',
-      parentEmail: entry.parentEmail || '',
-      status: STATUS_LABEL[entry.status] || entry.status,
-      submittedAt: fmtTime(entry.submittedAt),
-    }));
-  }, [previewSheet]);
 
   return (
     <div className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/45 backdrop-blur p-4">
-      <div className="flex items-start justify-between gap-3 mb-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-sm font-semibold text-white">Independent Class Sheets</h3>
+          <h3 className="text-sm font-semibold text-white">Centralized Workbook Export</h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Teacher-ready follow-up sheets. Preview first, then download a richer class template.
+            Download all classes and names in one Excel file.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-[11px]">
-          <span className="text-[11px] px-2 py-1 rounded-full border border-slate-700 bg-slate-800/70 text-slate-300">
-            {filteredRows.length} classes
-          </span>
-          <span className="text-slate-500">Preview before downloading is required.</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-3">
-        <select
-          value={classFilter}
-          onChange={(e) => setClassFilter(e.target.value)}
-          className="bg-slate-900/70 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-200"
+        <button
+          type="button"
+          onClick={downloadWorkbook}
+          disabled={downloadingWb}
+          className="text-[11px] px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30 font-semibold disabled:opacity-50 whitespace-nowrap"
         >
-          {classOptions.map((opt) => (
-            <option key={opt} value={opt}>{opt === 'ALL' ? 'All classes' : opt}</option>
-          ))}
-        </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-slate-900/70 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-200"
-        >
-          <option value="ALL">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="changes_requested">Awaiting parent</option>
-          <option value="approved">Approved</option>
-          <option value="rejected">Rejected</option>
-        </select>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search student / parent / phone"
-          className="md:col-span-2 bg-slate-900/70 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-white placeholder-slate-500"
-        />
+          <i className={`ph ${downloadingWb ? 'ph-circle-notch animate-spin' : 'ph-microsoft-excel-logo'} mr-1`}></i>
+          {downloadingWb ? 'Preparing…' : 'Download All (Excel)'}
+        </button>
       </div>
-
-      <div className="space-y-2 max-h-[30rem] overflow-y-auto pr-1">
-        {filteredRows.map((row) => (
-          <details key={`sheet-${row.classLabel}`} className="rounded-xl border border-slate-800/90 bg-slate-950/35" open={classFilter !== 'ALL'}>
-            <summary className="list-none cursor-pointer px-3 py-2.5 flex items-center justify-between gap-3">
-              <div className="inline-flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-semibold px-2 py-1 rounded-md bg-brand-500/20 border border-brand-500/35 text-brand-200">
-                  {row.classLabel}
-                </span>
-                <span className="text-xs text-slate-300">{row.formsCount} forms</span>
-                <span className="text-xs text-slate-400">{row.studentsCount} students</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/25 text-amber-300">P {row.statusCounts.pending || 0}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 border border-orange-500/25 text-orange-300">A {row.statusCounts.changes_requested || 0}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25 text-emerald-300">OK {row.statusCounts.approved || 0}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/25 text-red-300">X {row.statusCounts.rejected || 0}</span>
-              </div>
-              <div className="inline-flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPreviewSheet(row); }}
-                  className="text-[11px] px-2.5 py-1 rounded-md bg-violet-500/20 border border-violet-500/35 text-violet-200 hover:bg-violet-500/30"
-                >
-                  <i className="ph ph-eye mr-1"></i>Preview Template
-                </button>
-                <i className="ph ph-caret-down text-slate-500"></i>
-              </div>
-            </summary>
-            <div className="px-3 pb-3 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-slate-400 border-b border-slate-800">
-                    <th className="text-left py-1.5 pr-2 font-medium">Student</th>
-                    <th className="text-left py-1.5 pr-2 font-medium">Parent</th>
-                    <th className="text-left py-1.5 pr-2 font-medium">Status</th>
-                    <th className="text-left py-1.5 pr-2 font-medium">Submitted</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {row.entries.map((entry, idx) => (
-                    <tr key={`${row.classLabel}-sheet-${idx}`} className="border-b border-slate-900/80 last:border-0">
-                      <td className="py-1.5 pr-2 text-white">
-                        <div className="font-medium">{entry.studentName}</div>
-                        {entry.studentId && <div className="text-[10px] text-slate-500">{entry.studentId}</div>}
-                      </td>
-                      <td className="py-1.5 pr-2 text-slate-300">
-                        <div>{entry.parentName}</div>
-                        <div className="text-[10px] text-slate-500 truncate">{entry.parentPhone || entry.parentEmail || '—'}</div>
-                      </td>
-                      <td className="py-1.5 pr-2">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 bg-slate-800/70 text-slate-200">
-                          {STATUS_LABEL[entry.status] || entry.status}
-                        </span>
-                      </td>
-                      <td className="py-1.5 pr-2 text-slate-400">{fmtTime(entry.submittedAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        ))}
-
-        {filteredRows.length === 0 && (
-          <div className="rounded-xl border border-slate-800/90 bg-slate-950/35 p-4 text-xs text-slate-400 text-center">
-            No class sheets match the current filters.
-          </div>
-        )}
-      </div>
-
-      {previewSheet && (
-        <div className="fixed inset-0 z-[90] bg-black/70 backdrop-blur-[2px] p-4 overflow-y-auto">
-          <div className="max-w-6xl mx-auto mt-6 rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/40">
-            <div className="px-5 py-4 border-b border-slate-800 bg-gradient-to-r from-brand-600/20 via-slate-900/30 to-cyan-500/10">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[11px] uppercase tracking-widest text-brand-200/90">Template Preview</p>
-                  <h4 className="text-lg font-semibold text-white">Independent Class Sheet · {previewSheet.classLabel}</h4>
-                  <p className="text-xs text-slate-400 mt-1">Review this formatted template before downloading.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPreviewSheet(null)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800"
-                >
-                  <i className="ph ph-x"></i>
-                </button>
-              </div>
-            </div>
-
-            <div className="px-5 py-4 space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
-                <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2"><span className="text-slate-500">Class</span><div className="text-slate-200 font-semibold">{previewSheet.classLabel}</div></div>
-                <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2"><span className="text-slate-500">Forms</span><div className="text-slate-200 font-semibold">{previewSheet.formsCount}</div></div>
-                <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2"><span className="text-slate-500">Students</span><div className="text-slate-200 font-semibold">{previewSheet.studentsCount}</div></div>
-                <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-2"><span className="text-slate-500">Generated</span><div className="text-slate-200 font-semibold">{new Date().toLocaleString()}</div></div>
-              </div>
-
-              <div className="overflow-x-auto rounded-xl border border-slate-800">
-                <table className="min-w-[1100px] w-full text-xs">
-                  <thead className="bg-slate-900/80 text-slate-300">
-                    <tr>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">No</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Student</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Parent</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Status</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Submitted</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Priority</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Attempt 1</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Attempt 2</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Response</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Owner</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Deadline</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">Teacher Ack</th>
-                      <th className="text-left px-3 py-2 border-b border-slate-800">ACOP Note</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewRows.map((r) => (
-                      <tr key={`${r.classLabel}-${r.no}`} className="odd:bg-slate-950 even:bg-slate-900/35">
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-400">{r.no}</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-white">{r.studentName}<div className="text-[10px] text-slate-500">{r.studentId || '—'}</div></td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-300">{r.parentName}<div className="text-[10px] text-slate-500 truncate">{r.parentPhone || r.parentEmail || '—'}</div></td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-300">{r.status}</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-400">{r.submittedAt}</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600">__________</td>
-                        <td className="px-3 py-2 border-b border-slate-900 text-slate-600 min-w-[160px]">________________________________</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="px-5 py-3 border-t border-slate-800 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setPreviewSheet(null)}
-                className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 text-sm"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() => exportClassCsv(previewSheet)}
-                className="px-3 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30 text-sm font-semibold"
-              >
-                <i className="ph ph-download-simple mr-1"></i>Download Class Template
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -19,9 +19,11 @@ const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
 
 const PAIRING_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const PAIRING_TTL_SEC = PAIRING_TTL_MS / 1000;
+const TV_ENABLED = String(process.env.PICKUP_TV_FEED_ENABLED || 'false').toLowerCase() !== 'false';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
+  if (!TV_ENABLED) return res.status(503).json({ error: 'tv_disabled' });
 
   // Per-IP rate limit: a TV needs ~1 start-pair per session, so 6/min is generous.
   const ip = clientIp(req);

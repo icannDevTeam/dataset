@@ -20,8 +20,11 @@ const kp = require('../../../../lib/kiosk-profiles');
 const { maybeSeedPickupDemoOnClaim } = require('../../../../lib/pickup-demo-seeder');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
 
+const TV_ENABLED = String(process.env.PICKUP_TV_FEED_ENABLED || 'false').toLowerCase() !== 'false';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
+  if (!TV_ENABLED) return res.status(503).json({ error: 'tv_disabled' });
   const code = td.normalizeKioskCode(req.body?.kioskCode);
   if (!code) return res.status(400).json({ error: 'kioskCode required' });
 

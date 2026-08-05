@@ -282,6 +282,7 @@ function EditChaperoneModal({ open, chaperone, onCancel, onSave, busy }) {
 export default function ChaperonesPage() {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filterClass, setFilterClass] = useState('all');
   const [filterGrade, setFilterGrade] = useState('all');
   const [showDeleted, setShowDeleted] = useState(false);
@@ -296,10 +297,19 @@ export default function ChaperonesPage() {
   const [editTarget, setEditTarget] = useState(null);
   const [editBusy, setEditBusy] = useState(false);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
   const load = useCallback(() => {
     setLoading(true);
     const qs = new URLSearchParams({ status: filter });
     if (showDeleted) qs.set('includeDeleted', '1');
+    if (debouncedSearch) {
+      qs.set('q', debouncedSearch);
+      qs.set('limit', '300');
+    }
     fetch(`/api/pickup/admin/chaperones-list?${qs.toString()}`)
       .then((r) => r.json().then((j) => ({ r, j })))
       .then(({ r, j }) => {
@@ -308,7 +318,7 @@ export default function ChaperonesPage() {
       })
       .catch((e) => setErr(e.message))
       .finally(() => setLoading(false));
-  }, [filter, showDeleted]);
+  }, [filter, showDeleted, debouncedSearch]);
   useEffect(load, [load]);
 
   const visible = useMemo(() => {

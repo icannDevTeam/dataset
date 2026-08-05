@@ -23,12 +23,7 @@ import { withApi } from '../../../../lib/api-auth';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 
 const tenancy = require('../../../../lib/tenancy');
-
-function gradeOf(homeroom) {
-  if (!homeroom) return null;
-  const m = String(homeroom).match(/^(\d{1,2})/);
-  return m ? parseInt(m[1], 10) : null;
-}
+const { deriveGradeBucket, normalizeHomeroom } = require('../../../../lib/grade-utils');
 
 function tsToIso(v) {
   if (!v) return null;
@@ -40,12 +35,18 @@ function tsToIso(v) {
 
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+  return res.status(410).json({
+    error: 'disabled_for_cost_control',
+    message: 'Forms export is temporarily disabled for cost control. Use dashboard statistics.',
+  });
+
   const status = String(req.query.status || 'all');
-  const grade = req.query.grade ? parseInt(req.query.grade, 10) : null;
-  const homeroom = req.query.homeroom ? String(req.query.homeroom).toUpperCase() : null;
+  const grade = req.query.grade ? String(req.query.grade).trim().toUpperCase() : null;
+  const homeroom = req.query.homeroom ? normalizeHomeroom(String(req.query.homeroom)) : null;
   const studentId = req.query.studentId ? String(req.query.studentId) : null;
   const from = req.query.from ? String(req.query.from) : null;
   const to = req.query.to ? String(req.query.to) : null;
+  const fetchCap = Math.max(50, Math.min(100, parseInt(req.query.fetchCap || '100', 10)));
   const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
 
   try {
@@ -53,7 +54,7 @@ async function handler(req, res) {
     const db = admin.firestore();
     let q = db.collection(tenancy.pickupOnboardingPath(tid));
     if (status !== 'all') q = q.where('status', '==', status);
-    const snap = await q.limit(2000).get();
+    const snap = await q.limit(fetchCap).get();
 
     const records = [];
     snap.forEach((d) => {
@@ -68,9 +69,10 @@ async function handler(req, res) {
 
       // Apply student-level filters: at least one student must match
       const matchStudent = students.some((s) => {
+        const studentGrade = deriveGradeBucket({ homeroom: s.homeroom });
         if (studentId && s.id !== studentId) return false;
-        if (homeroom && (s.homeroom || '').toUpperCase() !== homeroom) return false;
-        if (grade != null && gradeOf(s.homeroom) !== grade) return false;
+        if (homeroom && normalizeHomeroom(s.homeroom || '') !== homeroom) return false;
+        if (grade != null && studentGrade !== grade) return false;
         return true;
       });
       if (!matchStudent && (studentId || homeroom || grade != null)) return;

@@ -23,19 +23,6 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    label: 'Management',
-    items: [
-      { icon: 'ph-user-circle-plus', label: 'Enrollment', children: [
-        { href: '/enrollment', label: 'Dataset Capture' },
-        { href: '/mobile-enrollment', label: 'Mobile Enrollment' },
-      ]},
-      { href: '/device-manager', icon: 'ph-cpu', label: 'Device Manager' },
-      { href: '/attendance-monitor', icon: 'ph-list-checks', label: 'Attendance Monitor' },
-      { href: '/hikvision', icon: 'ph-fingerprint', label: 'Hikvision' },
-      { href: '/v2/device-sync', icon: 'ph-cloud-arrow-down', label: 'Device Sync' },
-    ],
-  },
-  {
     label: 'Pickup System',
     items: [
       { href: '/v2/pickup-admin', icon: 'ph-hand-waving', label: 'Onboarding Review', badgeKey: 'pickupPending' },
@@ -43,13 +30,14 @@ const NAV_SECTIONS = [
       { href: '/v2/email-hub', icon: 'ph-megaphone', label: 'Email Hub' },
       { href: '/v2/student-class-management', icon: 'ph-student', label: 'Student & Class Management' },
       { href: '/v2/pickup-enroll', icon: 'ph-fingerprint', label: 'Chaperone Enrolment' },
+      { href: '/v2/pickup-map', icon: 'ph-map-pin', label: 'Chaperone Map' },
+      { href: '/v2/terminal-assignments', icon: 'ph-shuffle', label: 'Terminal Assignments' },
       { href: '/v2/terminals', icon: 'ph-fingerprint', label: 'Terminals' },
       { href: '/v2/release-groups', icon: 'ph-device-tablet-speaker', label: 'Release Groups (iPads)' },
       { href: '/v2/pickup-admin?view=settings', icon: 'ph-sliders', label: 'Pickup Settings' },
       { href: '/v2/chaperones', icon: 'ph-users-three', label: 'Chaperones' },
       { href: '/v2/officer-overrides', icon: 'ph-shield-check', label: 'Officer Overrides' },
       { href: '/v2/security', icon: 'ph-shield-warning', label: 'Security Heatmap' },
-      { href: '/v2/pickup-monitor', icon: 'ph-activity', label: 'System Monitor' },
       { href: '/v2/pickup-ops', icon: 'ph-terminal-window', label: 'Operations Interface' },
       { href: '/v2/system-interfaces', icon: 'ph-plugs-connected', label: 'Service Interfaces' },
     ],
@@ -94,6 +82,7 @@ export default function V2Layout({ children }) {
     if (!user) return;
     let cancelled = false;
     const fetchPending = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       try {
         const r = await fetch('/api/pickup/admin/onboarding-list?status=pending&limit=1', { credentials: 'include' });
         if (!r.ok) return;
@@ -102,8 +91,18 @@ export default function V2Layout({ children }) {
       } catch {}
     };
     fetchPending();
-    const t = setInterval(fetchPending, 15000);
-    return () => { cancelled = true; clearInterval(t); };
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchPending();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    const t = setInterval(fetchPending, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [user]);
 
   useEffect(() => {
@@ -152,7 +151,7 @@ export default function V2Layout({ children }) {
               BINUS School Simprug
             </span>
             <span className="text-[10px] text-slate-400 leading-tight block">
-              Attendance Monitoring
+              Operations Console
             </span>
           </div>
         )}
