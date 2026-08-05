@@ -115,7 +115,7 @@ async function resolveGroupTerminalRefs(db, tid, rawRefs) {
   return { terminalIds, terminalKeys: [...terminalKeys], queryKeys };
 }
 
-const DISMISSAL_START_MIN = 13 * 60; // 13:00 WIB
+const DISMISSAL_START_MIN = 12 * 60; // 12:00 WIB (EY dismissal is 12:30)
 const DISMISSAL_END_MIN   = 17 * 60; // 17:00 WIB
 const DISMISSAL_WINDOW_ENABLED = true;
 

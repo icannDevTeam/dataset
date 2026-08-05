@@ -21,8 +21,8 @@ const POLL_MS_LIVE = 60_000;     // when SSE is healthy (just a safety net)
 const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 
 // SO dismissal polling window — active only between these WIB times.
-// 30-min buffer before 13:30 dismissal, 1-hr buffer after 16:00 end.
-const DISMISSAL_START_HHMM = '13:00';
+// EY dismisses at 12:30 (earliest), so open at 12:00; 1-hr buffer after 16:00 end.
+const DISMISSAL_START_HHMM = '12:00';
 const DISMISSAL_END_HHMM   = '17:00';
 
 function wibMinutes() {
