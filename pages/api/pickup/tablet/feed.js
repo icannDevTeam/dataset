@@ -78,6 +78,7 @@ async function resolveGroupTerminalRefs(db, tid, rawRefs) {
   const terminalIds = [];
   const terminalIdSet = new Set();
   const terminalKeys = new Set();
+  const unmatchedKeys = new Set();
 
   for (const raw of collectTerminalRefs(rawRefs)) {
     const token = String(raw || '').trim();
@@ -91,6 +92,7 @@ async function resolveGroupTerminalRefs(db, tid, rawRefs) {
       for (const k of aliasesById.get(matchedId) || []) terminalKeys.add(k);
     } else {
       terminalKeys.add(token);
+      unmatchedKeys.add(token);
     }
   }
 
@@ -104,7 +106,13 @@ async function resolveGroupTerminalRefs(db, tid, rawRefs) {
     }
   }
 
-  return { terminalIds, terminalKeys: [...terminalKeys] };
+  // queryKeys: what we actually query pickup_events.terminalId against.
+  // Events stamp the CANONICAL registry id (verified 2026-08-05: 97% canonical,
+  // rest are stale deleted-terminal ids that arrive via unmatched refs), so
+  // querying every alias (name/ip/deviceName) just multiplied reads ~5x.
+  const queryKeys = [...new Set([...terminalIds, ...unmatchedKeys])];
+
+  return { terminalIds, terminalKeys: [...terminalKeys], queryKeys };
 }
 
 const DISMISSAL_START_MIN = 13 * 60; // 13:00 WIB
@@ -172,7 +180,7 @@ export default async function handler(req, res) {
     const group = groupSnap.data();
     const resolvedRefs = await resolveGroupTerminalRefs(db, tid, group.terminalIds);
     const terminalIds = resolvedRefs.terminalIds;
-    const terminalKeys = resolvedRefs.terminalKeys;
+    const queryKeys = resolvedRefs.queryKeys;
     if (terminalIds.length === 0) {
       return res.status(200).json({
         ok: true,
@@ -183,8 +191,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // Touch lastSeenAt
-    dev.ref.set({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+    // Touch lastSeenAt — at most once a minute, not on every poll.
+    const lastSeenMs = devData.lastSeenAt?.toMillis ? devData.lastSeenAt.toMillis() : 0;
+    if (Date.now() - lastSeenMs > 60_000) {
+      dev.ref.set({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+    }
 
     // Union of gradeScopes across the group's terminals — used to hide
     // wrong-gate cards (e.g. EY parent scanning at a Grade 4/5 pole) even if
@@ -228,7 +239,7 @@ export default async function handler(req, res) {
           .where('terminalId', '==', tidx)
           .where('recordedAt', '>=', cutoffTs)
           .orderBy('recordedAt', 'desc')
-          .limit(50).get();
+          .limit(25).get();
       } catch (e) {
         // Composite index might not exist yet on older tenants — fall back
         // without the time range so the feed still works.
@@ -236,17 +247,17 @@ export default async function handler(req, res) {
           return await db.collection(tenancy.pickupEventsPath(tid))
             .where('terminalId', '==', tidx)
             .orderBy('recordedAt', 'desc')
-            .limit(50).get();
+            .limit(25).get();
         } catch {
           return db.collection(tenancy.pickupEventsPath(tid))
             .where('terminalId', '==', tidx)
-            .limit(50).get();
+            .limit(25).get();
         }
       }
     };
 
     const perTerm = await Promise.all(
-      terminalKeys.slice(0, 50).map((tidx) => fetchTerminalDocs(tidx))
+      queryKeys.slice(0, 10).map((tidx) => fetchTerminalDocs(tidx))
     );
     const releaseGroupDocs = await (async () => {
       try {
@@ -254,20 +265,20 @@ export default async function handler(req, res) {
           .where('releaseGroupId', '==', releaseGroupId)
           .where('recordedAt', '>=', cutoffTs)
           .orderBy('recordedAt', 'desc')
-          .limit(50)
+          .limit(40)
           .get();
       } catch {
         try {
           return await db.collection(tenancy.pickupEventsPath(tid))
             .where('releaseGroupId', '==', releaseGroupId)
             .orderBy('recordedAt', 'desc')
-            .limit(50)
+            .limit(40)
             .get();
         } catch {
           try {
             return await db.collection(tenancy.pickupEventsPath(tid))
               .where('releaseGroupId', '==', releaseGroupId)
-              .limit(50)
+              .limit(40)
               .get();
           } catch {
             return { docs: [] };

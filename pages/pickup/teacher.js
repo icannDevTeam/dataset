@@ -16,8 +16,8 @@
 import Head from 'next/head';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const POLL_MS = 2500;            // when SSE is offline
-const POLL_MS_LIVE = 15_000;     // when SSE is healthy (just a safety net)
+const POLL_MS = 10_000;          // when SSE is offline (fallback hydration)
+const POLL_MS_LIVE = 60_000;     // when SSE is healthy (just a safety net)
 const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 
 // SO dismissal polling window — active only between these WIB times.
@@ -1150,7 +1150,7 @@ export default function TeacherTabletPage() {
   useEffect(() => {
     if (!token || !identity || !inWindow || isPreviewRef.current) return;
     pollFeed();
-    // Cadence depends on SSE health: 2.5s when offline (fallback), 15s when
+    // Cadence depends on SSE health: 10s when offline (fallback), 60s when
     // the SSE channel is delivering live events. The SSE effect below adjusts
     // sseLive which retriggers this effect via dep array.
     const interval = sseLive ? POLL_MS_LIVE : POLL_MS;
