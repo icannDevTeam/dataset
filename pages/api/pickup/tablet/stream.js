@@ -24,6 +24,7 @@ import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
 const bus = require('../../../../lib/pickup-event-bus');
+const { effectiveGateStatus } = require('../../../../lib/terminal-gate');
 
 // Allow long-lived connections on Vercel Node runtime.
 export const config = {
@@ -108,21 +109,10 @@ async function resolveGroupTerminalRefs(db, tid, rawRefs) {
   return { terminalIds, terminalKeys: [...terminalKeys] };
 }
 
-const DISMISSAL_START_MIN = 12 * 60; // 12:00 WIB (EY dismissal is 12:30)
-const DISMISSAL_END_MIN   = 17 * 60; // 17:00 WIB
-const DISMISSAL_WINDOW_ENABLED = true;
-
 export default async function handler(req, res) {
   if (req.method !== 'GET') { res.status(405).json({ error: 'method' }); return; }
   const token = req.headers['x-tablet-device-token'] || req.query.deviceToken;
   if (!token) { res.status(401).json({ error: 'deviceToken required' }); return; }
-
-  const wibNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
-  const wibMin = wibNow.getUTCHours() * 60 + wibNow.getUTCMinutes();
-  if (!DISMISSAL_WINDOW_ENABLED || wibMin < DISMISSAL_START_MIN || wibMin >= DISMISSAL_END_MIN) {
-    res.status(200).json({ ok: false, inWindow: false });
-    return;
-  }
 
   let tid, terminalIds = [], terminalKeys = [], gradeScopes = [], releaseGroupId = null;
   try {
@@ -168,6 +158,9 @@ export default async function handler(req, res) {
     terminalIds = resolvedRefs.terminalIds;
     terminalKeys = resolvedRefs.terminalKeys;
 
+    const pickupSettingsSnap = await db.document(tenancy.pickupSettingsDoc(tid)).get().catch(() => null);
+    const pickupSettings = pickupSettingsSnap?.exists ? (pickupSettingsSnap.data() || {}) : {};
+
     // Union of the group's terminal gradeScopes — lets the bus drop
     // wrong-gate cards (e.g. EY parent at a Grade 4/5 pole).
     if (terminalIds.length > 0) {
@@ -175,6 +168,14 @@ export default async function handler(req, res) {
         const termSnaps = await db.getAll(
           ...terminalIds.slice(0, 30).map((tidx) => db.doc(tenancy.terminalDoc(tidx, tid)))
         );
+        const terminalDocs = termSnaps.filter((s) => s.exists).map((s) => ({ id: s.id, ...(s.data() || {}) }));
+        const inWindow = terminalDocs
+          .map((t) => effectiveGateStatus(t, group, new Date(), pickupSettings))
+          .some((s) => !!s.open);
+        if (!inWindow) {
+          res.status(200).json({ ok: false, inWindow: false });
+          return;
+        }
         const set = new Set();
         termSnaps.forEach((s) => {
           if (!s.exists) return;
@@ -182,7 +183,12 @@ export default async function handler(req, res) {
           if (Array.isArray(sc)) sc.forEach((g) => { const v = String(g).trim().toUpperCase(); if (v) set.add(v); });
         });
         gradeScopes = [...set];
-      } catch { gradeScopes = []; }
+      } catch {
+        gradeScopes = [];
+      }
+    } else {
+      res.status(200).json({ ok: false, inWindow: false });
+      return;
     }
 
     // Touch lastSeenAt (best-effort, non-blocking).

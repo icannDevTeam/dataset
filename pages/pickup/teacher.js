@@ -20,10 +20,9 @@ const POLL_MS = 10_000;          // when SSE is offline (fallback hydration)
 const POLL_MS_LIVE = 60_000;     // when SSE is healthy (just a safety net)
 const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 
-// SO dismissal polling window — active only between these WIB times.
-// EY dismisses at 12:30 (earliest), so open at 12:00; 1-hr buffer after 16:00 end.
+// Local fallback only; server feed is authoritative per pole window.
 const DISMISSAL_START_HHMM = '12:00';
-const DISMISSAL_END_HHMM   = '17:00';
+const DISMISSAL_END_HHMM   = '15:30';
 
 function wibMinutes() {
   const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -839,6 +838,8 @@ export default function TeacherTabletPage() {
   const [showInstall, setShowInstall] = useState(false);
   const [sseLive, setSseLive] = useState(false);
   const [inWindow, setInWindow] = useState(isInDismissalWindow);
+  const [windowLabel, setWindowLabel] = useState({ open: DISMISSAL_START_HHMM, close: DISMISSAL_END_HHMM });
+  const serverClosedRef = useRef(false);
   const pollRef = useRef(null);
   const isPreviewRef = useRef(false);
 
@@ -1117,9 +1118,19 @@ export default function TeacherTabletPage() {
     return () => { cancelled = true; };
   }, [token]);
 
-  // Re-check dismissal window every 30s so the UI wakes up automatically at 13:00.
+  // Re-check every 30s; if server closed this pole, keep it closed.
   useEffect(() => {
-    const t = setInterval(() => setInWindow(isInDismissalWindow()), 30_000);
+    const t = setInterval(() => {
+      const local = isInDismissalWindow();
+      setInWindow(() => {
+        if (!local) {
+          serverClosedRef.current = false;
+          return false;
+        }
+        if (serverClosedRef.current) return false;
+        return true;
+      });
+    }, 30_000);
     return () => clearInterval(t);
   }, []);
 
@@ -1133,6 +1144,21 @@ export default function TeacherTabletPage() {
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (j.windowOpen || j.windowClose) {
+        setWindowLabel({
+          open: j.windowOpen || DISMISSAL_START_HHMM,
+          close: j.windowClose || DISMISSAL_END_HHMM,
+        });
+      }
+      if (typeof j.inWindow === 'boolean') {
+        serverClosedRef.current = !j.inWindow;
+        setInWindow(j.inWindow);
+        if (!j.inWindow) {
+          setFeed({ active: [], held: [], todayReleased: 0 });
+          setErr(null);
+          return;
+        }
+      }
       setFeed({ active: j.active || [], held: j.held || [], todayReleased: j.todayReleased || 0 });
       // Track most recent activity timestamp for the standby hero
       const latest = [...(j.active || []), ...(j.held || [])]
@@ -1329,7 +1355,7 @@ export default function TeacherTabletPage() {
               Dismissal not active
             </div>
             <div style={{ fontSize: 15, color: '#64748b', marginBottom: 4 }}>
-              Active window: {DISMISSAL_START_HHMM} &ndash; {DISMISSAL_END_HHMM} WIB
+              Active window: {windowLabel.open} &ndash; {windowLabel.close} WIB
             </div>
             {identity?.releaseGroupName && (
               <div style={{ fontSize: 13, color: '#475569', marginTop: 12 }}>

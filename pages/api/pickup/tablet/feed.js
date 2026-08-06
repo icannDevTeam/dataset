@@ -19,6 +19,7 @@
 import admin from 'firebase-admin';
 import { initializeFirebase, getFirebaseStorage } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
+const { effectiveGateStatus } = require('../../../../lib/terminal-gate');
 const { shapePickupEvent, SILENT_ON_IPAD, eventMatchesScopes } = require('../../../../lib/shape-pickup-event');
 
 const WINDOW_MS = 30 * 60 * 1000;
@@ -115,27 +116,40 @@ async function resolveGroupTerminalRefs(db, tid, rawRefs) {
   return { terminalIds, terminalKeys: [...terminalKeys], queryKeys };
 }
 
-const DISMISSAL_START_MIN = 12 * 60; // 12:00 WIB (EY dismissal is 12:30)
-const DISMISSAL_END_MIN   = 17 * 60; // 17:00 WIB
-const DISMISSAL_WINDOW_ENABLED = true;
+function hhmmToMinutes(s) {
+  if (!s || typeof s !== 'string') return null;
+  const [h, m] = s.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return (h * 60) + m;
+}
 
-function currentWibMinutes() {
-  const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
-  return now.getUTCHours() * 60 + now.getUTCMinutes();
+function summarizeWindow(gateStates) {
+  const windows = gateStates
+    .map((s) => ({
+      open: s?.scheduled?.opensAt || null,
+      close: s?.scheduled?.closesAt || null,
+    }))
+    .filter((w) => w.open && w.close);
+  if (windows.length === 0) return { windowOpen: null, windowClose: null };
+
+  const starts = windows
+    .map((w) => hhmmToMinutes(w.open))
+    .filter((v) => Number.isInteger(v));
+  const closes = windows
+    .map((w) => hhmmToMinutes(w.close))
+    .filter((v) => Number.isInteger(v));
+  if (!starts.length || !closes.length) return { windowOpen: null, windowClose: null };
+
+  const minStart = Math.min(...starts);
+  const maxClose = Math.max(...closes);
+  const fmt = (v) => `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+  return { windowOpen: fmt(minStart), windowClose: fmt(maxClose) };
 }
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
   const token = req.headers['x-tablet-device-token'] || req.query.deviceToken;
   if (!token) return res.status(401).json({ error: 'deviceToken required' });
-
-  const wibMin = currentWibMinutes();
-  if (!DISMISSAL_WINDOW_ENABLED || wibMin < DISMISSAL_START_MIN || wibMin >= DISMISSAL_END_MIN) {
-    return res.status(200).json({
-      ok: true, inWindow: false, now: new Date().toISOString(),
-      active: [], held: [], todayReleased: 0, releaseGroup: null,
-    });
-  }
 
   try {
     initializeFirebase();
@@ -184,10 +198,14 @@ export default async function handler(req, res) {
     if (terminalIds.length === 0) {
       return res.status(200).json({
         ok: true,
+        inWindow: false,
         now: new Date().toISOString(),
+        windowOpen: null,
+        windowClose: null,
         releaseGroup: { id: releaseGroupId, name: group.name, gradeLabel: group.gradeLabel, terminalIds: [] },
         active: [],
         held: [],
+        todayReleased: 0,
       });
     }
 
@@ -197,20 +215,50 @@ export default async function handler(req, res) {
       dev.ref.set({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
     }
 
+    const pickupSettingsSnap = await db.document(tenancy.pickupSettingsDoc(tid)).get().catch(() => null);
+    const pickupSettings = pickupSettingsSnap?.exists ? (pickupSettingsSnap.data() || {}) : {};
+
     // Union of gradeScopes across the group's terminals — used to hide
     // wrong-gate cards (e.g. EY parent scanning at a Grade 4/5 pole) even if
     // the edge writer didn't stamp decision='wrong_terminal'.
+    let terminalDocs = [];
     let groupScopes = new Set();
     try {
       const termSnaps = await db.getAll(
         ...terminalIds.slice(0, 30).map((tidx) => db.doc(tenancy.terminalDoc(tidx, tid)))
       );
+      terminalDocs = termSnaps.filter((s) => s.exists).map((s) => ({ id: s.id, ...(s.data() || {}) }));
       termSnaps.forEach((s) => {
         if (!s.exists) return;
         const sc = (s.data() || {}).gradeScopes;
         if (Array.isArray(sc)) sc.forEach((g) => { const v = String(g).trim().toUpperCase(); if (v) groupScopes.add(v); });
       });
-    } catch { groupScopes = new Set(); }
+    } catch {
+      groupScopes = new Set();
+      terminalDocs = [];
+    }
+
+    const gateStates = terminalDocs.map((t) => effectiveGateStatus(t, group, new Date(), pickupSettings));
+    const inWindow = gateStates.length > 0 ? gateStates.some((s) => !!s.open) : false;
+    const { windowOpen, windowClose } = summarizeWindow(gateStates);
+    if (!inWindow) {
+      return res.status(200).json({
+        ok: true,
+        inWindow: false,
+        now: new Date().toISOString(),
+        windowOpen,
+        windowClose,
+        releaseGroup: {
+          id: releaseGroupId,
+          name: group.name,
+          gradeLabel: group.gradeLabel,
+          terminalIds,
+        },
+        active: [],
+        held: [],
+        todayReleased: 0,
+      });
+    }
 
     const sinceMs = req.query.since ? new Date(String(req.query.since)).getTime() : null;
     const wibNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -343,7 +391,10 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     return res.status(200).json({
       ok: true,
+      inWindow: true,
       now: new Date().toISOString(),
+      windowOpen,
+      windowClose,
       releaseGroup: {
         id: releaseGroupId,
         name: group.name,
