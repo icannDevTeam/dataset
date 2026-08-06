@@ -215,7 +215,7 @@ export default async function handler(req, res) {
       dev.ref.set({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
     }
 
-    const pickupSettingsSnap = await db.document(tenancy.pickupSettingsDoc(tid)).get().catch(() => null);
+    const pickupSettingsSnap = await db.doc(tenancy.pickupSettingsDoc(tid)).get().catch(() => null);
     const pickupSettings = pickupSettingsSnap?.exists ? (pickupSettingsSnap.data() || {}) : {};
 
     // Union of gradeScopes across the group's terminals — used to hide

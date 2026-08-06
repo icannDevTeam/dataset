@@ -158,7 +158,7 @@ export default async function handler(req, res) {
     terminalIds = resolvedRefs.terminalIds;
     terminalKeys = resolvedRefs.terminalKeys;
 
-    const pickupSettingsSnap = await db.document(tenancy.pickupSettingsDoc(tid)).get().catch(() => null);
+    const pickupSettingsSnap = await db.doc(tenancy.pickupSettingsDoc(tid)).get().catch(() => null);
     const pickupSettings = pickupSettingsSnap?.exists ? (pickupSettingsSnap.data() || {}) : {};
 
     // Union of the group's terminal gradeScopes — lets the bus drop
