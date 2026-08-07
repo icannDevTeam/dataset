@@ -110,6 +110,12 @@ async function handler(req, res) {
       const ref = colRef.doc(id);
       const exists = await ref.get();
       if (!exists.exists) return res.status(404).json({ error: 'Profile not found' });
+      const current = exists.data() || {};
+      const finalWindowOpen = data.windowOpen !== null ? data.windowOpen : (current.windowOpen || null);
+      const finalWindowClose = data.windowClose !== null ? data.windowClose : (current.windowClose || null);
+      if ((finalWindowOpen && !finalWindowClose) || (!finalWindowOpen && finalWindowClose)) {
+        return res.status(400).json({ error: 'windowOpen and windowClose must both be set or both empty' });
+      }
       await ensureCodeUnique(colRef, data.kioskCode, id);
       const now = new Date().toISOString();
       await ref.set({ ...data, updatedAt: now }, { merge: true });

@@ -23,7 +23,7 @@ const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 // Local fallback only; server feed is authoritative per pole window.
 const DEFAULT_WINDOW = { open: '12:00', close: '15:30' };
 const WINDOW_BY_WEEKDAY = {
-  fri: { open: '09:30', close: '13:00' },
+  fri: { open: '10:40', close: '12:30' },
 };
 
 function wibMinutes() {

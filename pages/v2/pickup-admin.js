@@ -398,6 +398,13 @@ export default function PickupAdminPage() {
     const draft = kioskDrafts[profileId] || {};
     if (!profile) return;
 
+    const nextOpen = draft.windowOpen !== undefined ? draft.windowOpen : (profile.windowOpen || '');
+    const nextClose = draft.windowClose !== undefined ? draft.windowClose : (profile.windowClose || '');
+    if ((nextOpen && !nextClose) || (!nextOpen && nextClose)) {
+      pushToast('error', 'Please set both open and close time, or clear both.');
+      return;
+    }
+
     setKioskBusy((b) => ({ ...b, [profileId]: true }));
     try {
       const payload = {
@@ -409,8 +416,8 @@ export default function PickupAdminPage() {
         maxCards: profile.maxCards || 5,
         beepEnabled: profile.beepEnabled !== false,
         accent: profile.accent || '#8B1538',
-        windowOpen: draft.windowOpen || null,
-        windowClose: draft.windowClose || null,
+        windowOpen: nextOpen || null,
+        windowClose: nextClose || null,
         suppressOutOfWindow: draft.suppressOutOfWindow !== false,
       };
 
@@ -1763,15 +1770,25 @@ function TerminalGateControlCard() {
 
   const saveSchedule = async (id) => {
     const d = drafts[id];
+    const terminal = terminals.find((t) => t.id === id);
     if (!d) return;
+    if (!terminal) return;
+
+    const nextOpen = d.windowOpen !== undefined ? d.windowOpen : (terminal.windowOpen || '');
+    const nextClose = d.windowClose !== undefined ? d.windowClose : (terminal.windowClose || '');
+    if ((nextOpen && !nextClose) || (!nextOpen && nextClose)) {
+      setErr('Please set both open and close time, or clear both.');
+      return;
+    }
+
     setBusy((b) => ({ ...b, [id]: true }));
     try {
       const r = await fetch(`/api/pickup/admin/terminals?id=${id}`, {
         method: 'PUT', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          windowOpen:  d.windowOpen ?? null,
-          windowClose: d.windowClose ?? null,
+          windowOpen:  nextOpen || null,
+          windowClose: nextClose || null,
         }),
       });
       const j = await r.json();
@@ -1846,6 +1863,7 @@ function TerminalGateControlCard() {
             const winOpen  = draft.windowOpen  !== undefined ? draft.windowOpen  : (t.windowOpen  || '');
             const winClose = draft.windowClose !== undefined ? draft.windowClose : (t.windowClose || '');
             const dirty = draft.windowOpen !== undefined || draft.windowClose !== undefined;
+            const partialWindow = !!(winOpen && !winClose) || !!(!winOpen && winClose);
             const isBusy = !!busy[t.id];
             return (
               <div
@@ -1927,7 +1945,7 @@ function TerminalGateControlCard() {
                   </div>
                   <div>
                     <button
-                      disabled={!dirty || isBusy}
+                      disabled={!dirty || isBusy || partialWindow}
                       onClick={() => saveSchedule(t.id)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
                         dirty
@@ -1939,6 +1957,9 @@ function TerminalGateControlCard() {
                     </button>
                   </div>
                   <div className="text-[11px] text-slate-500 sm:text-right">
+                    {partialWindow && (
+                      <span className="text-amber-300">Set both open and close time before saving.</span>
+                    )}
                     {(winOpen && winClose)
                       ? <>Auto: gate opens at <b className="text-slate-300">{winOpen}</b> and closes at <b className="text-slate-300">{winClose}</b>.</>
                       : <>No schedule — gate stays open unless manually closed.</>}

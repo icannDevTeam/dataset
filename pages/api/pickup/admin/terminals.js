@@ -325,6 +325,14 @@ async function handler(req, res) {
         patch.archived = false;
         patch.archivedAt = null;
       }
+
+      const existing = snap.data() || {};
+      const finalWindowOpen = patch.windowOpen !== undefined ? patch.windowOpen : (existing.windowOpen || null);
+      const finalWindowClose = patch.windowClose !== undefined ? patch.windowClose : (existing.windowClose || null);
+      if ((finalWindowOpen && !finalWindowClose) || (!finalWindowOpen && finalWindowClose)) {
+        return res.status(400).json({ error: 'windowOpen and windowClose must both be set or both empty' });
+      }
+
       await ref.set(patch, { merge: true });
       const updated = (await ref.get()).data();
       const listenerStatusByTerminal = loadLatestListenerStatusByTerminal();
