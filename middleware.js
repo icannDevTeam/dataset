@@ -30,6 +30,7 @@ const SKIP_PREFIXES = [
   '/teacher-sw.js',
   '/teacher-manifest.webmanifest',
   '/pwa/',
+  '/kids-clock',
 ];
 
 export async function middleware(request) {
