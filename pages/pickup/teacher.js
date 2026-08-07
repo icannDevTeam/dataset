@@ -21,8 +21,10 @@ const POLL_MS_LIVE = 60_000;     // when SSE is healthy (just a safety net)
 const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 
 // Local fallback only; server feed is authoritative per pole window.
-const DISMISSAL_START_HHMM = '12:00';
-const DISMISSAL_END_HHMM   = '15:30';
+const DEFAULT_WINDOW = { open: '12:00', close: '15:30' };
+const WINDOW_BY_WEEKDAY = {
+  fri: { open: '11:00', close: '13:00' },
+};
 
 function wibMinutes() {
   const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -32,14 +34,61 @@ function hhmmToMinutes(s) {
   const [h, m] = s.split(':').map(Number);
   return h * 60 + m;
 }
+
+function weekdayKeyWib() {
+  const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][now.getUTCDay()];
+}
+
+function localDismissalWindow() {
+  const key = weekdayKeyWib();
+  return WINDOW_BY_WEEKDAY[key] || DEFAULT_WINDOW;
+}
+
+function gateReasonLabel(reason) {
+  const map = {
+    'manual-open': 'Manual override open',
+    'manual-closed': 'Manual override closed',
+    'weekly-in-window': 'Recurring schedule open',
+    'weekly-out-of-window': 'Recurring schedule closed',
+    'override-in-window': 'One-off override open',
+    'override-out-of-window': 'One-off override closed',
+    'in-window': 'Scheduled open',
+    'out-of-window': 'Scheduled closed',
+    'always-open': 'No schedule (always open)',
+    'no-terminals': 'No terminal assigned',
+  };
+  return map[reason] || String(reason || 'unknown');
+}
+
 function isInDismissalWindow() {
+  const w = localDismissalWindow();
   const cur = wibMinutes();
-  return cur >= hhmmToMinutes(DISMISSAL_START_HHMM) && cur < hhmmToMinutes(DISMISSAL_END_HHMM);
+  return cur >= hhmmToMinutes(w.open) && cur < hhmmToMinutes(w.close);
 }
 const TOKEN_KEY = 'pickup.tablet.deviceToken';
 const IDENTITY_KEY = 'pickup.tablet.identity';
 const BINUS_MAROON = '#8B1538';
 const BINUS_GOLD = '#FCBF11';
+
+function secUntilOpen(openHHMM) {
+  const now = new Date(Date.now() + 7 * 3600 * 1000);
+  const nowSec = now.getUTCHours() * 3600 + now.getUTCMinutes() * 60 + now.getUTCSeconds();
+  const [h, m] = (openHHMM || '00:00').split(':').map(Number);
+  const diff = h * 3600 + m * 60 - nowSec;
+  return diff > 0 ? diff : 0;
+}
+
+function wibNowSnapshot() {
+  const now = new Date(Date.now() + 7 * 3600 * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return {
+    time: `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}:${pad(now.getUTCSeconds())}`,
+    date: `${DAYS[now.getUTCDay()]}, ${now.getUTCDate()} ${MONTHS[now.getUTCMonth()]} ${now.getUTCFullYear()}`,
+  };
+}
 const ACTIVE_GAP = 12;
 const ACTIVE_MIN_W_WITH_HELD = 240;
 const ACTIVE_MIN_W_NO_HELD = 220;
@@ -825,7 +874,241 @@ function Stat({ label, value, accent }) {
   );
 }
 
+// BINUSIAN SPIRIT values — rotated on the waiting screen.
+const SPIRIT_VALUES = [
+  { letter: 'S', text: 'Striving for Excellence' },
+  { letter: 'P', text: 'Perseverance' },
+  { letter: 'I', text: 'Integrity' },
+  { letter: 'R', text: 'Respect' },
+  { letter: 'I', text: 'Innovation' },
+  { letter: 'T', text: 'Teamwork' },
+];
+
+function SpiritValuesRotator() {
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => setIdx((i) => (i + 1) % SPIRIT_VALUES.length), 3800);
+    return () => clearInterval(t);
+  }, []);
+
+  const active = SPIRIT_VALUES[idx];
+
+  return (
+    <div style={{ textAlign: 'center', marginBottom: 'clamp(6px, 1.4vh, 14px)' }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(252,191,17,0.4)', letterSpacing: 3, marginBottom: 'clamp(4px, 1vh, 8px)' }}>
+        BINUSIAN SPIRIT
+      </div>
+
+      {/* S P I R I T letter dots */}
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginBottom: 10 }}>
+        {SPIRIT_VALUES.map((v, i) => (
+          <span
+            key={i}
+            className={i === idx ? 'bps-spirit-letter-active' : undefined}
+            style={{
+              width: 26, height: 26, borderRadius: 8,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 13, fontWeight: 900, fontFamily: 'ui-monospace,monospace',
+              color: i === idx ? '#2D0A14' : 'rgba(252,191,17,0.45)',
+              background: i === idx ? BINUS_GOLD : 'rgba(252,191,17,0.08)',
+              border: `1px solid ${i === idx ? BINUS_GOLD : 'rgba(252,191,17,0.18)'}`,
+              transition: 'background 0.4s ease, color 0.4s ease, border-color 0.4s ease',
+            }}
+          >
+            {v.letter}
+          </span>
+        ))}
+      </div>
+
+      {/* Active value text — re-keyed each cycle to retrigger the animation */}
+      <div key={idx} className="bps-spirit-word" style={{
+        fontSize: 17, fontWeight: 800, color: '#f1f5f9', letterSpacing: 1.2,
+      }}>
+        {active.text}
+      </div>
+    </div>
+  );
+}
+
+function DismissalWaitingScreen({ windowLabel, identity }) {
+  const [secondsLeft, setSecondsLeft] = useState(() => secUntilOpen(windowLabel.open));
+  const [clock, setClock] = useState(wibNowSnapshot);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      setSecondsLeft(secUntilOpen(windowLabel.open));
+      setClock(wibNowSnapshot());
+    }, 1000);
+    return () => clearInterval(t);
+  }, [windowLabel.open]);
+
+  const hrs = Math.floor(secondsLeft / 3600);
+  const min = Math.floor((secondsLeft % 3600) / 60);
+  const sec = secondsLeft % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  const isOpening = secondsLeft === 0;
+
+  return (
+    <div className="bps-wait-root" style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(160deg, #2D0A14 0%, #0f172a 55%)',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+      height: '100dvh', overflow: 'hidden',
+      padding: 'clamp(10px, 1.8vh, 20px) 24px clamp(12px, 2.4vh, 32px)', boxSizing: 'border-box',
+      position: 'relative',
+    }}>
+      <style jsx global>{`
+        @keyframes bpsWaitFadeIn {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes bpsWaitGlow {
+          from { box-shadow: 0 4px 32px rgba(0,0,0,0.45); }
+          to   { box-shadow: 0 4px 32px rgba(0,0,0,0.45), 0 0 36px 4px rgba(252,191,17,0.18); }
+        }
+        @keyframes bpsWaitTick {
+          0%  { transform: scale(1); }
+          40% { transform: scale(1.14); color: #fff; }
+          100%{ transform: scale(1); }
+        }
+        @keyframes bpsWaitPulse {
+          0%,100% { opacity: 1; }
+          50%     { opacity: 0.35; }
+        }
+        @keyframes bpsSpiritWordIn {
+          0%   { opacity: 0; transform: translateY(10px) scale(0.96); filter: blur(3px); }
+          60%  { opacity: 1; transform: translateY(-2px) scale(1.02); filter: blur(0); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes bpsSpiritLetterPop {
+          0%   { transform: scale(1); }
+          45%  { transform: scale(1.25) rotate(-4deg); box-shadow: 0 0 16px rgba(252,191,17,0.55); }
+          100% { transform: scale(1); }
+        }
+        .bps-wait-root   { animation: bpsWaitFadeIn 0.75s ease-out both; }
+        .bps-wait-glow   { animation: bpsWaitGlow 2.5s ease-in-out infinite alternate; }
+        .bps-wait-tick   { animation: bpsWaitTick 0.22s ease-out; }
+        .bps-wait-opening{ animation: bpsWaitPulse 0.9s ease-in-out infinite; }
+        .bps-spirit-word { animation: bpsSpiritWordIn 0.55s ease-out both; }
+        .bps-spirit-letter-active { animation: bpsSpiritLetterPop 0.5s ease-out; }
+      `}</style>
+
+      {/* Gold top bar */}
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 5, background: BINUS_GOLD, zIndex: 10 }} />
+
+      {/* Brand */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: BINUS_GOLD, letterSpacing: 3.5, marginBottom: 'clamp(8px, 1.6vh, 18px)', opacity: 0.75 }}>
+        BINUS PICK-UP SYSTEM
+      </div>
+
+      {/* Hero image */}
+      <div style={{
+        background: 'rgba(255,255,255,0.97)',
+        borderRadius: 24,
+        border: `3px solid ${BINUS_GOLD}`,
+        boxShadow: '0 10px 50px rgba(0,0,0,0.55)',
+        padding: '6px 12px 0',
+        maxWidth: 340, width: '90%',
+        overflow: 'hidden', lineHeight: 0,
+        marginBottom: 'clamp(10px, 2vh, 22px)',
+        flexShrink: 1, minHeight: 0,
+      }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/kids-clock.jpg"
+          alt="Waiting for dismissal"
+          style={{ width: '100%', maxHeight: 'clamp(80px, 20vh, 200px)', objectFit: 'contain', display: 'block' }}
+        />
+      </div>
+
+      {/* Title */}
+      <div style={{ fontSize: 'clamp(16px, 2.6vh, 22px)', fontWeight: 900, color: '#ffffff', letterSpacing: 2, textAlign: 'center', marginBottom: 'clamp(8px, 1.8vh, 16px)', textTransform: 'uppercase' }}>
+        Dismissal Not Yet Open
+      </div>
+
+      {/* Opens / Closes row */}
+      <div style={{ display: 'flex', gap: 28, marginBottom: 'clamp(10px, 2vh, 18px)', alignItems: 'stretch', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(252,191,17,0.6)', letterSpacing: 2.5, marginBottom: 6 }}>OPENS AT</div>
+          <div style={{ fontSize: 'clamp(30px, 5vh, 44px)', fontWeight: 900, color: BINUS_GOLD, fontFamily: 'ui-monospace,monospace', lineHeight: 1 }}>
+            {windowLabel.open}
+          </div>
+          <div style={{ fontSize: 11, color: 'rgba(252,191,17,0.45)', marginTop: 4, letterSpacing: 1 }}>WIB</div>
+        </div>
+
+        <div style={{ width: 1, background: 'rgba(252,191,17,0.18)', alignSelf: 'stretch' }} />
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.35)', letterSpacing: 2.5, marginBottom: 6 }}>CLOSES AT</div>
+          <div style={{ fontSize: 'clamp(30px, 5vh, 44px)', fontWeight: 900, color: '#e2e8f0', fontFamily: 'ui-monospace,monospace', lineHeight: 1 }}>
+            {windowLabel.close}
+          </div>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', marginTop: 4, letterSpacing: 1 }}>WIB</div>
+        </div>
+      </div>
+
+      {/* Countdown */}
+      <div style={{ marginBottom: 'clamp(8px, 1.8vh, 16px)', textAlign: 'center' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(252,191,17,0.45)', letterSpacing: 3, marginBottom: 'clamp(6px, 1.2vh, 10px)' }}>
+          TIME REMAINING
+        </div>
+
+        {isOpening ? (
+          <div className="bps-wait-opening" style={{ fontSize: 26, fontWeight: 800, color: BINUS_GOLD, letterSpacing: 2 }}>
+            Opening now…
+          </div>
+        ) : (
+          <div className="bps-wait-glow" style={{
+            display: 'inline-flex', gap: 4, alignItems: 'center',
+            background: 'rgba(139,21,56,0.18)',
+            border: '1px solid rgba(252,191,17,0.22)',
+            borderRadius: 16, padding: 'clamp(8px, 1.4vh, 12px) 22px',
+          }}>
+            {[{ v: pad(hrs), l: 'HRS' }, { v: pad(min), l: 'MIN' }, { v: pad(sec), l: 'SEC', key: sec }].map(({ v, l, key }, i) => (
+              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                {i > 0 && (
+                  <span style={{ fontSize: 30, fontWeight: 900, color: 'rgba(252,191,17,0.3)', lineHeight: 1, margin: '0 2px', paddingBottom: 14 }}>:</span>
+                )}
+                <span
+                  key={key !== undefined ? key : i}
+                  className={key !== undefined ? 'bps-wait-tick' : undefined}
+                  style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', minWidth: 50 }}
+                >
+                  <span style={{ fontSize: 'clamp(28px, 4.6vh, 42px)', fontWeight: 900, color: BINUS_GOLD, fontFamily: 'ui-monospace,monospace', lineHeight: 1 }}>{v}</span>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(252,191,17,0.4)', letterSpacing: 1.5, marginTop: 5 }}>{l}</span>
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* BINUSIAN SPIRIT values */}
+      <SpiritValuesRotator />
+
+      {/* Date + live clock */}
+      <div style={{ textAlign: 'center', marginBottom: 'clamp(6px, 1.2vh, 14px)' }}>
+        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.38)', marginBottom: 3 }}>{clock.date}</div>
+        <div style={{ fontSize: 16, fontWeight: 600, color: 'rgba(252,191,17,0.5)', fontFamily: 'ui-monospace,monospace', letterSpacing: 1 }}>
+          {clock.time} WIB
+        </div>
+      </div>
+
+      {/* Release group */}
+      {identity?.releaseGroupName && (
+        <div style={{ fontSize: 12, color: '#3f4f60', letterSpacing: 0.5 }}>
+          {identity.releaseGroupName}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TeacherTabletPage() {
+  const localWindow = localDismissalWindow();
   const [token, setToken] = useState(null);
   const [identity, setIdentity] = useState(null);   // whoami payload
   const [feed, setFeed] = useState({ active: [], held: [], todayReleased: 0 });
@@ -838,10 +1121,50 @@ export default function TeacherTabletPage() {
   const [showInstall, setShowInstall] = useState(false);
   const [sseLive, setSseLive] = useState(false);
   const [inWindow, setInWindow] = useState(isInDismissalWindow);
-  const [windowLabel, setWindowLabel] = useState({ open: DISMISSAL_START_HHMM, close: DISMISSAL_END_HHMM });
+  const [windowLabel, setWindowLabel] = useState(localWindow);
+  const [gateSignal, setGateSignal] = useState(null);
+  const [gateNotice, setGateNotice] = useState(null);
   const serverClosedRef = useRef(false);
+  const gateFingerprintRef = useRef('');
   const pollRef = useRef(null);
   const isPreviewRef = useRef(false);
+
+  const applyGateSignal = useCallback((sig) => {
+    if (!sig) return;
+    const normalized = {
+      source: sig.source || 'firestore+backend',
+      open: !!sig.open,
+      reason: sig.reason || (sig.open ? 'in-window' : 'out-of-window'),
+      reasons: Array.isArray(sig.reasons) ? sig.reasons : [],
+      terminalsEvaluated: Number.isInteger(sig.terminalsEvaluated) ? sig.terminalsEvaluated : null,
+      windowOpen: sig.windowOpen || null,
+      windowClose: sig.windowClose || null,
+      evaluatedAt: sig.evaluatedAt || new Date().toISOString(),
+    };
+    setGateSignal(normalized);
+    const fp = [
+      normalized.open ? 'open' : 'closed',
+      normalized.reason,
+      normalized.windowOpen || '',
+      normalized.windowClose || '',
+      normalized.reasons.join(','),
+    ].join('|');
+    if (gateFingerprintRef.current && gateFingerprintRef.current !== fp) {
+      setGateNotice({
+        kind: normalized.open ? 'open' : 'closed',
+        text: normalized.open
+          ? `Gate opened by ${normalized.source} (${gateReasonLabel(normalized.reason)})`
+          : `Gate closed by ${normalized.source} (${gateReasonLabel(normalized.reason)})`,
+      });
+    }
+    gateFingerprintRef.current = fp;
+  }, []);
+
+  useEffect(() => {
+    if (!gateNotice) return;
+    const t = setTimeout(() => setGateNotice(null), 12_000);
+    return () => clearTimeout(t);
+  }, [gateNotice]);
 
   // Bootstrap preview/local token before first render to avoid pair-screen flash.
   useEffect(() => {
@@ -1122,6 +1445,12 @@ export default function TeacherTabletPage() {
   useEffect(() => {
     const t = setInterval(() => {
       const local = isInDismissalWindow();
+      const fallbackWindow = localDismissalWindow();
+      setWindowLabel((prev) => {
+        if (serverClosedRef.current) return prev;
+        if (prev.open === fallbackWindow.open && prev.close === fallbackWindow.close) return prev;
+        return fallbackWindow;
+      });
       setInWindow(() => {
         if (!local) {
           serverClosedRef.current = false;
@@ -1145,11 +1474,13 @@ export default function TeacherTabletPage() {
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       if (j.windowOpen || j.windowClose) {
+        const fallbackWindow = localDismissalWindow();
         setWindowLabel({
-          open: j.windowOpen || DISMISSAL_START_HHMM,
-          close: j.windowClose || DISMISSAL_END_HHMM,
+          open: j.windowOpen || fallbackWindow.open,
+          close: j.windowClose || fallbackWindow.close,
         });
       }
+      applyGateSignal(j.gateSignal);
       if (typeof j.inWindow === 'boolean') {
         serverClosedRef.current = !j.inWindow;
         setInWindow(j.inWindow);
@@ -1171,7 +1502,7 @@ export default function TeacherTabletPage() {
     } catch (e) {
       setErr(e.message);
     }
-  }, [token]);
+  }, [token, applyGateSignal]);
 
   useEffect(() => {
     if (!token || !identity || !inWindow || isPreviewRef.current) return;
@@ -1202,7 +1533,14 @@ export default function TeacherTabletPage() {
         setSseLive(false);
         return;
       }
-      es.addEventListener('hello', () => { if (!cancelled) setSseLive(true); });
+      es.addEventListener('hello', (msg) => {
+        if (cancelled) return;
+        setSseLive(true);
+        try {
+          const meta = JSON.parse(msg.data || '{}');
+          applyGateSignal(meta.gateSignal);
+        } catch {}
+      });
       es.addEventListener('pickup_event', (msg) => {
         if (cancelled) return;
         // Splice the full payload directly into local state for instant
@@ -1260,7 +1598,7 @@ export default function TeacherTabletPage() {
       try { es && es.close(); } catch {}
       setSseLive(false);
     };
-  }, [token, identity, pollFeed, inWindow]);
+  }, [token, identity, pollFeed, inWindow, applyGateSignal]);
 
   const onAction = async (ev, action) => {
     const id = ev.id;
@@ -1344,26 +1682,7 @@ export default function TeacherTabletPage() {
           <meta name="apple-mobile-web-app-capable" content="yes" />
           <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         </Head>
-        <div style={{
-          minHeight: '100vh', background: '#0f172a',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'system-ui, -apple-system, sans-serif',
-        }}>
-          <div style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 56, marginBottom: 20, color: '#334155' }}>&#x23F0;</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>
-              Dismissal not active
-            </div>
-            <div style={{ fontSize: 15, color: '#64748b', marginBottom: 4 }}>
-              Active window: {windowLabel.open} &ndash; {windowLabel.close} WIB
-            </div>
-            {identity?.releaseGroupName && (
-              <div style={{ fontSize: 13, color: '#475569', marginTop: 12 }}>
-                {identity.releaseGroupName}
-              </div>
-            )}
-          </div>
-        </div>
+        <DismissalWaitingScreen windowLabel={windowLabel} identity={identity} />
       </>
     );
   }
@@ -1503,6 +1822,52 @@ export default function TeacherTabletPage() {
         {err && (
           <div style={{ background: '#7f1d1d', color: '#fecaca', padding: '8px 22px', fontSize: 13 }}>
             {err}
+          </div>
+        )}
+
+        {gateNotice && (
+          <div style={{
+            background: gateNotice.kind === 'open' ? '#064e3b' : '#7f1d1d',
+            color: gateNotice.kind === 'open' ? '#bbf7d0' : '#fecaca',
+            padding: '8px 22px',
+            fontSize: 13,
+            borderTop: '1px solid rgba(255,255,255,0.08)',
+          }}>
+            {gateNotice.text}
+          </div>
+        )}
+
+        {gateSignal && (
+          <div style={{
+            background: 'rgba(15,23,42,0.65)',
+            borderTop: '1px solid rgba(148,163,184,0.18)',
+            borderBottom: '1px solid rgba(148,163,184,0.18)',
+            color: '#cbd5e1',
+            padding: '8px 22px',
+            fontSize: 12,
+            display: 'flex',
+            gap: 12,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+          }}>
+            <span style={{
+              display: 'inline-block',
+              padding: '2px 8px',
+              borderRadius: 999,
+              fontWeight: 800,
+              background: gateSignal.open ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)',
+              color: gateSignal.open ? '#6ee7b7' : '#fca5a5',
+            }}>
+              Firestore Gate: {gateSignal.open ? 'OPEN' : 'CLOSED'}
+            </span>
+            <span>Reason: {gateReasonLabel(gateSignal.reason)}</span>
+            {windowLabel?.open && windowLabel?.close && (
+              <span>Window: {windowLabel.open} - {windowLabel.close} WIB</span>
+            )}
+            {Number.isInteger(gateSignal.terminalsEvaluated) && (
+              <span>Terminals: {gateSignal.terminalsEvaluated}</span>
+            )}
+            <span>Source: {gateSignal.source}</span>
           </div>
         )}
 
