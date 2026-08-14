@@ -64,6 +64,26 @@ const EY_GRADE_OPTIONS = ['EY1', 'EY2', 'EY3'];
 const NUMERIC_GRADE_OPTIONS = ['1', '2', '3', '4', '5'];
 const GRADE_SELECTION_OPTIONS = [...EY_GRADE_OPTIONS, ...NUMERIC_GRADE_OPTIONS];
 
+async function parseApiPayload(res) {
+  const raw = await res.text();
+  try {
+    return { raw, json: raw ? JSON.parse(raw) : {} };
+  } catch {
+    return { raw, json: {} };
+  }
+}
+
+function explainNonJsonApiFailure(status, raw) {
+  if (/<!doctype html>/i.test(raw || '')) {
+    if (status === 401 || status === 403) {
+      return `HTTP ${status}: session expired or unauthorized. Please log in again.`;
+    }
+    return `HTTP ${status}: server returned HTML instead of JSON.`;
+  }
+  const snippet = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  return snippet ? `HTTP ${status}: ${snippet}` : `HTTP ${status}`;
+}
+
 function isTemporaryStudentId(value) {
   return String(value || '').startsWith('tmp-');
 }
@@ -317,8 +337,8 @@ export default function PickupAdminPage() {
   const [toasts, setToasts] = useState([]);
   const [submissionTracker, setSubmissionTracker] = useState([]);
 
-  // Top-level view switch — Onboarding queue vs TV Kiosk profiles.
-  // Driven by the sidebar (?view=kiosks); no in-page toggle.
+  // Top-level view switch.
+  // Driven by the sidebar query; no in-page toggle.
   const router = useRouter();
   const [view, setView] = useState('onboarding');
   useEffect(() => {
@@ -330,40 +350,96 @@ export default function PickupAdminPage() {
   // ─── Pickup settings state ──────────────────────────────────────────────
   const [pickupSettings, setPickupSettings] = useState(null);  // null = loading
   const [settingsBusy, setSettingsBusy] = useState(false);
-  const [kioskProfiles, setKioskProfiles] = useState([]);
-  const [kioskDrafts, setKioskDrafts] = useState({});
-  const [kiosksLoading, setKiosksLoading] = useState(false);
-  const [kioskBusy, setKioskBusy] = useState({});
+  const [pickupScheduleDraft, setPickupScheduleDraft] = useState({
+    defaultOpen: '',
+    defaultClose: '',
+    friOpen: '',
+    friClose: '',
+  });
+  const [scheduleGroups, setScheduleGroups] = useState([]);
+  const [scheduleGroupsLoading, setScheduleGroupsLoading] = useState(false);
+  const [poleSchedules, setPoleSchedules] = useState([]);
+  const [poleSchedulesLoading, setPoleSchedulesLoading] = useState(false);
 
   useEffect(() => {
     if (view !== 'settings') return;
     fetch('/api/pickup/admin/settings', { credentials: 'include' })
       .then((r) => r.json())
-      .then((j) => { if (j.ok) setPickupSettings(j.settings); })
+      .then((j) => {
+        if (!j.ok) return;
+        const settings = j.settings || {};
+        setPickupSettings(settings);
+        setPickupScheduleDraft({
+          defaultOpen: settings?.pickupWindow?.start || '10:00',
+          defaultClose: settings?.pickupWindow?.end || '13:00',
+          friOpen: settings?.pickupWindowByDay?.fri?.start || settings?.pickupWindow?.start || '10:00',
+          friClose: settings?.pickupWindowByDay?.fri?.end || settings?.pickupWindow?.end || '13:00',
+        });
+      })
       .catch(() => {});
   }, [view]);
 
   useEffect(() => {
     if (view !== 'settings') return;
-    setKiosksLoading(true);
-    fetch('/api/pickup/admin/kiosk-profiles', { credentials: 'include' })
+    setScheduleGroupsLoading(true);
+    fetch('/api/pickup/admin/release-groups', { credentials: 'include' })
       .then((r) => r.json().then((j) => ({ r, j })))
       .then(({ r, j }) => {
         if (!r.ok || !j?.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-        const profiles = Array.isArray(j.profiles) ? j.profiles : [];
-        setKioskProfiles(profiles);
-        const drafts = {};
-        profiles.forEach((p) => {
-          drafts[p.id] = {
-            windowOpen: p.windowOpen || '',
-            windowClose: p.windowClose || '',
-            suppressOutOfWindow: p.suppressOutOfWindow !== false,
+        setScheduleGroups(Array.isArray(j.groups) ? j.groups : []);
+      })
+      .catch(() => setScheduleGroups([]))
+      .finally(() => setScheduleGroupsLoading(false));
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== 'settings') return;
+    setPoleSchedulesLoading(true);
+    fetch('/api/pickup/admin/terminals', { credentials: 'include' })
+      .then((r) => r.json().then((j) => ({ r, j })))
+      .then(({ r, j }) => {
+        if (!r.ok || !j?.terminals) throw new Error(j?.error || `HTTP ${r.status}`);
+        const map = new Map();
+        (j.terminals || [])
+          .filter((t) => t && t.enabled !== false)
+          .forEach((t) => {
+            const pole = String(t.gateLabel || '').trim();
+            if (!/^Pole\s+[1-5]$/i.test(pole)) return;
+            const open = String(t.windowOpen || '').trim();
+            const close = String(t.windowClose || '').trim();
+            const key = `${open}-${close}`;
+            if (!map.has(pole)) {
+              map.set(pole, {
+                pole,
+                schedules: new Set(),
+                terminals: 0,
+              });
+            }
+            const row = map.get(pole);
+            row.terminals += 1;
+            if (open && close) row.schedules.add(key);
+          });
+
+        const ordered = [1, 2, 3, 4, 5].map((n) => {
+          const pole = `Pole ${n}`;
+          const row = map.get(pole);
+          if (!row) return { pole, terminals: 0, configured: false, open: null, close: null, drift: false };
+          const list = [...row.schedules];
+          const first = list[0] || '';
+          const [open, close] = first ? first.split('-') : [null, null];
+          return {
+            pole,
+            terminals: row.terminals,
+            configured: Boolean(open && close),
+            open,
+            close,
+            drift: list.length > 1,
           };
         });
-        setKioskDrafts(drafts);
+        setPoleSchedules(ordered);
       })
-      .catch((e) => pushToast('error', e.message || 'Failed loading gate hours', 'Settings load failed'))
-      .finally(() => setKiosksLoading(false));
+      .catch(() => setPoleSchedules([]))
+      .finally(() => setPoleSchedulesLoading(false));
   }, [view]);
 
   async function toggleSetting(key, value) {
@@ -386,65 +462,40 @@ export default function PickupAdminPage() {
     }
   }
 
-  function updateKioskDraft(id, patch) {
-    setKioskDrafts((prev) => ({
-      ...prev,
-      [id]: { ...(prev[id] || {}), ...patch },
-    }));
-  }
-
-  async function saveGateHours(profileId) {
-    const profile = kioskProfiles.find((p) => p.id === profileId);
-    const draft = kioskDrafts[profileId] || {};
-    if (!profile) return;
-
-    const nextOpen = draft.windowOpen !== undefined ? draft.windowOpen : (profile.windowOpen || '');
-    const nextClose = draft.windowClose !== undefined ? draft.windowClose : (profile.windowClose || '');
-    if ((nextOpen && !nextClose) || (!nextOpen && nextClose)) {
-      pushToast('error', 'Please set both open and close time, or clear both.');
+  async function savePickupSchedule() {
+    const { defaultOpen, defaultClose, friOpen, friClose } = pickupScheduleDraft;
+    const valid = (v) => /^\d{2}:\d{2}$/.test(String(v || ''));
+    if (!valid(defaultOpen) || !valid(defaultClose) || !valid(friOpen) || !valid(friClose)) {
+      pushToast('error', 'Please provide valid HH:MM values for all schedule fields.');
       return;
     }
-
-    setKioskBusy((b) => ({ ...b, [profileId]: true }));
+    setSettingsBusy(true);
     try {
       const payload = {
-        name: profile.name,
-        kioskCode: profile.kioskCode || '',
-        gates: profile.gates || [],
-        homerooms: profile.homerooms || [],
-        showQueue: profile.showQueue !== false,
-        maxCards: profile.maxCards || 5,
-        beepEnabled: profile.beepEnabled !== false,
-        accent: profile.accent || '#8B1538',
-        windowOpen: nextOpen || null,
-        windowClose: nextClose || null,
-        suppressOutOfWindow: draft.suppressOutOfWindow !== false,
+        pickupWindow: { start: defaultOpen, end: defaultClose },
+        pickupWindowByDay: {
+          ...((pickupSettings && pickupSettings.pickupWindowByDay) || {}),
+          fri: { start: friOpen, end: friClose, closedAllDay: false },
+        },
       };
-
-      const r = await fetch(`/api/pickup/admin/kiosk-profiles?id=${encodeURIComponent(profileId)}`, {
-        method: 'PUT',
+      const r = await fetch('/api/pickup/admin/settings', {
+        method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const j = await r.json();
-      if (!r.ok || !j?.ok) throw new Error(j?.message || j?.error || 'Failed saving gate hours');
-
-      const updated = j.profile;
-      setKioskProfiles((list) => list.map((p) => (p.id === profileId ? updated : p)));
-      setKioskDrafts((prev) => ({
-        ...prev,
-        [profileId]: {
-          windowOpen: updated.windowOpen || '',
-          windowClose: updated.windowClose || '',
-          suppressOutOfWindow: updated.suppressOutOfWindow !== false,
-        },
+      if (!r.ok) throw new Error(j.error || 'schedule update failed');
+      setPickupSettings((s) => ({
+        ...(s || {}),
+        pickupWindow: payload.pickupWindow,
+        pickupWindowByDay: payload.pickupWindowByDay,
       }));
-      pushToast('success', `Gate hours saved for ${updated.name}`);
+      pushToast('success', 'Pickup schedule saved and synced to all terminals.');
     } catch (e) {
-      pushToast('error', e.message || 'Failed saving gate hours');
+      pushToast('error', e.message || 'Failed to save pickup schedule');
     } finally {
-      setKioskBusy((b) => ({ ...b, [profileId]: false }));
+      setSettingsBusy(false);
     }
   }
 
@@ -633,20 +684,59 @@ export default function PickupAdminPage() {
       const r = await fetch('/api/pickup/admin/chaperone-photos', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          'x-requested-with': 'XMLHttpRequest',
+        },
         body: JSON.stringify({
           chaperoneId,
           replace,
-          enroll: false,
           photos: [{ imageBase64: dataUrl }],
         }),
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || j.message || 'upload failed');
-      pushToast('success', `Chaperone photo ${replace ? 'replaced' : 'added'}. Push to terminals on the Enrolment page.`);
+      const { raw, json } = await parseApiPayload(r);
+      if (!r.ok) {
+        throw new Error(
+          json.message
+          || json.error
+          || explainNonJsonApiFailure(r.status, raw)
+        );
+      }
+      if (json.enrollmentOk) {
+        pushToast('success', `Chaperone photo ${replace ? 'replaced' : 'added'} and enrolled on terminals.`);
+      } else {
+        pushToast('warn', `Chaperone photo ${replace ? 'replaced' : 'added'}, but enrollment needs attention. Open Pickup Enroll and retry.`);
+      }
       reload();
     } catch (e) {
       pushToast('error', `Upload failed: ${e.message}`);
+    }
+  }, [reload]);
+
+  const deleteChaperonePhoto = useCallback(async (chaperoneId, photoPath, { all = false } = {}) => {
+    if (!chaperoneId || (!photoPath && !all)) return false;
+    try {
+      const r = await fetch('/api/pickup/admin/chaperone-photos', {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          'x-requested-with': 'XMLHttpRequest',
+        },
+        body: JSON.stringify({ chaperoneId, photoPath, all }),
+      });
+      const { raw, json } = await parseApiPayload(r);
+      if (!r.ok) {
+        throw new Error(json.message || json.error || explainNonJsonApiFailure(r.status, raw));
+      }
+      pushToast('success', all ? 'All chaperone photos removed.' : 'Chaperone photo removed.');
+      reload();
+      return true;
+    } catch (e) {
+      pushToast('error', `Delete failed: ${e.message}`);
+      return false;
     }
   }, [reload]);
 
@@ -1094,79 +1184,184 @@ export default function PickupAdminPage() {
                     </button>
                   </div>
 
-                  {/* Per-gate schedule controls */}
                   <div className="rounded-xl bg-white/5 border border-slate-800 px-5 py-4">
                     <div className="flex items-start justify-between gap-4 mb-3 flex-wrap">
                       <div>
-                        <p className="text-sm font-medium text-white">Gate open/close windows (per gate profile)</p>
+                        <p className="text-sm font-medium text-white">Pickup time settings (single source)</p>
                         <p className="text-xs text-slate-400 mt-0.5 max-w-xl">
-                          Configure each gate profile schedule here. Security override still works on top, but default gate behavior follows these times.
+                          Mon-Thu uses grade-specific windows from Release Groups first. Friday uses one global window for all poles/gates.
+                          The default fallback below is only used when a release group has no grade window for that class.
+                          Values shown come from Firestore and stay active until an admin saves an override.
                         </p>
+                      </div>
+                      <button
+                        disabled={settingsBusy}
+                        onClick={savePickupSchedule}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500/20 border border-brand-500/40 text-brand-200 hover:bg-brand-500/30 disabled:opacity-50"
+                      >
+                        {settingsBusy ? 'Saving…' : 'Save pickup schedule'}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-3">
+                        <p className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Default fallback (Mon-Thu only, if no grade window exists for that class)</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">Open (WIB)</label>
+                            <input
+                              type="time"
+                              value={pickupScheduleDraft.defaultOpen || ''}
+                              onChange={(e) => setPickupScheduleDraft((s) => ({ ...s, defaultOpen: e.target.value }))}
+                              className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">Close (WIB)</label>
+                            <input
+                              type="time"
+                              value={pickupScheduleDraft.defaultClose || ''}
+                              onChange={(e) => setPickupScheduleDraft((s) => ({ ...s, defaultClose: e.target.value }))}
+                              className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-3">
+                        <p className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-2">Friday global override (all gates)</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">Open (WIB)</label>
+                            <input
+                              type="time"
+                              value={pickupScheduleDraft.friOpen || ''}
+                              onChange={(e) => setPickupScheduleDraft((s) => ({ ...s, friOpen: e.target.value }))}
+                              className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">Close (WIB)</label>
+                            <input
+                              type="time"
+                              value={pickupScheduleDraft.friClose || ''}
+                              onChange={(e) => setPickupScheduleDraft((s) => ({ ...s, friClose: e.target.value }))}
+                              className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    {kiosksLoading ? (
-                      <div className="text-xs text-slate-400">Loading gate profiles…</div>
-                    ) : kioskProfiles.length === 0 ? (
-                      <div className="text-xs text-slate-400">No kiosk profiles yet. Create one in TV Kiosks first.</div>
-                    ) : (
-                      <div className="space-y-3">
-                        {kioskProfiles.map((p) => {
-                          const d = kioskDrafts[p.id] || { windowOpen: '', windowClose: '', suppressOutOfWindow: true };
-                          const saving = !!kioskBusy[p.id];
-                          return (
-                            <div key={p.id} className="rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-3">
-                              <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
-                                <div>
-                                  <div className="text-sm font-semibold text-white">{p.name}</div>
-                                  <div className="text-[11px] text-slate-500 mt-0.5">
-                                    Gates: {(p.gates || []).length ? p.gates.join(', ') : 'All gates'}
+                    <div className="mt-3 rounded-lg border border-emerald-700/30 bg-emerald-900/10 px-4 py-3">
+                      <p className="text-[11px] uppercase tracking-wider text-emerald-300 font-semibold">Currently active in Firestore</p>
+                      <p className="text-xs text-emerald-100/90 mt-1">
+                        Default fallback (used only when no grade window exists): {(pickupSettings?.pickupWindow?.start || '--:--')} - {(pickupSettings?.pickupWindow?.end || '--:--')} WIB
+                      </p>
+                      <p className="text-xs text-emerald-100/90 mt-0.5">
+                        Friday global: {(pickupSettings?.pickupWindowByDay?.fri?.start || pickupSettings?.pickupWindow?.start || '--:--')} - {(pickupSettings?.pickupWindowByDay?.fri?.end || pickupSettings?.pickupWindow?.end || '--:--')} WIB
+                      </p>
+                    </div>
+
+                    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-3">
+                      <p className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Mon-Thu live pole schedule (terminal docs)</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        This is the actual schedule currently applied per pole in terminal records.
+                      </p>
+                      {poleSchedulesLoading ? (
+                        <div className="text-xs text-slate-500 mt-2">Loading pole schedules…</div>
+                      ) : poleSchedules.length === 0 ? (
+                        <div className="text-xs text-slate-500 mt-2">No pole schedule data found.</div>
+                      ) : (
+                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                          {poleSchedules.map((p) => (
+                            <div key={p.pole} className="rounded border border-slate-800 px-3 py-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-slate-200">{p.pole}</div>
+                                <div className="text-[10px] text-slate-500">{p.terminals} terminal(s)</div>
+                              </div>
+                              <div className="text-[11px] mt-1 text-slate-300">
+                                {p.configured ? `${p.open}-${p.close} WIB` : 'Not configured'}
+                              </div>
+                              {p.drift ? (
+                                <div className="text-[10px] mt-1 text-amber-300">Warning: terminals in this pole are not aligned.</div>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 px-4 py-3">
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Mon-Thu grade windows (Release Groups)</p>
+                          <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+                            Grade-level pickup windows are managed per pole in Release Groups and are used before fallback windows.
+                            ACOP should edit those windows there.
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-1">
+                            Friday shown in each pole below is the same global Friday window from Firestore.
+                          </p>
+                        </div>
+                        <a
+                          href="/v2/release-groups"
+                          className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10"
+                        >
+                          Open Release Groups
+                        </a>
+                      </div>
+                      {scheduleGroupsLoading ? (
+                        <div className="text-xs text-slate-500 mt-2">Loading group windows…</div>
+                      ) : scheduleGroups.length === 0 ? (
+                        <div className="text-xs text-slate-500 mt-2">No release groups found.</div>
+                      ) : (
+                        <div className="mt-2 space-y-2">
+                          {scheduleGroups.map((g) => {
+                            const gw = (g && g.gradeWindowByLabel && typeof g.gradeWindowByLabel === 'object') ? g.gradeWindowByLabel : {};
+                            const keys = Object.keys(gw);
+                            const fallbackOpen = pickupSettings?.pickupWindow?.start || '--:--';
+                            const fallbackClose = pickupSettings?.pickupWindow?.end || '--:--';
+                            const friOpen = pickupSettings?.pickupWindowByDay?.fri?.start || pickupSettings?.pickupWindow?.start || '--:--';
+                            const friClose = pickupSettings?.pickupWindowByDay?.fri?.end || pickupSettings?.pickupWindow?.end || '--:--';
+                            return (
+                              <div key={g.id} className="rounded border border-slate-800 px-3 py-2">
+                                <div className="text-xs font-semibold text-slate-200">{g.name || g.id}</div>
+                                <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-2">
+                                  <div className="rounded border border-slate-800 bg-slate-950/50 px-2 py-1.5">
+                                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Mon-Thu effective</div>
+                                    {keys.length === 0 ? (
+                                      <div className="text-[11px] text-slate-400 mt-1">
+                                        Uses fallback for all classes: {fallbackOpen}-{fallbackClose}
+                                      </div>
+                                    ) : (
+                                      <div className="text-[11px] text-slate-400 mt-1">
+                                        Grade windows apply for listed classes. Any missing class uses fallback {fallbackOpen}-{fallbackClose}.
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="rounded border border-slate-800 bg-slate-950/50 px-2 py-1.5">
+                                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Friday (all classes)</div>
+                                    <div className="text-[11px] text-slate-300 mt-1">{friOpen}-{friClose}</div>
                                   </div>
                                 </div>
-                                <button
-                                  disabled={saving}
-                                  onClick={() => saveGateHours(p.id)}
-                                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500/20 border border-brand-500/40 text-brand-200 hover:bg-brand-500/30 disabled:opacity-50"
-                                >
-                                  {saving ? 'Saving…' : 'Save'}
-                                </button>
+                                {keys.length === 0 ? (
+                                  <div className="text-[11px] text-slate-500 mt-1">No grade-specific windows (uses fallback).</div>
+                                ) : (
+                                  <div className="text-[11px] text-slate-400 mt-1 flex flex-wrap gap-2">
+                                    {keys.sort().map((k) => (
+                                      <span key={`${g.id}-${k}`} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700">
+                                        {k}: {gw[k]?.open || '--:--'}-{gw[k]?.close || '--:--'}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
-
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div>
-                                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Opens at</label>
-                                  <input
-                                    type="time"
-                                    value={d.windowOpen || ''}
-                                    onChange={(e) => updateKioskDraft(p.id, { windowOpen: e.target.value })}
-                                    className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
-                                  />
-                                </div>
-                                <div>
-                                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Closes at</label>
-                                  <input
-                                    type="time"
-                                    value={d.windowClose || ''}
-                                    onChange={(e) => updateKioskDraft(p.id, { windowClose: e.target.value })}
-                                    className="w-full bg-slate-900/60 border border-slate-700 rounded-md px-3 py-2 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
-                                  />
-                                </div>
-                              </div>
-
-                              <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={d.suppressOutOfWindow !== false}
-                                  onChange={(e) => updateKioskDraft(p.id, { suppressOutOfWindow: e.target.checked })}
-                                  className="accent-brand-500"
-                                />
-                                Suppress events outside window
-                              </label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1380,6 +1575,7 @@ export default function PickupAdminPage() {
           onPrint={selectedRecord ? () => setPrintRec(selectedRecord) : undefined}
           onUploadStudentPhoto={uploadStudentPhoto}
           onUploadChaperonePhoto={uploadChaperonePhoto}
+          onDeleteChaperonePhoto={deleteChaperonePhoto}
           onUploadPendingChaperoneFace={uploadPendingChaperoneFace}
           onOnboardingEdit={submitOnboardingEdit}
           autoOpenAddChaperone={autoAddChaperone}
@@ -1723,8 +1919,6 @@ function TerminalGateControlCard() {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState({});
   const [now, setNow] = useState(() => new Date());
-  // Per-terminal local schedule edit drafts, keyed by terminal id.
-  const [drafts, setDrafts] = useState({});
 
   const reload = useCallback(async () => {
     try {
@@ -1768,54 +1962,47 @@ function TerminalGateControlCard() {
     finally { setBusy((b) => ({ ...b, [id]: false })); }
   };
 
-  const saveSchedule = async (id) => {
-    const d = drafts[id];
-    const terminal = terminals.find((t) => t.id === id);
-    if (!d) return;
-    if (!terminal) return;
-
-    const nextOpen = d.windowOpen !== undefined ? d.windowOpen : (terminal.windowOpen || '');
-    const nextClose = d.windowClose !== undefined ? d.windowClose : (terminal.windowClose || '');
-    if ((nextOpen && !nextClose) || (!nextOpen && nextClose)) {
-      setErr('Please set both open and close time, or clear both.');
-      return;
-    }
-
-    setBusy((b) => ({ ...b, [id]: true }));
-    try {
-      const r = await fetch(`/api/pickup/admin/terminals?id=${id}`, {
-        method: 'PUT', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          windowOpen:  nextOpen || null,
-          windowClose: nextClose || null,
-        }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || 'failed');
-      setDrafts((prev) => { const n = { ...prev }; delete n[id]; return n; });
-      await reload();
-    } catch (e) { setErr(e.message); }
-    finally { setBusy((b) => ({ ...b, [id]: false })); }
-  };
-
   // Compute effective gate state mirroring lib/terminal-gate.js so the UI is
   // accurate without an extra round-trip.
   const effective = (t) => {
     const override = t.gateOverride === 'open' || t.gateOverride === 'closed' ? t.gateOverride : null;
     const parse = (s) => /^\d{2}:\d{2}$/.test(s || '') ? (parseInt(s.slice(0, 2), 10) * 60 + parseInt(s.slice(3), 10)) : null;
-    const o = parse(t.windowOpen), c = parse(t.windowClose);
     const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayKey = dayKeys[wib.getUTCDay()];
     const cur = wib.getUTCHours() * 60 + wib.getUTCMinutes();
+
+    const dayWindow = (t.weeklyWindowByDay && typeof t.weeklyWindowByDay === 'object')
+      ? t.weeklyWindowByDay[dayKey]
+      : null;
+
+    const sourceOpen = dayWindow && typeof dayWindow === 'object'
+      ? (dayWindow.start || dayWindow.open || t.windowOpen)
+      : t.windowOpen;
+    const sourceClose = dayWindow && typeof dayWindow === 'object'
+      ? (dayWindow.end || dayWindow.close || t.windowClose)
+      : t.windowClose;
+    const o = parse(sourceOpen);
+    const c = parse(sourceClose);
+
     let scheduledOpen = true, configured = false;
-    if (o != null && c != null) {
+    if (dayWindow && dayWindow.closedAllDay === true) {
+      configured = true;
+      scheduledOpen = false;
+    } else if (o != null && c != null) {
       configured = true;
       scheduledOpen = o <= c ? (cur >= o && cur <= c) : (cur >= o || cur <= c);
     }
+
+    const daySuffix = dayWindow && typeof dayWindow === 'object' ? ` (${dayKey.toUpperCase()})` : '';
+    const scheduleLabel = configured
+      ? `${sourceOpen || '--:--'} – ${sourceClose || '--:--'} WIB${daySuffix}`
+      : 'No schedule (always open unless manually closed)';
+
     if (override === 'closed') return { open: false, reason: 'manual-closed', override, configured, scheduledOpen };
     if (override === 'open')   return { open: true,  reason: 'manual-open',   override, configured, scheduledOpen };
-    if (configured)            return { open: scheduledOpen, reason: scheduledOpen ? 'in-window' : 'out-of-window', override: null, configured, scheduledOpen };
-    return { open: true, reason: 'always-open', override: null, configured: false, scheduledOpen: true };
+    if (configured)            return { open: scheduledOpen, reason: scheduledOpen ? 'in-window' : 'out-of-window', override: null, configured, scheduledOpen, scheduleLabel };
+    return { open: true, reason: 'always-open', override: null, configured: false, scheduledOpen: true, scheduleLabel };
   };
 
   const openCount = terminals.filter((t) => effective(t).open).length;
@@ -1859,11 +2046,6 @@ function TerminalGateControlCard() {
         <div className="space-y-2">
           {terminals.map((t) => {
             const eff = effective(t);
-            const draft = drafts[t.id] || {};
-            const winOpen  = draft.windowOpen  !== undefined ? draft.windowOpen  : (t.windowOpen  || '');
-            const winClose = draft.windowClose !== undefined ? draft.windowClose : (t.windowClose || '');
-            const dirty = draft.windowOpen !== undefined || draft.windowClose !== undefined;
-            const partialWindow = !!(winOpen && !winClose) || !!(!winOpen && winClose);
             const isBusy = !!busy[t.id];
             return (
               <div
@@ -1896,7 +2078,7 @@ function TerminalGateControlCard() {
                       {t.ip && <span className="text-slate-600"> · {t.ip}</span>}
                     </div>
                     <div className="text-[11px] text-slate-500 mt-0.5">
-                      Schedule: {eff.configured ? `${t.windowOpen} – ${t.windowClose} WIB` : 'No schedule (always open unless manually closed)'}
+                      Schedule: {eff.scheduleLabel}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1924,46 +2106,9 @@ function TerminalGateControlCard() {
                   </div>
                 </div>
 
-                <div className="mt-3 pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-[auto_auto_auto_1fr] gap-3 items-end">
-                  <div>
-                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Opens at (WIB)</label>
-                    <input
-                      type="time"
-                      value={winOpen}
-                      onChange={(e) => setDrafts((p) => ({ ...p, [t.id]: { ...(p[t.id] || {}), windowOpen: e.target.value || null } }))}
-                      className="bg-slate-950/60 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Closes at (WIB)</label>
-                    <input
-                      type="time"
-                      value={winClose}
-                      onChange={(e) => setDrafts((p) => ({ ...p, [t.id]: { ...(p[t.id] || {}), windowClose: e.target.value || null } }))}
-                      className="bg-slate-950/60 border border-slate-700 rounded-md px-3 py-1.5 text-xs text-slate-100 focus:border-brand-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <button
-                      disabled={!dirty || isBusy || partialWindow}
-                      onClick={() => saveSchedule(t.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${
-                        dirty
-                          ? 'bg-brand-500/20 text-brand-200 border-brand-500/40 hover:bg-brand-500/30'
-                          : 'bg-slate-900 text-slate-500 border-slate-800'
-                      }`}
-                    >
-                      {isBusy ? 'Saving…' : 'Save schedule'}
-                    </button>
-                  </div>
-                  <div className="text-[11px] text-slate-500 sm:text-right">
-                    {partialWindow && (
-                      <span className="text-amber-300">Set both open and close time before saving.</span>
-                    )}
-                    {(winOpen && winClose)
-                      ? <>Auto: gate opens at <b className="text-slate-300">{winOpen}</b> and closes at <b className="text-slate-300">{winClose}</b>.</>
-                      : <>No schedule — gate stays open unless manually closed.</>}
-                  </div>
+                <div className="mt-3 pt-3 border-t border-slate-800/80 text-[11px] text-slate-500">
+                  Schedule is centrally managed in <span className="text-slate-300 font-semibold">Pickup time settings</span> above.
+                  Use manual <span className="text-slate-300">Open/Auto/Close</span> here only for operational overrides.
                 </div>
               </div>
             );
@@ -2214,7 +2359,7 @@ function RecordCard(props) {
 function RecordDetail(props) {
   const {
     rec, thumbnails,
-    onPhoto, onUploadStudentPhoto, onUploadChaperonePhoto,
+    onPhoto, onUploadStudentPhoto, onUploadChaperonePhoto, onDeleteChaperonePhoto,
     onUploadPendingChaperoneFace, onOnboardingEdit,
     autoOpenAddChaperone, onAddChaperoneHandled,
   } = props;
@@ -2316,7 +2461,11 @@ function RecordDetail(props) {
                 canEdit={editable}
                 onEdit={editable ? (patch) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'update', patch }) : null}
                 onDelete={editable ? () => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete' }) : null}
-                onDeleteFace={editable ? (facePath) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete-face', facePath }) : null}
+                onDeleteFace={allocated && onDeleteChaperonePhoto
+                  ? (facePath) => onDeleteChaperonePhoto(allocated.chaperoneId, facePath)
+                  : editable
+                    ? (facePath) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete-face', facePath })
+                    : null}
               />
             );
           })}
@@ -3326,7 +3475,7 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
                     {j + 1}
                   </span>
                 </button>
-                {canEdit && onDeleteFace && (c.facePaths || [])[j] && (
+                {onDeleteFace && (c.facePaths || [])[j] && (
                   <div className="absolute inset-x-0 bottom-0 p-1 flex justify-center gap-1 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover/face:opacity-100 transition-opacity pointer-events-none">
                     <button type="button"
                       onClick={(e) => {
@@ -3345,7 +3494,7 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
                     </button>
                   </div>
                 )}
-                {canEdit && onDeleteFace && (c.facePaths || [])[j] && (
+                {onDeleteFace && (c.facePaths || [])[j] && (
                   <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-900 text-slate-300 border border-slate-700 flex items-center justify-center text-[9px] pointer-events-none">
                     <i className="ph ph-pencil-simple"></i>
                   </span>
