@@ -21,9 +21,9 @@ const POLL_MS_LIVE = 60_000;     // when SSE is healthy (just a safety net)
 const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 
 // Local fallback only; server feed is authoritative per pole window.
-const DEFAULT_WINDOW = { open: '12:00', close: '15:30' };
+const DEFAULT_WINDOW = { open: '10:00', close: '13:00' };
 const WINDOW_BY_WEEKDAY = {
-  fri: { open: '10:40', close: '12:30' },
+  fri: { open: '10:00', close: '13:00' },
 };
 
 function wibMinutes() {
@@ -1128,6 +1128,16 @@ export default function TeacherTabletPage() {
   const gateFingerprintRef = useRef('');
   const pollRef = useRef(null);
   const isPreviewRef = useRef(false);
+  // Tombstones: cards the teacher just released/held. Stale poll responses
+  // (in-flight when the tap happened, or served before the write landed)
+  // must not resurrect them. id → expiry epoch ms.
+  const actionedRef = useRef(new Map());
+  const isTombstoned = useCallback((id) => {
+    const exp = actionedRef.current.get(id);
+    if (!exp) return false;
+    if (Date.now() > exp) { actionedRef.current.delete(id); return false; }
+    return true;
+  }, []);
 
   const applyGateSignal = useCallback((sig) => {
     if (!sig) return;
@@ -1429,6 +1439,13 @@ export default function TeacherTabletPage() {
         if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
         if (!cancelled) {
           setIdentity(j);
+          if (j.windowOpen || j.windowClose) {
+            const fallbackWindow = localDismissalWindow();
+            setWindowLabel({
+              open: j.windowOpen || fallbackWindow.open,
+              close: j.windowClose || fallbackWindow.close,
+            });
+          }
           try { localStorage.setItem(IDENTITY_KEY, JSON.stringify(j)); } catch {}
           setErr(null);
         }
@@ -1490,7 +1507,11 @@ export default function TeacherTabletPage() {
           return;
         }
       }
-      setFeed({ active: j.active || [], held: j.held || [], todayReleased: j.todayReleased || 0 });
+      setFeed({
+        active: (j.active || []).filter((e) => !isTombstoned(e.id)),
+        held: (j.held || []).filter((e) => !isTombstoned(e.id)),
+        todayReleased: j.todayReleased || 0,
+      });
       // Track most recent activity timestamp for the standby hero
       const latest = [...(j.active || []), ...(j.held || [])]
         .map((e) => e.scannedAt || e.recordedAt)
@@ -1502,7 +1523,7 @@ export default function TeacherTabletPage() {
     } catch (e) {
       setErr(e.message);
     }
-  }, [token, applyGateSignal]);
+  }, [token, applyGateSignal, isTombstoned]);
 
   useEffect(() => {
     if (!token || !identity || !inWindow || isPreviewRef.current) return;
@@ -1548,7 +1569,7 @@ export default function TeacherTabletPage() {
         // as a safety net to reconcile status flips (release/dismiss).
         try {
           const ev = JSON.parse(msg.data);
-          if (ev && ev.id) {
+          if (ev && ev.id && !isTombstoned(ev.id)) {
             setFeed((prev) => {
               const dupe = (prev.active || []).some((x) => x.id === ev.id)
                 || (prev.held || []).some((x) => x.id === ev.id);
@@ -1605,6 +1626,11 @@ export default function TeacherTabletPage() {
     if (busy[id] || exiting[id]) return;
     setBusy((b) => ({ ...b, [id]: true }));
     setExiting((e) => ({ ...e, [id]: action })); // kick off CSS transition immediately
+    // Tombstone BEFORE the optimistic removal so any stale poll/SSE payload
+    // (including responses already in flight) can't resurrect the card.
+    // 'hold' keeps a short window only — the card legitimately reappears in
+    // the held rail via the next reconcile.
+    actionedRef.current.set(id, Date.now() + (action === 'release' ? 120_000 : 5_000));
     // Optimistically drop the card from the local feed so the next one slides
     // in instantly — we don't wait for the network or the exit animation.
     setFeed((f) => ({
@@ -1629,7 +1655,9 @@ export default function TeacherTabletPage() {
       // Refresh in background to reconcile (status, new arrivals, held promotions).
       pollFeed();
     } catch (e) {
-      // Rollback: refresh from server so the card reappears in its true state.
+      // Rollback: clear the tombstone and refresh so the card reappears in
+      // its true state (the write failed — it is still pending server-side).
+      actionedRef.current.delete(id);
       pollFeed();
       alert(e.message);
     } finally {
