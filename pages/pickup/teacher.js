@@ -20,11 +20,27 @@ const POLL_MS = 10_000;          // when SSE is offline (fallback hydration)
 const POLL_MS_LIVE = 60_000;     // when SSE is healthy (just a safety net)
 const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 
-// Local fallback only; server feed is authoritative per pole window.
-const DEFAULT_WINDOW = { open: '10:00', close: '13:00' };
+// Local fallback only until the server teaches us this pole's real window
+// (learned windows are persisted per weekday and reused the next day, so the
+// closed screen needs ZERO network — that is the cost-control contract).
+const DEFAULT_WINDOW = { open: '10:00', close: '15:00' };
 const WINDOW_BY_WEEKDAY = {
   fri: { open: '10:00', close: '13:00' },
 };
+const WINDOW_CACHE_KEY = 'pickup.tablet.windowByDay';
+
+function loadLearnedWindows() {
+  try { return JSON.parse(localStorage.getItem(WINDOW_CACHE_KEY)) || {}; } catch { return {}; }
+}
+
+function saveLearnedWindow(open, close) {
+  if (!open || !close) return;
+  try {
+    const m = loadLearnedWindows();
+    m[weekdayKeyWib()] = { open, close };
+    localStorage.setItem(WINDOW_CACHE_KEY, JSON.stringify(m));
+  } catch { /* private mode etc. — fallback table still applies */ }
+}
 
 function wibMinutes() {
   const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -42,7 +58,8 @@ function weekdayKeyWib() {
 
 function localDismissalWindow() {
   const key = weekdayKeyWib();
-  return WINDOW_BY_WEEKDAY[key] || DEFAULT_WINDOW;
+  const learned = typeof window !== 'undefined' ? loadLearnedWindows()[key] : null;
+  return learned || WINDOW_BY_WEEKDAY[key] || DEFAULT_WINDOW;
 }
 
 function gateReasonLabel(reason) {
@@ -1447,6 +1464,7 @@ export default function TeacherTabletPage() {
               open: j.windowOpen || fallbackWindow.open,
               close: j.windowClose || fallbackWindow.close,
             });
+            saveLearnedWindow(j.windowOpen, j.windowClose);
           }
           try { localStorage.setItem(IDENTITY_KEY, JSON.stringify(j)); } catch {}
           setErr(null);
@@ -1476,6 +1494,7 @@ export default function TeacherTabletPage() {
           open: j.windowOpen || fallbackWindow.open,
           close: j.windowClose || fallbackWindow.close,
         });
+        saveLearnedWindow(j.windowOpen, j.windowClose);
       }
       applyGateSignal(j.gateSignal);
       if (typeof j.inWindow === 'boolean') {
@@ -1505,44 +1524,37 @@ export default function TeacherTabletPage() {
     }
   }, [token, applyGateSignal, isTombstoned]);
 
-  // Keep refs in sync for use inside the 30s interval closure.
+  // Keep refs in sync for use inside interval closures.
   useEffect(() => { inWindowRef.current = inWindow; }, [inWindow]);
   useEffect(() => { windowLabelRef.current = windowLabel; }, [windowLabel]);
 
-  // Re-check while closed. The server (Firestore schedule + gate enforcer) is
-  // authoritative for open/close — the local weekday table is only a
-  // first-paint hint. To keep Firestore/Vercel cost negligible, closed-state
-  // checks run every 5 min off-hours and tighten to 30s only within 20 min of
-  // the scheduled opening (so poles still open on time without manual reloads).
+  // Re-check every 30s using the LOCAL clock only — zero network while
+  // closed (cost-control contract). The window times come from the server
+  // (learned + persisted per weekday), so this local check cannot drift from
+  // Firestore the way the old hardcoded table did.
   useEffect(() => {
-    let tick = 0;
     const t = setInterval(() => {
-      tick += 1;
+      const local = isInDismissalWindow();
       const fallbackWindow = localDismissalWindow();
       setWindowLabel((prev) => {
         if (serverClosedRef.current) return prev;
         if (prev.open === fallbackWindow.open && prev.close === fallbackWindow.close) return prev;
         return fallbackWindow;
       });
-      if (inWindowRef.current) return; // open → the main poll/SSE loop owns cadence
-      const w = windowLabelRef.current || fallbackWindow;
-      const cur = wibMinutes();
-      const openMin = hhmmToMinutes(w.open || fallbackWindow.open);
-      const closeMin = hhmmToMinutes(w.close || fallbackWindow.close);
-      const nearWindow = cur >= openMin - 20 && cur <= closeMin + 5;
-      if (nearWindow || tick % 10 === 0) pollFeed();
+      setInWindow(() => {
+        if (!local) {
+          serverClosedRef.current = false;
+          return false;
+        }
+        if (serverClosedRef.current) return false;
+        return true;
+      });
     }, 30_000);
     return () => clearInterval(t);
-  }, [pollFeed]);
+  }, []);
 
   useEffect(() => {
-    if (!token || !identity || isPreviewRef.current) return;
-    if (!inWindow) {
-      // Ask the server immediately — the local table may say closed while
-      // the real Firestore window is still open (server is authoritative).
-      pollFeed();
-      return;
-    }
+    if (!token || !identity || !inWindow || isPreviewRef.current) return;
     pollFeed();
     // Cadence depends on SSE health: 10s when offline (fallback), 60s when
     // the SSE channel is delivering live events. The SSE effect below adjusts
