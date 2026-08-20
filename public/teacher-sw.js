@@ -1,4 +1,4 @@
-const CACHE_NAME = 'teacher-pwa-v7';
+const CACHE_NAME = 'teacher-pwa-v8';
 const PRECACHE = [
   '/teacher-manifest.webmanifest',
   '/binus-logo.jpg',
@@ -40,18 +40,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Next.js hashed assets are immutable — safe to cache forever.
-  // The HTML always references the latest hashes, so we never serve a
-  // mismatched bundle. Use stale-while-revalidate for everything else.
+  // For this deployment we run Next in dev mode on LAN during ops, where
+  // chunk filenames are stable (main.js/_app.js) rather than content-hashed.
+  // Cache-first here can pin stale JS forever (e.g. old gate-window labels).
+  // Use network-first so tablets always pick up current runtime bundles.
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
-      caches.match(event.request).then((cached) => cached || fetch(event.request).then((res) => {
-        if (res.ok) {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
-        }
-        return res;
-      }))
+      fetch(event.request)
+        .then((res) => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
+          }
+          return res;
+        })
+        .catch(() => caches.match(event.request))
     );
     return;
   }

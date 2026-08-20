@@ -1641,11 +1641,22 @@ export default function DownloadsPage() {
 
   // ── M6: Share link — mint 24h signed URL, copy to clipboard ────────
   const shareRun = useCallback(async (r) => {
-    const note = window.prompt(
-      'Optional note: who are you sharing this with? (Audit-logged, not sent anywhere.)',
-      '',
-    );
-    if (note === null) return;  // user cancelled
+    let note = '';
+    try {
+      if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+        const typed = window.prompt(
+          'Optional note: who are you sharing this with? (Audit-logged, not sent anywhere.)',
+          '',
+        );
+        if (typed === null) return;
+        note = typed;
+      }
+    } catch {
+      const proceed = window.confirm(
+        'This browser does not support prompt input. Continue without a share note?',
+      );
+      if (!proceed) return;
+    }
     try {
       const res = await fetch(`/api/downloads/runs/${r.id}/share`, {
         method: 'POST', credentials: 'include',
@@ -1661,7 +1672,10 @@ export default function DownloadsPage() {
         await navigator.clipboard.writeText(data.url);
         alert(`Link copied to clipboard.\nExpires: ${new Date(data.expiresAt).toLocaleString()}\n\nCommunicate this link out-of-band — recipients are not notified automatically.`);
       } catch {
-        window.prompt('Copy this share link (expires in 24h):', data.url);
+        const showLink = window.confirm('Clipboard is unavailable. Show share link in an alert so you can copy manually?');
+        if (showLink) {
+          alert(`Share link (expires in 24h):\n\n${data.url}`);
+        }
       }
     } catch (e) {
       alert(`Share failed: ${e.message}`);

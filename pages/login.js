@@ -52,7 +52,17 @@ export default function LoginPage() {
     );
   }
 
-  if (authorized) return null;
+  if (authorized && user) {
+    return (
+      <div className="aura-theme antialiased min-h-screen flex items-center justify-center relative overflow-hidden">
+        <div className="noise-overlay"></div>
+        <div className="glass-panel rounded-2xl border border-slate-800 p-12 flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-slate-300 text-sm font-medium">Redirecting to dashboard…</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

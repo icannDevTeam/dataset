@@ -31,6 +31,21 @@ const FILTERS = [
   { key: 'no-photos',    label: 'Need photo',     icon: 'ph-camera-slash' },
 ];
 
+function askReasonOrFallback(message, fallbackValue) {
+  if (typeof window === 'undefined') return null;
+  try {
+    if (typeof window.prompt === 'function') {
+      return window.prompt(message, fallbackValue);
+    }
+  } catch {
+    // Continue to fallback confirmation below when prompt is unsupported.
+  }
+  const useFallback = window.confirm(
+    `${message}\n\nThis browser does not support text prompts. Use default reason: "${fallbackValue}"?`,
+  );
+  return useFallback ? fallbackValue : null;
+}
+
 export default function PickupEnrollPage() {
   const [board, setBoard] = useState(null);
   const [err, setErr] = useState(null);
@@ -41,6 +56,7 @@ export default function PickupEnrollPage() {
   const [selected, setSelected] = useState({});
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [toast, setToast] = useState(null);
   const [collapsed, setCollapsed] = useState({});
   const [lightbox, setLightbox] = useState(null);
@@ -78,8 +94,10 @@ export default function PickupEnrollPage() {
         ...g,
         chaperones: g.chaperones.filter((c) => {
           if (q) {
-            const hay = [c.name, c.employeeNo || '', c.phone || '',
-              ...c.authorizedStudents.map((s) => s.name)].join(' ').toLowerCase();
+            const hay = [
+              c.name, c.employeeNo, c.phone,
+              ...c.authorizedStudents.flatMap((s) => [s.name, s.homeroom]),
+            ].filter(Boolean).join(' ').toLowerCase();
             if (!hay.includes(q)) return false;
           }
           if (filter === 'needs-enroll') return c.needsEnroll;
@@ -194,6 +212,48 @@ export default function PickupEnrollPage() {
       return;
     }
     startRun(chaperones);
+  };
+
+  const deleteOne = async (c) => {
+    const reason = askReasonOrFallback(
+      `Reason for deleting approved chaperone ${c.name} (required):`,
+      'Data correction requested by ACOP',
+    );
+    if (!reason || !String(reason).trim()) return;
+
+    const hasTerminalOverride = c.assignmentMode === 'override' && Array.isArray(c.allowedTerminalIds) && c.allowedTerminalIds.length > 0;
+    const assignmentNote = hasTerminalOverride
+      ? `\n\nThis chaperone currently has ${c.allowedTerminalIds.length} terminal assignment override(s). Continuing will also clear those assignments.`
+      : '\n\nContinuing will also clear this chaperone from Terminal Assignment.';
+
+    const ok = window.confirm(
+      `Delete ${c.name}?\n\nThis removes the chaperone enrollment from terminals and hides this card from the enrollment board.${assignmentNote}`,
+    );
+    if (!ok) return;
+
+    setDeletingId(c.id);
+    try {
+      const r = await fetch('/api/pickup/admin/chaperone-delete', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chaperoneId: c.id, reason: String(reason).trim() }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || j.error || 'delete failed');
+
+      const failedDevices = (j.deviceRemoval?.devices || []).filter((d) => d.ok === false);
+      if (failedDevices.length > 0) {
+        showToast('warn', `${c.name} deleted, but ${failedDevices.length} terminal(s) reported unenroll errors.`);
+      } else {
+        showToast('success', `${c.name} deleted and enrollment removed.`);
+      }
+      load();
+    } catch (e) {
+      showToast('error', `Delete failed: ${e.message}`);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const grades = useMemo(() => {
@@ -433,9 +493,11 @@ export default function PickupEnrollPage() {
                       checked={!!selected[c.id]}
                       onCheck={(v) => setSelected((s) => ({ ...s, [c.id]: v }))}
                       onEnroll={() => enrollOne(c)}
+                      onDelete={() => deleteOne(c)}
                       onPhoto={() => c.facePhotoUrl && setLightbox({ url: c.facePhotoUrl, caption: c.name })}
                       busy={busy}
                       busyHere={busyId === c.id}
+                      deletingHere={deletingId === c.id}
                       resolvedTerminalCount={resolveTerminalsFor(c).length}
                     />
                   ))}
@@ -509,7 +571,7 @@ function StatCard({ label, value, icon, tone, hint, active, onClick }) {
 }
 
 function ChaperoneCard({
-  c, checked, onCheck, onEnroll, onPhoto, busy, busyHere,
+  c, checked, onCheck, onEnroll, onDelete, onPhoto, busy, busyHere, deletingHere,
   resolvedTerminalCount,
 }) {
   const allDevices = c.enrollment?.allDevices || [];
@@ -602,13 +664,13 @@ function ChaperoneCard({
       {/* Picks-up section */}
       {c.authorizedStudents.length > 0 && (
         <div className="px-4 py-2 border-t border-slate-800/60 bg-slate-900/40">
-          <div className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-1 flex items-center gap-1">
-            <i className="ph ph-graduation-cap"></i>Authorised to pick up
+          <div className="text-[9px] uppercase tracking-wider text-emerald-300 font-semibold mb-1.5 flex items-center gap-1">
+            <i className="ph ph-seal-check"></i>Authorised to pick up
           </div>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-1.5">
             {c.authorizedStudents.map((s) => (
-              <span key={s.id} className="text-[10px] px-1.5 py-0.5 rounded-full bg-brand-500/10 text-brand-200 border border-brand-500/30">
-                {s.name}
+              <span key={s.id} className="text-[10px] px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-100 border border-emerald-400/40 font-semibold inline-flex items-center gap-1">
+                <i className="ph ph-check-square"></i>{s.name}
               </span>
             ))}
           </div>
@@ -652,19 +714,32 @@ function ChaperoneCard({
             <i className="ph ph-list-checks mr-1"></i>Pick at least one terminal on the class header
           </div>
         ) : (
-          <button
-            onClick={onEnroll}
-            disabled={busy}
-            className={`w-full text-sm px-3 py-2 rounded-lg font-semibold border ${
-              c.allEnrolled
-                ? 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'
-                : 'bg-brand-500 border-brand-400 text-white hover:bg-brand-600 shadow-md shadow-brand-500/20'
-            } disabled:opacity-50`}
-          >
-            {busyHere ? <><i className="ph ph-spinner-gap animate-spin mr-1"></i>Enrolling…</>
-              : c.allEnrolled ? <><i className="ph ph-arrows-clockwise mr-1"></i>Re-enrol on {resolvedTerminalCount} terminal{resolvedTerminalCount !== 1 ? 's' : ''}</>
-              : <><i className="ph ph-fingerprint mr-1"></i>Enrol on {resolvedTerminalCount} terminal{resolvedTerminalCount !== 1 ? 's' : ''}</>}
-          </button>
+          <div className="space-y-2">
+            <button
+              onClick={onEnroll}
+              disabled={busy || deletingHere}
+              className={`w-full text-sm px-3 py-2 rounded-lg font-semibold border ${
+                c.allEnrolled
+                  ? 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'
+                  : 'bg-brand-500 border-brand-400 text-white hover:bg-brand-600 shadow-md shadow-brand-500/20'
+              } disabled:opacity-50`}
+            >
+              {busyHere ? <><i className="ph ph-spinner-gap animate-spin mr-1"></i>Enrolling…</>
+                : c.allEnrolled ? <><i className="ph ph-arrows-clockwise mr-1"></i>Re-enrol on {resolvedTerminalCount} terminal{resolvedTerminalCount !== 1 ? 's' : ''}</>
+                : <><i className="ph ph-fingerprint mr-1"></i>Enrol on {resolvedTerminalCount} terminal{resolvedTerminalCount !== 1 ? 's' : ''}</>}
+            </button>
+            {onDelete && (
+              <button
+                onClick={onDelete}
+                disabled={busy || deletingHere}
+                className="w-full text-xs px-3 py-2 rounded-lg font-semibold border bg-red-500/10 border-red-500/30 text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+              >
+                {deletingHere
+                  ? <><i className="ph ph-spinner-gap animate-spin mr-1"></i>Deleting…</>
+                  : <><i className="ph ph-trash mr-1"></i>Delete chaperone</>}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

@@ -11,6 +11,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
+import { compressImageToJpegDataUrl } from '../../lib/client-image';
 
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
@@ -92,6 +93,10 @@ function DeleteReasonModal({ open, chaperone, onCancel, onConfirm, busy }) {
   const [reason, setReason] = useState('');
   useEffect(() => { if (open) setReason(''); }, [open]);
   if (!open) return null;
+  const hasTerminalOverride =
+    chaperone?.assignmentMode === 'override' &&
+    Array.isArray(chaperone?.allowedTerminalIds) &&
+    chaperone.allowedTerminalIds.length > 0;
   return (
     <div
       role="dialog"
@@ -106,8 +111,15 @@ function DeleteReasonModal({ open, chaperone, onCancel, onConfirm, busy }) {
         </h3>
         <p className="text-xs text-slate-400 mt-1">
           Marks <span className="text-slate-200 font-medium">{chaperone?.name || '—'}</span> as deleted.
-          Hikvision enrolment and audit history are preserved; the record can be restored later.
+          Gate enrollment is removed immediately, audit history is preserved, and the record can be restored later.
         </p>
+        {hasTerminalOverride && (
+          <div className="mt-3 text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-2">
+            <i className="ph ph-warning-circle mr-1" />
+            This chaperone has <strong>{chaperone.allowedTerminalIds.length}</strong> terminal assignment override(s).
+            Deleting will also clear those Terminal Assignment overrides.
+          </div>
+        )}
         <label className="block mt-4 text-[11px] uppercase tracking-wider text-slate-500">
           Reason <span className="text-rose-300">*</span>
         </label>
@@ -153,6 +165,8 @@ function EditChaperoneModal({ open, chaperone, onCancel, onSave, busy }) {
     idNumber: '',
     status: 'approved_pending_faces',
   });
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
 
   useEffect(() => {
     if (!open || !chaperone) return;
@@ -164,6 +178,8 @@ function EditChaperoneModal({ open, chaperone, onCancel, onSave, busy }) {
       idNumber: chaperone.idNumber || '',
       status: chaperone.status || 'approved_pending_faces',
     });
+    setPhotoFile(null);
+    setPhotoPreview(null);
   }, [open, chaperone]);
 
   if (!open || !chaperone) return null;
@@ -256,6 +272,54 @@ function EditChaperoneModal({ open, chaperone, onCancel, onSave, busy }) {
           </label>
         </div>
 
+        {/* Face Photo */}
+        <div className="border-t border-slate-800 pt-3 mt-3">
+          <div className="text-xs text-slate-400 mb-2">Face Photo</div>
+          <div className="flex items-center gap-3 flex-wrap">
+            {photoPreview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={photoPreview}
+                alt="new face"
+                className="w-14 h-14 rounded-xl object-cover border border-brand-500/50 shrink-0"
+              />
+            ) : (
+              <Avatar url={chaperone.photoUrl} name={form.name} size={56} />
+            )}
+            <div className="flex flex-col gap-1.5">
+              <label className="cursor-pointer px-2.5 py-1 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-300 hover:bg-white/10 flex items-center gap-1.5">
+                <i className="ph ph-camera" />
+                {photoPreview ? 'Change again' : 'Change photo'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (!f) return;
+                    setPhotoFile(f);
+                    setPhotoPreview(URL.createObjectURL(f));
+                  }}
+                />
+              </label>
+              {photoPreview && (
+                <button
+                  type="button"
+                  onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
+                  className="text-[11px] text-slate-500 hover:text-rose-400 text-left"
+                >
+                  ✕ Remove new photo
+                </button>
+              )}
+            </div>
+            {photoPreview && (
+              <span className="ml-auto text-[11px] text-amber-400 flex items-center gap-1 shrink-0">
+                <i className="ph ph-warning" /> Replaces existing photo
+              </span>
+            )}
+          </div>
+        </div>
+
         <div className="mt-4 flex items-center justify-end gap-2">
           <button
             type="button"
@@ -268,7 +332,7 @@ function EditChaperoneModal({ open, chaperone, onCancel, onSave, busy }) {
           <button
             type="button"
             disabled={busy || !canSave}
-            onClick={() => onSave(form)}
+            onClick={() => onSave({ ...form, photoFile })}
             className="px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 rounded-lg disabled:opacity-50 flex items-center gap-1.5"
           >
             {busy ? <><i className="ph ph-circle-notch animate-spin" /> Saving…</> : <><i className="ph ph-floppy-disk" /> Save</>}
@@ -323,7 +387,7 @@ export default function ChaperonesPage() {
 
   const visible = useMemo(() => {
     if (!data) return [];
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.toLowerCase();
     return data.items.filter((c) => {
       const matchText = !q ||
         (c.name || '').toLowerCase().includes(q) ||
@@ -340,7 +404,7 @@ export default function ChaperonesPage() {
 
       return matchText && matchClass && matchGrade;
     });
-  }, [data, search, filterClass, filterGrade]);
+  }, [data, debouncedSearch, filterClass, filterGrade]);
 
   const classOptions = useMemo(() => {
     if (!data?.items) return [];
@@ -404,6 +468,16 @@ export default function ChaperonesPage() {
 
   const confirmDelete = async (reason) => {
     if (!deleteTarget) return;
+    const hasTerminalOverride =
+      deleteTarget.assignmentMode === 'override' &&
+      Array.isArray(deleteTarget.allowedTerminalIds) &&
+      deleteTarget.allowedTerminalIds.length > 0;
+    if (hasTerminalOverride) {
+      const proceed = window.confirm(
+        `Also clear ${deleteTarget.allowedTerminalIds.length} terminal assignment override(s) for ${deleteTarget.name} before delete?\n\nDelete will continue only if you confirm.`,
+      );
+      if (!proceed) return;
+    }
     setDeleteBusy(true);
     try {
       const r = await fetch('/api/pickup/admin/chaperone-delete', {
@@ -446,6 +520,29 @@ export default function ChaperonesPage() {
     if (!editTarget) return;
     setEditBusy(true);
     try {
+      // Upload new face photo first (replace=true, auto-enroll to terminals).
+      if (form.photoFile) {
+        let dataUrl;
+        try {
+          dataUrl = await compressImageToJpegDataUrl(form.photoFile, { maxDim: 1024, maxBytes: 190 * 1024 });
+        } catch (e) {
+          setErr(`Photo compression failed: ${e.message}`);
+          return;
+        }
+        const pr = await fetch('/api/pickup/admin/chaperone-photos', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            chaperoneId: editTarget.id,
+            photos: [{ imageBase64: dataUrl }],
+            replace: true,
+            enroll: true,
+          }),
+        });
+        const pj = await pr.json();
+        if (!pr.ok) { setErr(pj.error || `Photo upload failed: HTTP ${pr.status}`); return; }
+      }
+
       const r = await fetch('/api/pickup/admin/chaperone-update', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -569,13 +666,18 @@ export default function ChaperonesPage() {
                 ))}
               </select>
             </div>
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, employeeNo, student, class, grade…"
-              className="w-full sm:w-72 px-3 py-1.5 text-sm rounded-lg bg-white/5 border border-slate-800 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-brand-400"
-            />
+            <div className="relative w-full sm:w-72">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name, employeeNo, student, class, grade…"
+                className="w-full px-3 py-1.5 text-sm rounded-lg bg-white/5 border border-slate-800 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-brand-400 pr-7"
+              />
+              {(search !== debouncedSearch || (loading && debouncedSearch)) && (
+                <i className="ph ph-circle-notch animate-spin absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 text-xs pointer-events-none" />
+              )}
+            </div>
           </div>
 
           {/* Bulk action bar */}
@@ -627,7 +729,12 @@ export default function ChaperonesPage() {
                 </tr>
               </thead>
               <tbody>
-                {visible.length === 0 && !loading && (
+                {loading && (
+                  <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500 text-xs">
+                    <i className="ph ph-circle-notch animate-spin mr-2"></i>Loading…
+                  </td></tr>
+                )}
+                {!loading && visible.length === 0 && (
                   <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500 text-xs">No chaperones match.</td></tr>
                 )}
                 {visible.map((c) => {

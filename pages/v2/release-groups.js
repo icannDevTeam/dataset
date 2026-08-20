@@ -50,6 +50,7 @@ const STATUS_TONE = {
   pending: { ring: 'border-amber-500/40',   halo: 'bg-amber-500',   chip: 'bg-amber-500/15 text-amber-300 border-amber-500/40',     icon: 'ph-hourglass-medium', label: 'Pending pair' },
   unbound: { ring: 'border-slate-700',      halo: 'bg-slate-600',   chip: 'bg-slate-700/40 text-slate-300 border-slate-600',         icon: 'ph-link-break', label: 'Unbound' },
 };
+const MAX_TERMINALS_PER_GROUP = 6;
 
 export default function ReleaseGroupsPage() {
   const [groups, setGroups] = useState([]);
@@ -202,6 +203,22 @@ export default function ReleaseGroupsPage() {
     finally { setBusy((b) => ({ ...b, [id]: false })); }
   };
 
+  const updateGradeWindows = async (id, gradeWindowByLabel) => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const r = await fetch(`/api/pickup/admin/release-groups?id=${id}`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gradeWindowByLabel }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message || j.error || 'failed');
+      showToast('success', 'Grade timing windows saved.');
+      await reload();
+    } catch (e) { showToast('error', e.message); }
+    finally { setBusy((b) => ({ ...b, [id]: false })); }
+  };
+
   const copyCode = (code) => {
     if (!code) return;
     try {
@@ -214,7 +231,10 @@ export default function ReleaseGroupsPage() {
   const stats = useMemo(() => {
     let paired = 0, pending = 0, unbound = 0;
     groups.forEach((g) => {
-      if (g.tabletDeviceId) paired++;
+      const tabletIds = Array.isArray(g.tabletDeviceIds) && g.tabletDeviceIds.length
+        ? g.tabletDeviceIds
+        : (g.tabletDeviceId ? [g.tabletDeviceId] : []);
+      if (tabletIds.length) paired++;
       else if (g.pairingCode || g.status === 'pending') pending++;
       else unbound++;
     });
@@ -376,7 +396,10 @@ export default function ReleaseGroupsPage() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {groups.map((g) => {
-              const tone = g.tabletDeviceId ? STATUS_TONE.paired
+              const tabletIds = Array.isArray(g.tabletDeviceIds) && g.tabletDeviceIds.length
+                ? g.tabletDeviceIds
+                : (g.tabletDeviceId ? [g.tabletDeviceId] : []);
+              const tone = tabletIds.length ? STATUS_TONE.paired
                 : (g.pairingCode || g.status === 'pending') ? STATUS_TONE.pending
                 : STATUS_TONE.unbound;
               const code = pairCode[g.id]?.code || g.pairingCode;
@@ -403,17 +426,24 @@ export default function ReleaseGroupsPage() {
                       <div className="text-[11px] text-slate-500 mt-1 font-mono truncate" title={g.id}>id: {g.id}</div>
                     </div>
                     <div className="flex items-center gap-1">
-                      {g.tabletDeviceId ? (
+                      {tabletIds.length ? (
                         <button onClick={() => unpair(g.id)} disabled={busy[g.id]}
-                          title="Unpair iPad"
+                          title="Unpair all iPads"
                           className="px-2.5 py-1.5 rounded-md text-xs bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 disabled:opacity-50">
-                          <i className="ph ph-link-break mr-1"></i>Unpair
+                          <i className="ph ph-link-break mr-1"></i>Unpair all
                         </button>
                       ) : (
                         <button onClick={() => startPair(g.id)} disabled={busy[g.id]}
                           title="Generate a fresh pairing code"
                           className="px-2.5 py-1.5 rounded-md text-xs bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 disabled:opacity-50">
                           <i className="ph ph-device-tablet-speaker mr-1"></i>{code ? 'Re-pair' : 'Pair iPad'}
+                        </button>
+                      )}
+                      {tabletIds.length > 0 && (
+                        <button onClick={() => startPair(g.id)} disabled={busy[g.id]}
+                          title="Pair another iPad"
+                          className="px-2.5 py-1.5 rounded-md text-xs bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 disabled:opacity-50">
+                          <i className="ph ph-device-tablet mr-1"></i>Pair another
                         </button>
                       )}
                       <button onClick={() => removeGroup(g.id)}
@@ -424,8 +454,30 @@ export default function ReleaseGroupsPage() {
                     </div>
                   </div>
 
+                  {/* Paired iPads */}
+                  <div className="mx-5 mb-3 p-3 rounded-lg bg-slate-950/40 border border-slate-800">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                        <i className="ph ph-device-tablet-speaker mr-1"></i>Paired iPads
+                      </div>
+                      <div className="text-[10px] text-slate-500">{tabletIds.length} total</div>
+                    </div>
+                    {tabletIds.length === 0 ? (
+                      <div className="text-[11px] text-slate-500">No iPads paired yet.</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {tabletIds.map((tabletId) => (
+                          <span key={tabletId} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md border bg-emerald-500/10 border-emerald-500/30 text-emerald-200">
+                            <i className="ph ph-device-tablet opacity-70"></i>
+                            {tabletId}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Pairing code (when pending) */}
-                  {code && !g.tabletDeviceId && (
+                  {code && (
                     <div className="mx-5 mb-3 p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/30">
                       <div className="flex items-center justify-between gap-2 mb-1.5">
                         <div className="text-[10px] uppercase tracking-wider text-emerald-300 font-semibold">
@@ -445,7 +497,7 @@ export default function ReleaseGroupsPage() {
                         </button>
                       </div>
                       <div className="text-[10px] text-emerald-400/70 mt-1.5">
-                        Enter on the iPad at <code className="font-mono text-emerald-200">/pickup/teacher</code>.
+                        Enter on the iPad at <code className="font-mono text-emerald-200">/pickup/teacher</code>. You can pair more than one iPad to the same pole.
                       </div>
                     </div>
                   )}
@@ -543,12 +595,23 @@ export default function ReleaseGroupsPage() {
                     />
                   </div>
 
+                  {/* Grade timing scope windows */}
+                  <div className="px-5 pb-3">
+                    <GradeTimingEditor
+                      groupId={g.id}
+                      gradeLabel={g.gradeLabel || ''}
+                      initial={g.gradeWindowByLabel || {}}
+                      busy={!!busy[g.id]}
+                      onSave={(map) => updateGradeWindows(g.id, map)}
+                    />
+                  </div>
+
                   {/* Footer meta */}
-                  {(g.createdAt || g.updatedAt || g.tabletDeviceId) && (
+                  {(g.createdAt || g.updatedAt || tabletIds.length) && (
                     <div className="px-5 py-2 border-t border-slate-800/60 bg-slate-950/30 text-[10px] text-slate-500 flex items-center gap-3 flex-wrap">
-                      {g.tabletDeviceId && (
-                        <span className="font-mono truncate max-w-[180px]" title={g.tabletDeviceId}>
-                          <i className="ph ph-device-tablet mr-1"></i>{g.tabletDeviceId}
+                      {tabletIds.length > 0 && (
+                        <span className="font-mono truncate max-w-[240px]" title={tabletIds.join(', ')}>
+                          <i className="ph ph-device-tablet mr-1"></i>{tabletIds.length} iPad{tabletIds.length > 1 ? 's' : ''} paired
                         </span>
                       )}
                       {g.updatedAt && <span><i className="ph ph-clock mr-1"></i>updated {fmtDate(g.updatedAt)}</span>}
@@ -573,6 +636,190 @@ export default function ReleaseGroupsPage() {
         </div>
       )}
     </V2Layout>
+  );
+}
+
+function GradeTimingEditor({ groupId, gradeLabel, initial, busy, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [map, setMap] = useState(() => ({ ...(initial || {}) }));
+
+  useEffect(() => {
+    setMap({ ...(initial || {}) });
+  }, [groupId, JSON.stringify(initial)]);
+
+  const normalized = useMemo(() => {
+    const out = {};
+    Object.entries(map || {}).forEach(([k, v]) => {
+      const label = String(k || '').trim().toUpperCase();
+      if (!label || !v || typeof v !== 'object') return;
+      out[label] = {
+        open: String(v.open || '').trim(),
+        close: String(v.close || '').trim(),
+      };
+    });
+    return out;
+  }, [map]);
+
+  const initialNorm = useMemo(() => {
+    const out = {};
+    Object.entries(initial || {}).forEach(([k, v]) => {
+      const label = String(k || '').trim().toUpperCase();
+      if (!label || !v || typeof v !== 'object') return;
+      out[label] = {
+        open: String(v.open || '').trim(),
+        close: String(v.close || '').trim(),
+      };
+    });
+    return out;
+  }, [JSON.stringify(initial)]);
+
+  const keys = Object.keys(normalized).sort();
+  const dirty = JSON.stringify(normalized) !== JSON.stringify(initialNorm);
+
+  const addGrade = () => {
+    const fallback = String(gradeLabel || '').trim().toUpperCase() || 'G1';
+    const label = normalized[fallback] ? `${fallback}_SUPPORT` : fallback;
+    setMap((prev) => ({
+      ...(prev || {}),
+      [label]: { open: '12:00', close: '14:30' },
+    }));
+    setOpen(true);
+  };
+
+  const patchWindow = (label, patch) => {
+    setMap((prev) => ({
+      ...(prev || {}),
+      [label]: { ...(prev?.[label] || {}), ...patch },
+    }));
+  };
+
+  const renameLabel = (oldLabel, nextLabelRaw) => {
+    const nextLabel = String(nextLabelRaw || '').trim().toUpperCase();
+    if (!nextLabel || oldLabel === nextLabel) return;
+    setMap((prev) => {
+      const next = { ...(prev || {}) };
+      const val = next[oldLabel];
+      delete next[oldLabel];
+      next[nextLabel] = val;
+      return next;
+    });
+  };
+
+  const removeLabel = (label) => {
+    setMap((prev) => {
+      const next = { ...(prev || {}) };
+      delete next[label];
+      return next;
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 text-left"
+      >
+        <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5">
+          <i className="ph ph-timer"></i>
+          Grade timing scope
+          {keys.length > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-brand-500/15 border border-brand-500/40 text-brand-200 text-[10px]">
+              {keys.length} window{keys.length > 1 ? 's' : ''}
+            </span>
+          )}
+        </span>
+        <span className="text-[10px] text-slate-500 flex items-center gap-1">
+          {dirty && <span className="text-amber-400">unsaved</span>}
+          <i className={`ph ${open ? 'ph-caret-up' : 'ph-caret-down'}`}></i>
+        </span>
+      </button>
+
+      {open && (
+        <div className="px-3 pb-3 space-y-2">
+          {keys.length === 0 ? (
+            <div className="text-[11px] text-slate-500 py-1.5">
+              No grade timing windows set. Terminal and tenant windows will apply.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {keys.map((label) => {
+                const row = normalized[label] || { open: '', close: '' };
+                return (
+                  <div key={label} className="rounded-md border border-slate-700 bg-slate-900/60 p-2">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div>
+                        <label className="block text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-0.5">Grade label</label>
+                        <input
+                          type="text"
+                          defaultValue={label}
+                          onBlur={(e) => renameLabel(label, e.target.value)}
+                          className="px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-100 focus:border-brand-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-0.5">Open</label>
+                        <input
+                          type="time"
+                          value={row.open || ''}
+                          onChange={(e) => patchWindow(label, { open: e.target.value })}
+                          className="px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-100 focus:border-brand-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] uppercase tracking-wider text-slate-500 font-semibold mb-0.5">Close</label>
+                        <input
+                          type="time"
+                          value={row.close || ''}
+                          onChange={(e) => patchWindow(label, { close: e.target.value })}
+                          className="px-2 py-1 text-xs bg-slate-950 border border-slate-700 rounded text-slate-100 focus:border-brand-500 focus:outline-none"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeLabel(label)}
+                        title="Remove"
+                        className="px-2 py-1.5 rounded border border-slate-700 bg-slate-900 text-slate-400 hover:text-rose-300 hover:border-rose-500/40"
+                      >
+                        <i className="ph ph-trash"></i>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex justify-between gap-2 pt-1">
+            <button
+              type="button"
+              onClick={addGrade}
+              className="px-2.5 py-1 text-[11px] rounded bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700"
+            >
+              <i className="ph ph-plus mr-1"></i>Add grade window
+            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setMap({ ...(initial || {}) })}
+                disabled={!dirty || busy}
+                className="px-2.5 py-1 text-[11px] rounded bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 disabled:opacity-40"
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                onClick={() => onSave(normalized)}
+                disabled={!dirty || busy}
+                className="px-3 py-1 text-[11px] rounded font-semibold bg-emerald-500 hover:bg-emerald-400 text-slate-950 border border-emerald-400 disabled:opacity-40"
+              >
+                {busy ? <><i className="ph ph-spinner-gap animate-spin mr-1"></i>Saving…</> : <><i className="ph ph-check mr-1"></i>Save timing</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

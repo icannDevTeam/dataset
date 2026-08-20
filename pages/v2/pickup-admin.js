@@ -84,6 +84,21 @@ function explainNonJsonApiFailure(status, raw) {
   return snippet ? `HTTP ${status}: ${snippet}` : `HTTP ${status}`;
 }
 
+function askReasonOrFallback(message, fallbackValue) {
+  if (typeof window === 'undefined') return null;
+  try {
+    if (typeof window.prompt === 'function') {
+      return window.prompt(message, fallbackValue);
+    }
+  } catch {
+    // Continue to fallback confirmation below when prompt is unsupported.
+  }
+  const useFallback = window.confirm(
+    `${message}\n\nThis browser does not support text prompts. Use default reason: "${fallbackValue}"?`,
+  );
+  return useFallback ? fallbackValue : null;
+}
+
 function isTemporaryStudentId(value) {
   return String(value || '').startsWith('tmp-');
 }
@@ -743,6 +758,34 @@ export default function PickupAdminPage() {
   // Edit / delete chaperone or student inside a pending onboarding record.
   // Used by the per-section Edit / Delete action buttons.
   const submitOnboardingEdit = useCallback(async (payload) => {
+    if (payload?.action === 'delete-approved-chaperone') {
+      try {
+        const reason = String(payload.reason || '').trim();
+        const chaperoneId = String(payload.chaperoneId || '').trim();
+        if (!reason || !chaperoneId) {
+          throw new Error('missing delete reason or chaperone id');
+        }
+        const r = await fetch('/api/pickup/admin/chaperone-delete', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chaperoneId, reason }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.message || j.error || 'delete failed');
+        const failedDevices = (j.deviceRemoval?.devices || []).filter((d) => d.ok === false);
+        if (failedDevices.length > 0) {
+          pushToast('warn', `Chaperone deleted, but ${failedDevices.length} terminal(s) reported unenroll errors.`);
+        } else {
+          pushToast('success', 'Chaperone deleted and removed from terminals.');
+        }
+        reload();
+        return true;
+      } catch (e) {
+        pushToast('error', `Delete failed: ${e.message}`);
+        return false;
+      }
+    }
     try {
       const r = await fetch('/api/pickup/admin/onboarding-edit', {
         method: 'PATCH',
@@ -2443,6 +2486,7 @@ function RecordDetail(props) {
             const allocated = rec.allocatedChaperones?.[i];
             const enrol = (rec.enrollment || []).find((e) => e.chaperoneId === allocated?.chaperoneId);
             const editable = EDITABLE_ONBOARDING_STATUSES.includes(rec.status) && !!onOnboardingEdit;
+            const approvedDelete = rec.status === 'approved' && !!allocated?.chaperoneId && !!onOnboardingEdit;
             return (
               <ChaperoneRow
                 key={c.tempId || i}
@@ -2460,7 +2504,15 @@ function RecordDetail(props) {
                   : null}
                 canEdit={editable}
                 onEdit={editable ? (patch) => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'update', patch }) : null}
-                onDelete={editable ? () => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete' }) : null}
+                onDelete={editable
+                  ? () => onOnboardingEdit({ recordId: rec.id, target: 'chaperone', tempId: c.tempId, action: 'delete' })
+                  : approvedDelete
+                    ? (reason) => onOnboardingEdit({
+                      action: 'delete-approved-chaperone',
+                      chaperoneId: allocated.chaperoneId,
+                      reason,
+                    })
+                    : null}
                 onDeleteFace={allocated && onDeleteChaperonePhoto
                   ? (facePath) => onDeleteChaperonePhoto(allocated.chaperoneId, facePath)
                   : editable
@@ -3035,11 +3087,11 @@ function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingC
   }, [autoOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    name: '', relation: 'parent', phone: '', email: '',
+    name: '', relation: 'parent', email: '',
     idNumber: '', authorizedStudentIds: [],
   });
   const reset = () => setForm({
-    name: '', relation: 'parent', phone: '', email: '',
+    name: '', relation: 'parent', email: '',
     idNumber: '', authorizedStudentIds: [],
   });
   const toggle = (sid) => setForm((f) => ({
@@ -3050,7 +3102,6 @@ function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingC
   }));
   const valid =
     form.name.trim().length >= 2 &&
-    form.phone.trim().length >= 4 &&
     form.authorizedStudentIds.length > 0;
   const atCap = existingCount >= 5;
   const isApproved = recordStatus === 'approved';
@@ -3061,7 +3112,6 @@ function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingC
     const ok = await onSubmit({
       name: form.name.trim(),
       relation: form.relation,
-      phone: form.phone.trim(),
       email: form.email.trim() || null,
       idNumber: form.idNumber.trim() || null,
       authorizedStudentIds: form.authorizedStudentIds,
@@ -3124,11 +3174,6 @@ function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingC
           </select>
         </label>
         <label className="block">
-          <div className="text-[10px] text-slate-500 mb-0.5">Phone *</div>
-          <input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
-        </label>
-        <label className="block">
           <div className="text-[10px] text-slate-500 mb-0.5">Email</div>
           <input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
             className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white" />
@@ -3136,16 +3181,18 @@ function AddChaperonePanel({ recordId, recordStatus, enrichedStudents, existingC
       </div>
       {enrichedStudents.length > 0 && (
         <div>
-          <div className="text-[10px] text-slate-500 mb-1">Authorized to pick up *</div>
+          <div className="text-[10px] text-emerald-300 mb-1.5 uppercase tracking-wider font-semibold inline-flex items-center gap-1">
+            <i className="ph ph-seal-check"></i>Authorized to pick up *
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {enrichedStudents.map((s) => {
               const on = form.authorizedStudentIds.includes(s.id);
               return (
                 <button key={s.id} type="button" onClick={() => toggle(s.id)}
-                  className={`text-[11px] px-2 py-0.5 rounded-full border ${on
-                    ? 'bg-brand-500/20 border-brand-500/40 text-brand-200'
+                  className={`text-[11px] px-2 py-1 rounded-lg border font-semibold inline-flex items-center ${on
+                    ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-100'
                     : 'bg-slate-800/40 border-slate-700 text-slate-400'}`}>
-                  <i className={`ph ${on ? 'ph-check-circle' : 'ph-circle'} mr-1`}></i>{s.name || s.id}
+                  <i className={`ph ${on ? 'ph-check-square' : 'ph-square'} mr-1`}></i>{s.name || s.id}
                 </button>
               );
             })}
@@ -3198,6 +3245,18 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
 
   const handleDelete = async () => {
     if (!onDelete) return;
+    if (allocated?.chaperoneId) {
+      const reason = askReasonOrFallback(
+        `Reason for deleting approved chaperone ${c.name} (required):`,
+        'Data correction requested by ACOP',
+      );
+      if (!reason || !String(reason).trim()) return;
+      if (!confirm(
+        `Delete approved chaperone "${c.name}"?\n\nThis removes gate enrollment, clears terminal assignment overrides, and hides this chaperone from Pickup Enroll.`,
+      )) return;
+      await onDelete(String(reason).trim());
+      return;
+    }
     if (!confirm(`Remove chaperone "${c.name}" from this submission?\n\nUploaded face photos will also be deleted. This cannot be undone before approval.`)) return;
     await onDelete();
   };
@@ -3327,18 +3386,20 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
             </span>
           ))}
           {canEdit && (
-            <>
-              <button type="button" onClick={() => setEditOpen((v) => !v)}
-                className="text-[10px] px-2 py-0.5 rounded border bg-slate-800/60 border-slate-700 text-slate-200 hover:bg-slate-700"
-                title="Edit chaperone details">
-                <i className="ph ph-pencil-simple mr-1"></i>Edit
-              </button>
-              <button type="button" onClick={handleDelete}
-                className="text-[10px] px-2 py-0.5 rounded border bg-red-500/15 border-red-500/30 text-red-300 hover:bg-red-500/25"
-                title="Remove this chaperone from the submission">
-                <i className="ph ph-trash mr-1"></i>Delete
-              </button>
-            </>
+            <button type="button" onClick={() => setEditOpen((v) => !v)}
+              className="text-[10px] px-2 py-0.5 rounded border bg-slate-800/60 border-slate-700 text-slate-200 hover:bg-slate-700"
+              title="Edit chaperone details">
+              <i className="ph ph-pencil-simple mr-1"></i>Edit
+            </button>
+          )}
+          {onDelete && (
+            <button type="button" onClick={handleDelete}
+              className="text-[10px] px-2 py-0.5 rounded border bg-red-500/15 border-red-500/30 text-red-300 hover:bg-red-500/25"
+              title={allocated?.chaperoneId
+                ? 'Delete this approved chaperone (also clears terminal assignments)'
+                : 'Remove this chaperone from the submission'}>
+              <i className="ph ph-trash mr-1"></i>Delete
+            </button>
           )}
         </div>
       </div>
@@ -3372,16 +3433,18 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
           </div>
           {enrichedStudents.length > 0 && (
             <div>
-              <div className="text-[10px] text-slate-500 mb-1">Authorized to pick up</div>
+              <div className="text-[10px] text-emerald-300 mb-1.5 uppercase tracking-wider font-semibold inline-flex items-center gap-1">
+                <i className="ph ph-seal-check"></i>Authorized to pick up
+              </div>
               <div className="flex flex-wrap gap-1.5">
                 {enrichedStudents.map((s) => {
                   const on = editForm.authorizedStudentIds.includes(s.id);
                   return (
                     <button key={s.id} type="button" onClick={() => toggleAuthStudent(s.id)}
-                      className={`text-[11px] px-2 py-0.5 rounded-full border ${on
-                        ? 'bg-brand-500/20 border-brand-500/40 text-brand-200'
+                      className={`text-[11px] px-2 py-1 rounded-lg border font-semibold inline-flex items-center ${on
+                        ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-100'
                         : 'bg-slate-800/40 border-slate-700 text-slate-400'}`}>
-                      <i className={`ph ${on ? 'ph-check-circle' : 'ph-circle'} mr-1`}></i>{s.name || s.id}
+                      <i className={`ph ${on ? 'ph-check-square' : 'ph-square'} mr-1`}></i>{s.name || s.id}
                     </button>
                   );
                 })}
@@ -3409,14 +3472,14 @@ function ChaperoneRow({ c, index, allocated, enrol, enrichedStudents, onPhoto, o
         {/* Authorized to pick up */}
         {authorizedNames.length > 0 && (
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">
-              <i className="ph ph-graduation-cap mr-1"></i>Authorized to pick up
+            <div className="text-[10px] uppercase tracking-wider text-emerald-300 font-semibold mb-1.5 inline-flex items-center gap-1">
+              <i className="ph ph-seal-check"></i>Authorized to pick up
             </div>
             <div className="flex flex-wrap gap-1.5">
               {authorizedNames.map((a) => (
                 <span key={a.id}
-                  className="text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-200 border border-brand-500/30">
-                  <i className="ph ph-check-circle"></i>{a.name}
+                  className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-100 border border-emerald-400/40 font-semibold">
+                  <i className="ph ph-check-square"></i>{a.name}
                 </span>
               ))}
             </div>
@@ -3822,9 +3885,11 @@ function PrintFormModal({ rec, thumbnails, onClose }) {
                   <div className="text-xs mt-1.5">
                     <span className="text-slate-600">Authorised to pick up: </span>
                     <strong>
-                      {(c.authorizedStudentIds || [])
-                        .map((sid) => enrichedStudents.find((x) => x.id === sid)?.name || sid)
-                        .join(', ') || '—'}
+                      {(c.authorizedStudentIds || []).length > 0
+                        ? (c.authorizedStudentIds || [])
+                          .map((sid) => `\u2713 ${enrichedStudents.find((x) => x.id === sid)?.name || sid}`)
+                          .join(', ')
+                        : '—'}
                     </strong>
                   </div>
                   {rec.allocatedChaperones?.[i] && (

@@ -74,10 +74,30 @@ function AuthGate({ Component, pageProps }) {
 
     const from = normalizeRedirectPath(router.pathname || router.asPath);
     const target = `/login?from=${encodeURIComponent(from)}`;
-    if (router.asPath !== target) {
-      router.replace(target);
+    if (router.asPath === target) return;
+
+    let fallbackTimer;
+    router.replace(target).catch(() => {
+      if (typeof window !== 'undefined') {
+        window.location.replace(target);
+      }
+    });
+
+    // Safety fallback: some stale/history states can swallow client-side nav.
+    if (typeof window !== 'undefined') {
+      fallbackTimer = window.setTimeout(() => {
+        if (window.location.pathname !== '/login') {
+          window.location.replace(target);
+        }
+      }, 900);
     }
-  }, [loading, authorized, router]);
+
+    return () => {
+      if (fallbackTimer) {
+        window.clearTimeout(fallbackTimer);
+      }
+    };
+  }, [loading, authorized, router.pathname, router.asPath]);
 
   // Public pages: render without auth check
   if (isPublicRoute(router.pathname)) {
@@ -99,7 +119,16 @@ function AuthGate({ Component, pageProps }) {
 
   // Not authorized → redirect to login
   if (!authorized) {
-    return null;
+    return (
+      <div className="aura-theme antialiased min-h-screen flex items-center justify-center">
+        <div className="noise-overlay"></div>
+        <div className="glass-panel rounded-2xl border border-slate-800 p-12 flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-slate-300 text-sm font-medium">Redirecting to login…</span>
+          <span className="text-slate-500 text-xs text-center max-w-xs">If you keep seeing this, sign in again or clear the stale session cookie.</span>
+        </div>
+      </div>
+    );
   }
 
   // Permissions still resolving — show page (avoids flash of denied)
