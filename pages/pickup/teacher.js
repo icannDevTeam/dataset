@@ -1125,6 +1125,8 @@ export default function TeacherTabletPage() {
   const [gateSignal, setGateSignal] = useState(null);
   const [gateNotice, setGateNotice] = useState(null);
   const serverClosedRef = useRef(false);
+  const inWindowRef = useRef(false);
+  const windowLabelRef = useRef(localWindow);
   const gateFingerprintRef = useRef('');
   const pollRef = useRef(null);
   const isPreviewRef = useRef(false);
@@ -1503,20 +1505,32 @@ export default function TeacherTabletPage() {
     }
   }, [token, applyGateSignal, isTombstoned]);
 
-  // Re-check every 30s. The server (Firestore schedule + gate enforcer) is
+  // Keep refs in sync for use inside the 30s interval closure.
+  useEffect(() => { inWindowRef.current = inWindow; }, [inWindow]);
+  useEffect(() => { windowLabelRef.current = windowLabel; }, [windowLabel]);
+
+  // Re-check while closed. The server (Firestore schedule + gate enforcer) is
   // authoritative for open/close — the local weekday table is only a
-  // first-paint hint before the first feed response arrives.
+  // first-paint hint. To keep Firestore/Vercel cost negligible, closed-state
+  // checks run every 5 min off-hours and tighten to 30s only within 20 min of
+  // the scheduled opening (so poles still open on time without manual reloads).
   useEffect(() => {
+    let tick = 0;
     const t = setInterval(() => {
+      tick += 1;
       const fallbackWindow = localDismissalWindow();
       setWindowLabel((prev) => {
         if (serverClosedRef.current) return prev;
         if (prev.open === fallbackWindow.open && prev.close === fallbackWindow.close) return prev;
         return fallbackWindow;
       });
-      // While closed, keep asking the server so a longer Firestore window or
-      // an admin manual-open re-opens the tablet without a manual reload.
-      pollFeed();
+      if (inWindowRef.current) return; // open → the main poll/SSE loop owns cadence
+      const w = windowLabelRef.current || fallbackWindow;
+      const cur = wibMinutes();
+      const openMin = hhmmToMinutes(w.open || fallbackWindow.open);
+      const closeMin = hhmmToMinutes(w.close || fallbackWindow.close);
+      const nearWindow = cur >= openMin - 20 && cur <= closeMin + 5;
+      if (nearWindow || tick % 10 === 0) pollFeed();
     }, 30_000);
     return () => clearInterval(t);
   }, [pollFeed]);
