@@ -1458,28 +1458,6 @@ export default function TeacherTabletPage() {
     return () => { cancelled = true; };
   }, [token]);
 
-  // Re-check every 30s; if server closed this pole, keep it closed.
-  useEffect(() => {
-    const t = setInterval(() => {
-      const local = isInDismissalWindow();
-      const fallbackWindow = localDismissalWindow();
-      setWindowLabel((prev) => {
-        if (serverClosedRef.current) return prev;
-        if (prev.open === fallbackWindow.open && prev.close === fallbackWindow.close) return prev;
-        return fallbackWindow;
-      });
-      setInWindow(() => {
-        if (!local) {
-          serverClosedRef.current = false;
-          return false;
-        }
-        if (serverClosedRef.current) return false;
-        return true;
-      });
-    }, 30_000);
-    return () => clearInterval(t);
-  }, []);
-
   // Poll feed
   const pollFeed = useCallback(async () => {
     if (!token || isPreviewRef.current) return;
@@ -1525,8 +1503,32 @@ export default function TeacherTabletPage() {
     }
   }, [token, applyGateSignal, isTombstoned]);
 
+  // Re-check every 30s. The server (Firestore schedule + gate enforcer) is
+  // authoritative for open/close — the local weekday table is only a
+  // first-paint hint before the first feed response arrives.
   useEffect(() => {
-    if (!token || !identity || !inWindow || isPreviewRef.current) return;
+    const t = setInterval(() => {
+      const fallbackWindow = localDismissalWindow();
+      setWindowLabel((prev) => {
+        if (serverClosedRef.current) return prev;
+        if (prev.open === fallbackWindow.open && prev.close === fallbackWindow.close) return prev;
+        return fallbackWindow;
+      });
+      // While closed, keep asking the server so a longer Firestore window or
+      // an admin manual-open re-opens the tablet without a manual reload.
+      pollFeed();
+    }, 30_000);
+    return () => clearInterval(t);
+  }, [pollFeed]);
+
+  useEffect(() => {
+    if (!token || !identity || isPreviewRef.current) return;
+    if (!inWindow) {
+      // Ask the server immediately — the local table may say closed while
+      // the real Firestore window is still open (server is authoritative).
+      pollFeed();
+      return;
+    }
     pollFeed();
     // Cadence depends on SSE health: 10s when offline (fallback), 60s when
     // the SSE channel is delivering live events. The SSE effect below adjusts
