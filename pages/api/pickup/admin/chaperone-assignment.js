@@ -11,9 +11,12 @@ const SIGNED_URL_TTL_MS = 60 * 60 * 1000; // 1h — short-lived so storage paths
 function normalizeScopeToken(value) {
   const raw = String(value || '').trim().toUpperCase();
   if (!raw) return [];
-  // Keep matching exact. Expanding EY1/EY2/EY3 to EY caused one EY sibling
-  // to match every EY terminal, which is what created the spillover.
   if (raw === 'EY') return ['EY'];
+  // Keep specific EY terminals exact, but allow a chaperone who has an EY1/EY2/EY3
+  // child to match the broad EY gate by adding the family-level alias in the
+  // chaperone scope derivation below. This prevents the false negative where the
+  // parent is visible at the generic EY terminal but not recognized there.
+  if (/^EY\d+$/.test(raw)) return [raw];
   const m = raw.match(/^(\d{1,2})/);
   if (m) return [m[1]];
   return [raw];
@@ -21,7 +24,16 @@ function normalizeScopeToken(value) {
 
 function deriveChaperoneScopes(ch) {
   const out = new Set();
-  const add = (v) => normalizeScopeToken(v).forEach((x) => out.add(x));
+  const add = (v) => {
+    const raw = String(v || '').trim().toUpperCase();
+    if (!raw) return;
+    if (/^EY\d+$/.test(raw)) {
+      out.add(raw);
+      out.add('EY');
+      return;
+    }
+    normalizeScopeToken(v).forEach((x) => out.add(x));
+  };
   (ch?.studentGrades || []).forEach(add);
   (ch?.studentClasses || []).forEach(add);
   return [...out];

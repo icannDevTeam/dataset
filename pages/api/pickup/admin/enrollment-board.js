@@ -120,6 +120,7 @@ async function handler(req, res) {
       // Pending/rejected/suspended records belong to the admin queue, not the
       // enrollment board.
       if (c.suspendedAt) return;
+      if (c.lifecycleStatus === 'deleted') return;
       if (!['approved', 'approved_pending_faces'].includes(c.status)) return;
       chaperones.push({ id: d.id, ...c });
       (c.authorizedStudentIds || []).forEach((sid) => sid && allStudentIds.add(sid));
@@ -315,6 +316,8 @@ async function handler(req, res) {
         enrolledDeviceCount: allDevices.filter((d) => d.ok).length,
         availableDeviceCount: allDevices.length,
         suspended: !!c.suspendedAt,
+        assignmentMode: c.assignmentMode || 'derived',
+        allowedTerminalIds: Array.isArray(c.allowedTerminalIds) ? c.allowedTerminalIds : [],
       };
 
       // Group the card under EVERY class of the chaperone's authorized

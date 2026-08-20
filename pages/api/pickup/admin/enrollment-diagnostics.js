@@ -7,8 +7,8 @@ const tenancy = require('../../../../lib/tenancy');
 function normalizeScopeToken(value) {
   const raw = String(value || '').trim().toUpperCase();
   if (!raw) return [];
-  if (/^EY[1-3]$/.test(raw)) return [raw, 'EY'];
   if (raw === 'EY') return ['EY'];
+  if (/^EY[1-3]$/.test(raw)) return [raw];
   const m = raw.match(/^(\d{1,2})/);
   if (m) return [m[1]];
   return [raw];
@@ -16,7 +16,16 @@ function normalizeScopeToken(value) {
 
 function deriveChaperoneScopes(ch) {
   const out = new Set();
-  const add = (v) => normalizeScopeToken(v).forEach((x) => out.add(x));
+  const add = (v) => {
+    const raw = String(v || '').trim().toUpperCase();
+    if (!raw) return;
+    if (/^EY\d+$/.test(raw)) {
+      out.add(raw);
+      out.add('EY');
+      return;
+    }
+    normalizeScopeToken(v).forEach((x) => out.add(x));
+  };
   (ch?.studentGrades || []).forEach(add);
   (ch?.studentClasses || []).forEach(add);
   return [...out];

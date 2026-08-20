@@ -14,9 +14,18 @@ import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 
+const SUMMARY_CACHE_TTL_MS = 10 * 1000;
+const summaryCache = new Map();
+
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
   const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
+  const cacheKey = `summary:${tid}`;
+
+  const cached = summaryCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return res.status(200).json(cached.payload);
+  }
 
   try {
     initializeFirebase();
@@ -69,7 +78,7 @@ async function handler(req, res) {
       };
     });
 
-    return res.status(200).json({
+    const payload = {
       ok: true,
       counts: {
         pending,
@@ -80,7 +89,10 @@ async function handler(req, res) {
         total: pending + changes_requested + approved + rejected + archived,
       },
       recentPending,
-    });
+    };
+
+    summaryCache.set(cacheKey, { payload, expiresAt: Date.now() + SUMMARY_CACHE_TTL_MS });
+    return res.status(200).json(payload);
   } catch (err) {
     console.error('[forms-summary]', err.message);
     return res.status(500).json({ error: 'internal', message: err.message });

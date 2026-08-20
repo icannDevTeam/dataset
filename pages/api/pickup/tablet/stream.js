@@ -33,6 +33,58 @@ export const config = {
 
 const TERMINAL_REF_TTL_MS = 30 * 1000;
 const TERMINAL_REF_CACHE = new Map();
+const OFF_WINDOW_CACHE_TTL_MS = 60 * 1000;
+const OFF_WINDOW_STREAM_CACHE = new Map();
+const STREAM_CONTEXT_CACHE_TTL_MS = 30 * 1000;
+const STREAM_HEARTBEAT_SECS = 10 * 60 * 1000;
+const STREAM_CONTEXT_CACHE = new Map();
+
+function getStreamContextCache(key) {
+  const hit = STREAM_CONTEXT_CACHE.get(key);
+  if (!hit) return null;
+  if ((Date.now() - hit.at) > STREAM_CONTEXT_CACHE_TTL_MS) {
+    STREAM_CONTEXT_CACHE.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function setStreamContextCache(key, value) {
+  STREAM_CONTEXT_CACHE.set(key, { at: Date.now(), value });
+}
+
+function getOffWindowCache(key) {
+  const hit = OFF_WINDOW_STREAM_CACHE.get(key);
+  if (!hit) return null;
+  if ((Date.now() - hit.at) > OFF_WINDOW_CACHE_TTL_MS) {
+    OFF_WINDOW_STREAM_CACHE.delete(key);
+    return null;
+  }
+  return hit.payload;
+}
+
+function setOffWindowCache(key, payload) {
+  OFF_WINDOW_STREAM_CACHE.set(key, { at: Date.now(), payload });
+}
+
+function summarizeGateSignal(gateStates, inWindow) {
+  const reasonCounts = new Map();
+  gateStates.forEach((s) => {
+    const reason = String(s?.reason || 'unknown');
+    reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+  });
+  const reasons = [...reasonCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason]) => reason);
+  return {
+    source: 'firestore+backend',
+    open: !!inWindow,
+    reason: reasons[0] || (inWindow ? 'in-window' : 'out-of-window'),
+    reasons,
+    terminalsEvaluated: gateStates.length,
+    evaluatedAt: new Date().toISOString(),
+  };
+}
 
 function normalizeToken(value) {
   return String(value || '').trim().toLowerCase();
@@ -113,53 +165,68 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') { res.status(405).json({ error: 'method' }); return; }
   const token = req.headers['x-tablet-device-token'] || req.query.deviceToken;
   if (!token) { res.status(401).json({ error: 'deviceToken required' }); return; }
+  const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
+  const tokenKey = `${tid}:${String(token)}`;
 
-  let tid, terminalIds = [], terminalKeys = [], gradeScopes = [], releaseGroupId = null;
+  const cachedClosed = getOffWindowCache(tokenKey);
+  if (cachedClosed) {
+    res.status(200).json(cachedClosed);
+    return;
+  }
+
+  let terminalIds = [], terminalKeys = [], gradeScopes = [], releaseGroupId = null;
+  let gateSignal = null;
+  let dev = null;
+  let devData = null;
   try {
     initializeFirebase();
     const db = admin.firestore();
-    tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
+    const cachedCtx = getStreamContextCache(tokenKey);
+    let group = null;
+    let pickupSettings = null;
+    if (cachedCtx) {
+      ({ releaseGroupId, terminalIds, terminalKeys, gradeScopes, group, pickupSettings } = cachedCtx);
+    } else {
+      const devSnap = await db.collection(tenancy.tabletDevicesPath(tid))
+        .where('deviceToken', '==', String(token))
+        .limit(1).get();
+      if (devSnap.empty) { res.status(401).json({ error: 'unknown token' }); return; }
+      dev = devSnap.docs[0];
+      devData = dev.data();
+      if (devData.status !== 'paired') { res.status(401).json({ error: 'not paired' }); return; }
 
-    const devSnap = await db.collection(tenancy.tabletDevicesPath(tid))
-      .where('deviceToken', '==', String(token))
-      .limit(1).get();
-    if (devSnap.empty) { res.status(401).json({ error: 'unknown token' }); return; }
-    const dev = devSnap.docs[0];
-    const devData = dev.data();
-    if (devData.status !== 'paired') { res.status(401).json({ error: 'not paired' }); return; }
-
-    releaseGroupId = devData.releaseGroupId;
-    let groupSnap = releaseGroupId ? await db.doc(tenancy.releaseGroupDoc(releaseGroupId, tid)).get() : null;
-    if (!groupSnap?.exists) {
-      const candidates = ['tabletDeviceId', 'tabletId', 'pairedTabletDeviceId', 'deviceId'];
-      let recovered = null;
-      for (const field of candidates) {
-        try {
-          const snap = await db.collection(tenancy.releaseGroupsPath(tid))
-            .where(field, '==', dev.id)
-            .limit(1)
-            .get();
-          if (!snap.empty) {
-            recovered = snap.docs[0];
-            break;
-          }
-        } catch {}
+      releaseGroupId = devData.releaseGroupId;
+      let groupSnap = releaseGroupId ? await db.doc(tenancy.releaseGroupDoc(releaseGroupId, tid)).get() : null;
+      if (!groupSnap?.exists) {
+        const candidates = ['tabletDeviceId', 'tabletId', 'pairedTabletDeviceId', 'deviceId'];
+        let recovered = null;
+        for (const field of candidates) {
+          try {
+            const snap = await db.collection(tenancy.releaseGroupsPath(tid))
+              .where(field, '==', dev.id)
+              .limit(1)
+              .get();
+            if (!snap.empty) {
+              recovered = snap.docs[0];
+              break;
+            }
+          } catch {}
+        }
+        if (recovered) {
+          groupSnap = recovered;
+          releaseGroupId = recovered.id;
+          dev.ref.set({ releaseGroupId }, { merge: true }).catch(() => {});
+        }
       }
-      if (recovered) {
-        groupSnap = recovered;
-        releaseGroupId = recovered.id;
-        dev.ref.set({ releaseGroupId }, { merge: true }).catch(() => {});
-      }
+      if (!releaseGroupId) { res.status(409).json({ error: 'no release group bound' }); return; }
+      if (!groupSnap?.exists) { res.status(404).json({ error: 'release group not found' }); return; }
+      group = groupSnap.data();
+      const resolvedRefs = await resolveGroupTerminalRefs(db, tid, group.terminalIds);
+      terminalIds = resolvedRefs.terminalIds;
+      terminalKeys = resolvedRefs.terminalKeys;
+      const pickupSettingsSnap = await db.doc(tenancy.pickupSettingsDoc(tid)).get().catch(() => null);
+      pickupSettings = pickupSettingsSnap?.exists ? (pickupSettingsSnap.data() || {}) : {};
     }
-    if (!releaseGroupId) { res.status(409).json({ error: 'no release group bound' }); return; }
-    if (!groupSnap?.exists) { res.status(404).json({ error: 'release group not found' }); return; }
-    const group = groupSnap.data();
-    const resolvedRefs = await resolveGroupTerminalRefs(db, tid, group.terminalIds);
-    terminalIds = resolvedRefs.terminalIds;
-    terminalKeys = resolvedRefs.terminalKeys;
-
-    const pickupSettingsSnap = await db.doc(tenancy.pickupSettingsDoc(tid)).get().catch(() => null);
-    const pickupSettings = pickupSettingsSnap?.exists ? (pickupSettingsSnap.data() || {}) : {};
 
     // Union of the group's terminal gradeScopes — lets the bus drop
     // wrong-gate cards (e.g. EY parent at a Grade 4/5 pole).
@@ -169,13 +236,17 @@ export default async function handler(req, res) {
           ...terminalIds.slice(0, 30).map((tidx) => db.doc(tenancy.terminalDoc(tidx, tid)))
         );
         const terminalDocs = termSnaps.filter((s) => s.exists).map((s) => ({ id: s.id, ...(s.data() || {}) }));
-        const inWindow = terminalDocs
-          .map((t) => effectiveGateStatus(t, group, new Date(), pickupSettings))
-          .some((s) => !!s.open);
+        const gateStates = terminalDocs
+          .map((t) => effectiveGateStatus(t, group, new Date(), pickupSettings));
+        const inWindow = gateStates.some((s) => !!s.open);
+        gateSignal = summarizeGateSignal(gateStates, inWindow);
         if (!inWindow) {
-          res.status(200).json({ ok: false, inWindow: false });
+          const closedPayload = { ok: false, inWindow: false, gateSignal };
+          setOffWindowCache(tokenKey, closedPayload);
+          res.status(200).json(closedPayload);
           return;
         }
+        OFF_WINDOW_STREAM_CACHE.delete(tokenKey);
         const set = new Set();
         termSnaps.forEach((s) => {
           if (!s.exists) return;
@@ -183,16 +254,37 @@ export default async function handler(req, res) {
           if (Array.isArray(sc)) sc.forEach((g) => { const v = String(g).trim().toUpperCase(); if (v) set.add(v); });
         });
         gradeScopes = [...set];
+        setStreamContextCache(tokenKey, { releaseGroupId, terminalIds, terminalKeys, gradeScopes, group, pickupSettings });
       } catch {
         gradeScopes = [];
       }
     } else {
-      res.status(200).json({ ok: false, inWindow: false });
+      gateSignal = {
+        source: 'firestore+backend',
+        open: false,
+        reason: 'no-terminals',
+        reasons: ['no-terminals'],
+        terminalsEvaluated: 0,
+        evaluatedAt: new Date().toISOString(),
+      };
+      const closedPayload = { ok: false, inWindow: false, gateSignal };
+      setOffWindowCache(tokenKey, closedPayload);
+      res.status(200).json(closedPayload);
       return;
     }
 
-    // Touch lastSeenAt (best-effort, non-blocking).
-    dev.ref.set({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+    // Touch lastSeenAt sparingly to reduce write burn from reconnect loops.
+    if (!dev) {
+      const devSnap = await db.collection(tenancy.tabletDevicesPath(tid))
+        .where('deviceToken', '==', String(token))
+        .limit(1).get();
+      dev = devSnap.empty ? null : devSnap.docs[0];
+      devData = dev?.data() || null;
+    }
+    const lastSeenMs = devData?.lastSeenAt?.toMillis ? devData.lastSeenAt.toMillis() : 0;
+    if (dev && (Date.now() - lastSeenMs > STREAM_HEARTBEAT_SECS)) {
+      dev.ref.set({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+    }
   } catch (e) {
     console.error('[pickup/tablet/stream auth]', e.message);
     res.status(500).json({ error: 'internal', message: e.message });
@@ -209,7 +301,7 @@ export default async function handler(req, res) {
   res.write(`: connected ${new Date().toISOString()}\n\n`);
   // Some clients (and Vercel's edge) won't flush until a meaningful event
   // arrives — send a small event so the EventSource transitions to OPEN.
-  res.write(`event: hello\ndata: ${JSON.stringify({ tenantId: tid, terminalIds })}\n\n`);
+  res.write(`event: hello\ndata: ${JSON.stringify({ tenantId: tid, terminalIds, gateSignal })}\n\n`);
 
   bus.subscribe(tid, terminalKeys, res, gradeScopes, releaseGroupId);
 }

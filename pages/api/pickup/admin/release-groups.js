@@ -52,6 +52,37 @@ function normaliseOverrides(raw) {
   return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
+// Validate + normalise grade-specific timing windows.
+// Shape:
+// {
+//   "G1": { open:"12:00", close:"14:30" },
+//   "EY": { start:"12:00", end:"13:30" }
+// }
+function normaliseGradeWindows(raw) {
+  if (raw == null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('gradeWindowByLabel must be an object');
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const label = String(key || '').trim().toUpperCase();
+    if (!label) continue;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`gradeWindowByLabel.${label} must be an object`);
+    }
+    const open = String(value.open || value.start || '').trim();
+    const close = String(value.close || value.end || '').trim();
+    if (!open || !close) {
+      throw new Error(`gradeWindowByLabel.${label} requires open + close`);
+    }
+    if (!isValidHHMM(open) || !isValidHHMM(close)) {
+      throw new Error(`gradeWindowByLabel.${label} must use HH:MM`);
+    }
+    out[label] = { open, close };
+  }
+  return out;
+}
+
 // Reject if any of `ids` is already in another group's terminalIds, or if
 // the terminal's gradeLabel/gradeScopes don't match `gradeLabel` of the
 // group being edited. `selfId` is the current group's id (skip-conflict).
@@ -109,16 +140,24 @@ function tsIso(ts) {
 
 function publicGroup(id, data) {
   if (!data) return null;
+  const tabletDeviceIds = Array.isArray(data.tabletDeviceIds)
+    ? data.tabletDeviceIds.filter(Boolean)
+    : (data.tabletDeviceId ? [data.tabletDeviceId] : []);
+  const primaryTabletDeviceId = data.tabletDeviceId || tabletDeviceIds[0] || null;
   return {
     id,
     name: data.name || id,
     gradeLabel: data.gradeLabel || null,
     terminalIds: Array.isArray(data.terminalIds) ? data.terminalIds : [],
     pickupOverrides: Array.isArray(data.pickupOverrides) ? data.pickupOverrides : [],
-    tabletDeviceId: data.tabletDeviceId || null,
+    gradeWindowByLabel: (data.gradeWindowByLabel && typeof data.gradeWindowByLabel === 'object' && !Array.isArray(data.gradeWindowByLabel))
+      ? data.gradeWindowByLabel
+      : {},
+    tabletDeviceId: primaryTabletDeviceId,
+    tabletDeviceIds,
     pairingCode: data.pairingCode || null,
     pairingExpiresAt: tsIso(data.pairingExpiresAt),
-    status: data.status || (data.tabletDeviceId ? 'paired' : 'unbound'),
+    status: data.status || (tabletDeviceIds.length ? 'paired' : 'unbound'),
     createdAt: tsIso(data.createdAt),
     updatedAt: tsIso(data.updatedAt),
     claimedAt: tsIso(data.claimedAt),
@@ -179,6 +218,7 @@ async function handler(req, res) {
         pairingCode,
         pairingExpiresAt: expiresAt,
         pendingTabletDeviceId: deviceId,
+        pendingTabletDeviceIds: admin.firestore.FieldValue.arrayUnion(deviceId),
         updatedAt: now,
       }, { merge: true });
 
@@ -196,19 +236,25 @@ async function handler(req, res) {
       const groupRef = colRef.doc(id);
       const groupSnap = await groupRef.get();
       if (!groupSnap.exists) return res.status(404).json({ error: 'group not found' });
-      const tabletId = groupSnap.data().tabletDeviceId;
-      if (tabletId) {
-        await tabletColRef.doc(tabletId).set({
+      const tabletIds = Array.isArray(groupSnap.data().tabletDeviceIds)
+        ? groupSnap.data().tabletDeviceIds.filter(Boolean)
+        : (groupSnap.data().tabletDeviceId ? [groupSnap.data().tabletDeviceId] : []);
+      const revocationBatch = db.batch();
+      for (const tabletId of tabletIds) {
+        revocationBatch.set(tabletColRef.doc(tabletId), {
           status: 'revoked',
           deviceToken: null,
           revokedAt: admin.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
       }
+      await revocationBatch.commit().catch(() => {});
       await groupRef.set({
         tabletDeviceId: null,
+        tabletDeviceIds: [],
         pairingCode: null,
         pairingExpiresAt: null,
         pendingTabletDeviceId: null,
+        pendingTabletDeviceIds: [],
         status: 'unbound',
         claimedAt: null,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -235,12 +281,20 @@ async function handler(req, res) {
         catch (e) { return res.status(400).json({ error: 'invalid_overrides', message: e.message }); }
       }
 
+      let gradeWindowByLabel = {};
+      if (req.body?.gradeWindowByLabel !== undefined) {
+        try { gradeWindowByLabel = normaliseGradeWindows(req.body.gradeWindowByLabel); }
+        catch (e) { return res.status(400).json({ error: 'invalid_grade_windows', message: e.message }); }
+      }
+
       const docRef = await colRef.add({
         name,
         gradeLabel,
         terminalIds,
         pickupOverrides,
+        gradeWindowByLabel,
         tabletDeviceId: null,
+        tabletDeviceIds: [],
         status: 'unbound',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -285,9 +339,20 @@ async function handler(req, res) {
         }
         patch.terminalIds = newTerminalIds;
       }
+      if (req.body?.tabletDeviceIds !== undefined) {
+        if (!Array.isArray(req.body.tabletDeviceIds)) {
+          return res.status(400).json({ error: 'tabletDeviceIds must be an array' });
+        }
+        patch.tabletDeviceIds = req.body.tabletDeviceIds.map(String).map((s) => s.trim()).filter(Boolean);
+        patch.tabletDeviceId = patch.tabletDeviceIds[0] || null;
+      }
       if (req.body?.pickupOverrides !== undefined) {
         try { patch.pickupOverrides = normaliseOverrides(req.body.pickupOverrides); }
         catch (e) { return res.status(400).json({ error: 'invalid_overrides', message: e.message }); }
+      }
+      if (req.body?.gradeWindowByLabel !== undefined) {
+        try { patch.gradeWindowByLabel = normaliseGradeWindows(req.body.gradeWindowByLabel); }
+        catch (e) { return res.status(400).json({ error: 'invalid_grade_windows', message: e.message }); }
       }
       await ref.set(patch, { merge: true });
 

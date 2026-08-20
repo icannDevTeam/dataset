@@ -40,6 +40,7 @@ const tenancy = require('../../../../lib/tenancy');
 const { verifyPickupOnboardingToken } = require('../../../../lib/pickup-token');
 const { enforceRateLimit, clientIp } = require('../../../../lib/rate-limit');
 const inviteLinks = require('../../../../lib/onboarding-invites');
+const { buildOnboardingSearchPrefixes } = require('../../../../lib/pickup-search');
 const { syntheticStudentId, isTmpId } = require('../../../../lib/pickup-student-links');
 
 const MAX_CHAPERONES = 5;
@@ -351,6 +352,14 @@ export default async function handler(req, res) {
         reviewedAt: null,
         reviewedBy: null,
         approvalNotes: null,
+        searchPrefixes: buildOnboardingSearchPrefixes({
+          id: recordId,
+          formNumber,
+          guardian: { name: guardianName, email: guardianEmail, phone: guardianPhone },
+          students: cleanStudents,
+          chaperones: cleanChaperones,
+        }),
+        searchIndexVersion: 1,
       });
 
       lockCandidates.forEach(({ sid, student }, i) => {

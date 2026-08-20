@@ -216,6 +216,50 @@ async function detachTerminalFromReleaseGroups(db, tid, terminalId) {
   return updated;
 }
 
+async function syncTerminalReleaseGroupMembership(db, tid, terminalId, targetGroupId) {
+  const groupsRef = db.collection(tenancy.releaseGroupsPath(tid));
+  const current = await groupsRef.where('terminalIds', 'array-contains', terminalId).get();
+
+  const batch = db.batch();
+  let updated = 0;
+  for (const doc of current.docs) {
+    const data = doc.data() || {};
+    const terminalIds = Array.isArray(data.terminalIds) ? data.terminalIds.map(String) : [];
+    // Keep membership only on the canonical target group.
+    if (targetGroupId && doc.id === String(targetGroupId)) continue;
+    const next = terminalIds.filter((id) => id !== terminalId);
+    if (next.length === terminalIds.length) continue;
+    batch.set(doc.ref, {
+      terminalIds: next,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    updated += 1;
+  }
+
+  if (targetGroupId) {
+    const targetRef = groupsRef.doc(String(targetGroupId));
+    const targetSnap = await targetRef.get();
+    if (!targetSnap.exists) {
+      const err = new Error('release group not found');
+      err.code = 400;
+      throw err;
+    }
+    const targetData = targetSnap.data() || {};
+    const targetIds = Array.isArray(targetData.terminalIds) ? targetData.terminalIds.map(String) : [];
+    if (!targetIds.includes(terminalId)) {
+      targetIds.push(terminalId);
+      batch.set(targetRef, {
+        terminalIds: targetIds,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      updated += 1;
+    }
+  }
+
+  if (updated > 0) await batch.commit();
+  return updated;
+}
+
 async function handler(req, res) {
   initializeFirebase();
   const db = admin.firestore();
@@ -272,6 +316,7 @@ async function handler(req, res) {
       };
       if (!existing.exists) patch.createdAt = admin.firestore.FieldValue.serverTimestamp();
       await ref.set(patch, { merge: true });
+      await syncTerminalReleaseGroupMembership(db, tid, id, patch.releaseGroupId || null);
       const updated = (await ref.get()).data();
       const listenerStatusByTerminal = loadLatestListenerStatusByTerminal();
       return res.status(existing.exists ? 200 : 201).json({ ok: true, terminal: publicTerminal(id, updated, listenerStatusByTerminal) });
@@ -334,6 +379,9 @@ async function handler(req, res) {
       }
 
       await ref.set(patch, { merge: true });
+      if (req.body?.releaseGroupId !== undefined) {
+        await syncTerminalReleaseGroupMembership(db, tid, id, patch.releaseGroupId || null);
+      }
       const updated = (await ref.get()).data();
       const listenerStatusByTerminal = loadLatestListenerStatusByTerminal();
       return res.status(200).json({ ok: true, terminal: publicTerminal(id, updated, listenerStatusByTerminal) });

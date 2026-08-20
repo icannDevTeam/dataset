@@ -13,6 +13,9 @@ import { initializeFirebase } from '../../../../lib/firebase-admin';
 import { withApi } from '../../../../lib/api-auth';
 const tenancy = require('../../../../lib/tenancy');
 
+const NOTIFICATIONS_CACHE_TTL_MS = 10 * 1000;
+const notificationsCache = new Map();
+
 const TYPE_LABEL = {
   spoof_attempt: 'Spoof attempt',
   liveness_failure: 'Liveness failure',
@@ -31,9 +34,15 @@ function toIso(v) {
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
 
+  const tid = tenancy.getTenantId(req.query.tenant);
+  const cacheKey = `notifications:${tid}`;
+  const cached = notificationsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return res.status(200).json(cached.payload);
+  }
+
   initializeFirebase();
   const db = admin.firestore();
-  const tid = tenancy.getTenantId(req.query.tenant);
   const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
   const items = [];
 
@@ -105,7 +114,9 @@ async function handler(req, res) {
   } catch { /* non-critical */ }
 
   items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
-  return res.status(200).json({ ok: true, items: items.slice(0, 20) });
+  const payload = { ok: true, items: items.slice(0, 20) };
+  notificationsCache.set(cacheKey, { payload, expiresAt: Date.now() + NOTIFICATIONS_CACHE_TTL_MS });
+  return res.status(200).json(payload);
 }
 
 export default withApi(handler, { methods: ['GET'], permission: 'pickup_admin.view' });

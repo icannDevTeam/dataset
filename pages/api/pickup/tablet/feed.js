@@ -25,6 +25,39 @@ const { shapePickupEvent, SILENT_ON_IPAD, eventMatchesScopes } = require('../../
 const WINDOW_MS = 30 * 60 * 1000;
 const TERMINAL_REF_TTL_MS = 30 * 1000;
 const TERMINAL_REF_CACHE = new Map();
+const OFF_WINDOW_CACHE_TTL_MS = 60 * 1000;
+const OFF_WINDOW_FEED_CACHE = new Map();
+const FEED_CONTEXT_CACHE_TTL_MS = 30 * 1000;
+const FEED_HEARTBEAT_SECS = 10 * 60 * 1000;
+const FEED_CONTEXT_CACHE = new Map();
+
+function getFeedContextCache(key) {
+  const hit = FEED_CONTEXT_CACHE.get(key);
+  if (!hit) return null;
+  if ((Date.now() - hit.at) > FEED_CONTEXT_CACHE_TTL_MS) {
+    FEED_CONTEXT_CACHE.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function setFeedContextCache(key, value) {
+  FEED_CONTEXT_CACHE.set(key, { at: Date.now(), value });
+}
+
+function getOffWindowCache(key) {
+  const hit = OFF_WINDOW_FEED_CACHE.get(key);
+  if (!hit) return null;
+  if ((Date.now() - hit.at) > OFF_WINDOW_CACHE_TTL_MS) {
+    OFF_WINDOW_FEED_CACHE.delete(key);
+    return null;
+  }
+  return hit.payload;
+}
+
+function setOffWindowCache(key, payload) {
+  OFF_WINDOW_FEED_CACHE.set(key, { at: Date.now(), payload });
+}
 
 function toIso(v) {
   if (!v) return null;
@@ -146,72 +179,133 @@ function summarizeWindow(gateStates) {
   return { windowOpen: fmt(minStart), windowClose: fmt(maxClose) };
 }
 
+function summarizeGateSignal(gateStates, inWindow, windowOpen, windowClose) {
+  const reasonCounts = new Map();
+  gateStates.forEach((s) => {
+    const reason = String(s?.reason || 'unknown');
+    reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+  });
+  const reasons = [...reasonCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason]) => reason);
+  return {
+    source: 'firestore+backend',
+    open: !!inWindow,
+    reason: reasons[0] || (inWindow ? 'in-window' : 'out-of-window'),
+    reasons,
+    terminalsEvaluated: gateStates.length,
+    windowOpen: windowOpen || null,
+    windowClose: windowClose || null,
+    evaluatedAt: new Date().toISOString(),
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'method' });
   const token = req.headers['x-tablet-device-token'] || req.query.deviceToken;
   if (!token) return res.status(401).json({ error: 'deviceToken required' });
+  const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
+  const tokenKey = `${tid}:${String(token)}`;
+
+  const cachedClosed = getOffWindowCache(tokenKey);
+  if (cachedClosed) {
+    return res.status(200).json({
+      ...cachedClosed,
+      now: new Date().toISOString(),
+    });
+  }
 
   try {
     initializeFirebase();
     const db = admin.firestore();
     const bucket = getFirebaseStorage().bucket();
-    const tid = req.query.tenant ? String(req.query.tenant) : tenancy.getTenantId();
+    let dev = null;
+    let devData = null;
+    let releaseGroupId = null;
+    let group = null;
+    let terminalIds = [];
+    let queryKeys = [];
 
-    // Resolve device → release group → terminalIds
-    const devSnap = await db.collection(tenancy.tabletDevicesPath(tid))
-      .where('deviceToken', '==', String(token))
-      .limit(1).get();
-    if (devSnap.empty) return res.status(401).json({ error: 'unknown token' });
-    const dev = devSnap.docs[0];
-    const devData = dev.data();
-    if (devData.status !== 'paired') return res.status(401).json({ error: 'not paired' });
+    const cachedCtx = getFeedContextCache(tokenKey);
+    if (cachedCtx) {
+      ({ releaseGroupId, group, terminalIds, queryKeys } = cachedCtx);
+    } else {
+      // Resolve device -> release group -> terminalIds.
+      const devSnap = await db.collection(tenancy.tabletDevicesPath(tid))
+        .where('deviceToken', '==', String(token))
+        .limit(1).get();
+      if (devSnap.empty) return res.status(401).json({ error: 'unknown token' });
+      dev = devSnap.docs[0];
+      devData = dev.data();
+      if (devData.status !== 'paired') return res.status(401).json({ error: 'not paired' });
 
-    let releaseGroupId = devData.releaseGroupId;
-    let groupSnap = releaseGroupId ? await db.doc(tenancy.releaseGroupDoc(releaseGroupId, tid)).get() : null;
-    if (!groupSnap?.exists) {
-      const candidates = ['tabletDeviceId', 'tabletId', 'pairedTabletDeviceId', 'deviceId'];
-      let recovered = null;
-      for (const field of candidates) {
-        try {
-          const snap = await db.collection(tenancy.releaseGroupsPath(tid))
-            .where(field, '==', dev.id)
-            .limit(1)
-            .get();
-          if (!snap.empty) {
-            recovered = snap.docs[0];
-            break;
-          }
-        } catch {}
+      releaseGroupId = devData.releaseGroupId;
+      let groupSnap = releaseGroupId ? await db.doc(tenancy.releaseGroupDoc(releaseGroupId, tid)).get() : null;
+      if (!groupSnap?.exists) {
+        const candidates = ['tabletDeviceId', 'tabletId', 'pairedTabletDeviceId', 'deviceId'];
+        let recovered = null;
+        for (const field of candidates) {
+          try {
+            const snap = await db.collection(tenancy.releaseGroupsPath(tid))
+              .where(field, '==', dev.id)
+              .limit(1)
+              .get();
+            if (!snap.empty) {
+              recovered = snap.docs[0];
+              break;
+            }
+          } catch {}
+        }
+        if (recovered) {
+          groupSnap = recovered;
+          releaseGroupId = recovered.id;
+          dev.ref.set({ releaseGroupId }, { merge: true }).catch(() => {});
+        }
       }
-      if (recovered) {
-        groupSnap = recovered;
-        releaseGroupId = recovered.id;
-        dev.ref.set({ releaseGroupId }, { merge: true }).catch(() => {});
-      }
+      if (!releaseGroupId) return res.status(409).json({ error: 'no release group bound' });
+      if (!groupSnap?.exists) return res.status(404).json({ error: 'release group not found' });
+      group = groupSnap.data();
+      const resolvedRefs = await resolveGroupTerminalRefs(db, tid, group.terminalIds);
+      terminalIds = resolvedRefs.terminalIds;
+      queryKeys = resolvedRefs.queryKeys;
+      setFeedContextCache(tokenKey, { releaseGroupId, group, terminalIds, queryKeys });
     }
-    if (!releaseGroupId) return res.status(409).json({ error: 'no release group bound' });
-    if (!groupSnap?.exists) return res.status(404).json({ error: 'release group not found' });
-    const group = groupSnap.data();
-    const resolvedRefs = await resolveGroupTerminalRefs(db, tid, group.terminalIds);
-    const terminalIds = resolvedRefs.terminalIds;
-    const queryKeys = resolvedRefs.queryKeys;
     if (terminalIds.length === 0) {
-      return res.status(200).json({
-        ok: true,
-        inWindow: false,
-        now: new Date().toISOString(),
+      const gateSignal = {
+        source: 'firestore+backend',
+        open: false,
+        reason: 'no-terminals',
+        reasons: ['no-terminals'],
+        terminalsEvaluated: 0,
         windowOpen: null,
         windowClose: null,
+        evaluatedAt: new Date().toISOString(),
+      };
+      const closedPayload = {
+        ok: true,
+        inWindow: false,
+        windowOpen: null,
+        windowClose: null,
+        gateSignal,
         releaseGroup: { id: releaseGroupId, name: group.name, gradeLabel: group.gradeLabel, terminalIds: [] },
         active: [],
         held: [],
         todayReleased: 0,
-      });
+      };
+      setOffWindowCache(tokenKey, closedPayload);
+      return res.status(200).json({ ...closedPayload, now: new Date().toISOString() });
     }
 
-    // Touch lastSeenAt — at most once a minute, not on every poll.
-    const lastSeenMs = devData.lastSeenAt?.toMillis ? devData.lastSeenAt.toMillis() : 0;
-    if (Date.now() - lastSeenMs > 60_000) {
+    // Touch lastSeenAt sparingly to reduce write burn from polling tablets.
+    if (!dev) {
+      const devSnap = await db.collection(tenancy.tabletDevicesPath(tid))
+        .where('deviceToken', '==', String(token))
+        .limit(1).get();
+      dev = devSnap.empty ? null : devSnap.docs[0];
+      devData = dev?.data() || null;
+    }
+    const lastSeenMs = devData?.lastSeenAt?.toMillis ? devData.lastSeenAt.toMillis() : 0;
+    if (dev && (Date.now() - lastSeenMs > FEED_HEARTBEAT_SECS)) {
       dev.ref.set({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
     }
 
@@ -241,13 +335,14 @@ export default async function handler(req, res) {
     const gateStates = terminalDocs.map((t) => effectiveGateStatus(t, group, new Date(), pickupSettings));
     const inWindow = gateStates.length > 0 ? gateStates.some((s) => !!s.open) : false;
     const { windowOpen, windowClose } = summarizeWindow(gateStates);
+    const gateSignal = summarizeGateSignal(gateStates, inWindow, windowOpen, windowClose);
     if (!inWindow) {
-      return res.status(200).json({
+      const closedPayload = {
         ok: true,
         inWindow: false,
-        now: new Date().toISOString(),
         windowOpen,
         windowClose,
+        gateSignal,
         releaseGroup: {
           id: releaseGroupId,
           name: group.name,
@@ -257,8 +352,11 @@ export default async function handler(req, res) {
         active: [],
         held: [],
         todayReleased: 0,
-      });
+      };
+      setOffWindowCache(tokenKey, closedPayload);
+      return res.status(200).json({ ...closedPayload, now: new Date().toISOString() });
     }
+    OFF_WINDOW_FEED_CACHE.delete(tokenKey);
 
     const sinceMs = req.query.since ? new Date(String(req.query.since)).getTime() : null;
     const wibNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
@@ -395,6 +493,7 @@ export default async function handler(req, res) {
       now: new Date().toISOString(),
       windowOpen,
       windowClose,
+      gateSignal,
       releaseGroup: {
         id: releaseGroupId,
         name: group.name,

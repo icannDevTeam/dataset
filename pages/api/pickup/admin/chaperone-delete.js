@@ -57,6 +57,10 @@ async function handler(req, res) {
       deletedAt: now,
       deletedBy: { uid: actor.uid, email: actor.email },
       deletedReason: trimmedReason,
+      assignmentMode: 'derived',
+      allowedTerminalIds: [],
+      assignmentUpdatedAt: nowIso,
+      assignmentUpdatedBy: actor.email,
       restoredAt: null,
       restoredBy: null,
     };
@@ -92,6 +96,10 @@ async function handler(req, res) {
       metadata: {
         revisionId: revisionRef.id,
         reason: trimmedReason,
+        assignmentCleared: {
+          hadOverride: before.assignmentMode === 'override',
+          previousAllowedTerminalCount: Array.isArray(before.allowedTerminalIds) ? before.allowedTerminalIds.length : 0,
+        },
         deviceRemoval: {
           ok: deviceRemoval.ok,
           devices: (deviceRemoval.devices || []).map((d) => ({ ip: d.ip, ok: d.ok, error: d.error || null })),

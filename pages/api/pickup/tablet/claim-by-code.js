@@ -58,6 +58,7 @@ export default async function handler(req, res) {
     const groupRef = db.doc(tenancy.releaseGroupDoc(releaseGroupId, tid));
     const groupSnap = await groupRef.get();
     if (!groupSnap.exists) return res.status(404).json({ error: 'release group not found' });
+    const groupData = groupSnap.data() || {};
 
     const deviceToken = tab.genDeviceToken();
     const now = admin.firestore.FieldValue.serverTimestamp();
@@ -72,17 +73,23 @@ export default async function handler(req, res) {
       userAgent,
     }, { merge: true });
 
+    const tabletDeviceIds = Array.isArray(groupData.tabletDeviceIds)
+      ? groupData.tabletDeviceIds.filter(Boolean)
+      : (groupData.tabletDeviceId ? [groupData.tabletDeviceId] : []);
+    const nextTabletDeviceIds = Array.from(new Set([...tabletDeviceIds, doc.id]));
+
     await groupRef.set({
-      tabletDeviceId: doc.id,
+      tabletDeviceId: groupData.tabletDeviceId || doc.id,
+      tabletDeviceIds: nextTabletDeviceIds,
       pairingCode: null,
       pairingExpiresAt: null,
       pendingTabletDeviceId: null,
+      pendingTabletDeviceIds: admin.firestore.FieldValue.arrayRemove(doc.id),
       status: 'paired',
       claimedAt: now,
       updatedAt: now,
     }, { merge: true });
 
-    const groupData = groupSnap.data();
     return res.status(200).json({
       ok: true,
       deviceToken,

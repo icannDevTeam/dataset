@@ -10,7 +10,7 @@
  *  { recordId, target:'chaperone', tempId, action:'delete' }
  *  { recordId, target:'chaperone', tempId, action:'delete-face', facePath }
  *  { recordId, target:'chaperone', tempId, action:'add-face', imageBase64 }
- *  { recordId, target:'record',                action:'add-chaperone', chaperone:{name,phone,email,idNumber,relation,authorizedStudentIds} }
+ *  { recordId, target:'record',                action:'add-chaperone', chaperone:{name,email,idNumber,relation,authorizedStudentIds,phone?} }
  *  { recordId, target:'student',   id,     action:'update', patch:{id,studentId?,firstName?,nickname?,name?,gradeSelection?,className?} }
  *  { recordId, target:'student',   id,     action:'delete' }
  *
@@ -233,12 +233,12 @@ async function handler(req, res) {
     // applies fixes the parent sent via email/WhatsApp directly on the form.
     const isApprovedStudentClassEdit = rec.status === 'approved' && target === 'student' && action === 'update';
     if (!['pending', 'changes_requested'].includes(rec.status)) {
-      // The only post-approval mutation we allow is admin appending a
-      // brand-new chaperone (e.g. parent asked the school to add a
-      // replacement). Everything else stays locked to preserve the audit
-      // trail and force admins through re-enroll / revoke flows.
+      // Allow photo add/delete on approved records, but keep broader edits
+      // locked. This matters for admin recovery when an approved chaperone
+      // is still missing a photo or has a stale image that needs replacement.
       const isAddChaperone = target === 'record' && action === 'add-chaperone';
-      if (!isAddChaperone && !isApprovedStudentClassEdit) {
+      const isApprovedFaceOp = target === 'chaperone' && ['add-face', 'delete-face'].includes(action);
+      if (!isAddChaperone && !isApprovedFaceOp && !isApprovedStudentClassEdit) {
         return res.status(409).json({
           error: 'record_not_editable',
           message: `Cannot edit a ${rec.status} record. Re-enroll or revoke instead.`,
@@ -380,8 +380,8 @@ async function handler(req, res) {
       if (!name || name.length < 2 || name.length > 80) {
         return res.status(400).json({ error: 'invalid_name', message: 'Name must be 2–80 characters.' });
       }
-      if (!phone || phone.length > 24) {
-        return res.status(400).json({ error: 'invalid_phone', message: 'Phone is required (max 24 chars).' });
+      if (phone.length > 24) {
+        return res.status(400).json({ error: 'invalid_phone', message: 'Phone max length is 24 chars.' });
       }
 
       const validStudentIds = new Set((rec.students || []).map((s) => String(s.id)));
@@ -402,7 +402,7 @@ async function handler(req, res) {
         tempId: newTempId,
         name,
         relation,
-        phone,
+        phone: phone || null,
         idNumber,
         email,
         authorizedStudentIds,
@@ -476,7 +476,7 @@ async function handler(req, res) {
             tenantId: tid,
             name,
             relation,
-            phone,
+            phone: phone || null,
             email: email || null,
             idNumber: idNumber || null,
             guardianName: rec.guardian?.name || null,

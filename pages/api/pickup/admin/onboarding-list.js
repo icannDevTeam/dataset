@@ -28,6 +28,49 @@ function normalizeText(value) {
   return String(value || '').toLowerCase().trim();
 }
 
+function normalizePhone(value) {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function alignApprovedAllocations(chaperones = [], allocatedDocs = []) {
+  const remaining = [...allocatedDocs];
+  return chaperones.map((c, i) => {
+    const name = normalizeText(c?.name);
+    const relation = normalizeText(c?.relation || c?.relationship);
+    const phone = normalizePhone(c?.phone);
+
+    let hitIdx = remaining.findIndex((a) => (
+      normalizeText(a?.name) === name
+      && normalizeText(a?.relation || a?.relationship) === relation
+      && normalizePhone(a?.phone) === phone
+    ));
+
+    if (hitIdx === -1) {
+      hitIdx = remaining.findIndex((a) => (
+        normalizeText(a?.name) === name
+        && normalizePhone(a?.phone) === phone
+      ));
+    }
+
+    if (hitIdx === -1) {
+      hitIdx = remaining.findIndex((a) => normalizeText(a?.name) === name);
+    }
+
+    if (hitIdx === -1 && remaining.length > 0 && i < remaining.length) {
+      hitIdx = i;
+    }
+
+    if (hitIdx === -1) return null;
+    const [match] = remaining.splice(hitIdx, 1);
+    return {
+      chaperoneId: match.chaperoneId || match.id || null,
+      employeeNo: match.employeeNo || null,
+      name: match.name || c?.name || null,
+      facesCopied: Array.isArray(match.facePaths) ? match.facePaths.length : 0,
+    };
+  });
+}
+
 function recordMatchesQuery(record, query) {
   if (!query) return true;
   const q = normalizeText(query);
@@ -123,6 +166,33 @@ async function handler(req, res) {
 
       cursor = snap.docs[snap.docs.length - 1];
       if (snap.size < roundLimit) break;
+    }
+
+    // Backfill missing approved allocation metadata for legacy/partial records.
+    // Upload buttons in pickup-admin depend on allocatedChaperones[i].chaperoneId.
+    if (status === 'approved') {
+      const recordsNeedingAlloc = rawRecords.filter((r) => {
+        const current = Array.isArray(r?.allocatedChaperones) ? r.allocatedChaperones : [];
+        const chaperones = Array.isArray(r?.chaperones) ? r.chaperones : [];
+        return chaperones.length > 0 && (current.length === 0 || current.length < chaperones.length);
+      });
+
+      for (const rec of recordsNeedingAlloc) {
+        try {
+          const snapAlloc = await db.collection(tenancy.chaperonesPath(tid))
+            .where('approvedFromOnboarding', '==', rec.id)
+            .get();
+          if (snapAlloc.empty) continue;
+
+          const docs = snapAlloc.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+          const aligned = alignApprovedAllocations(rec.chaperones || [], docs);
+          if (aligned.some((a) => a && a.chaperoneId)) {
+            rec.allocatedChaperones = aligned;
+          }
+        } catch {
+          // Best effort only; keep response usable even if backfill fails.
+        }
+      }
     }
 
     // For approved records, also pull final face paths from chaperones/{id}.
