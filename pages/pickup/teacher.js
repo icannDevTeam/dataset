@@ -1528,10 +1528,12 @@ export default function TeacherTabletPage() {
   useEffect(() => { inWindowRef.current = inWindow; }, [inWindow]);
   useEffect(() => { windowLabelRef.current = windowLabel; }, [windowLabel]);
 
-  // Re-check every 30s using the LOCAL clock only — zero network while
-  // closed (cost-control contract). The window times come from the server
-  // (learned + persisted per weekday), so this local check cannot drift from
-  // Firestore the way the old hardcoded table did.
+  // Re-check every 30s using the LOCAL clock — zero network while closed
+  // outside the scheduled window (cost-control contract). If the server said
+  // "closed" but the local clock says the window is open (stale cache /
+  // transient at the boundary), re-ask the server every 30s: without this the
+  // tablet latches shut for the whole window. Bounded to window hours, so the
+  // overnight/weekend cost stays zero.
   useEffect(() => {
     const t = setInterval(() => {
       const local = isInDismissalWindow();
@@ -1541,6 +1543,7 @@ export default function TeacherTabletPage() {
         if (prev.open === fallbackWindow.open && prev.close === fallbackWindow.close) return prev;
         return fallbackWindow;
       });
+      if (local && serverClosedRef.current) pollFeed();
       setInWindow(() => {
         if (!local) {
           serverClosedRef.current = false;
@@ -1551,7 +1554,7 @@ export default function TeacherTabletPage() {
       });
     }, 30_000);
     return () => clearInterval(t);
-  }, []);
+  }, [pollFeed]);
 
   useEffect(() => {
     if (!token || !identity || !inWindow || isPreviewRef.current) return;
