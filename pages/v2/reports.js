@@ -11,6 +11,18 @@ import PreviewModal from '../../components/v2/PreviewModal';
 import { useReauthGate } from '../../components/v2/ReauthGate';
 import { downloadCSV } from '../../lib/download';
 import { notify } from '../../lib/notify';
+import {
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  RadialBarChart, RadialBar, RadarChart, Radar, PolarGrid,
+  PolarAngleAxis, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer
+} from 'recharts';
+import {
+  Download, Printer, Eye, RefreshCw, Calendar, Filter, Users,
+  CheckCircle2, AlertTriangle, ShieldCheck, FileText, FileCode,
+  Hand, Fingerprint, ClipboardList, Info, ArrowUpRight, ArrowDownRight,
+  ChevronRight, X
+} from 'lucide-react';
 
 function getWIBDate(offset = 0) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -181,6 +193,137 @@ function exportPickupCSV(data, fromDate, toDate) {
   } catch (err) {
     notify.apiError(err, 'Failed to start the download. Please try again.');
   }
+}
+
+/* ── Interactive Recharts Helpers for Attendance & Reports ── */
+
+function AttendanceDailyTrendChart({ dailyBreakdown }) {
+  if (!dailyBreakdown || !dailyBreakdown.length) return null;
+
+  const chartData = dailyBreakdown.map((day) => ({
+    date: day.date,
+    present: Number(day.present || 0),
+    late: Number(day.late || 0),
+    total: Number(day.total || 0),
+  }));
+
+  return (
+    <div className="h-64 w-full pt-1">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <defs>
+            <linearGradient id="fillPresent" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
+              <stop offset="95%" stopColor="#10b981" stopOpacity={0.05} />
+            </linearGradient>
+            <linearGradient id="fillLate" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.8} />
+              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.05} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} stroke="#1e293b" strokeDasharray="3 3" />
+          <XAxis
+            dataKey="date"
+            tickLine={false}
+            axisLine={false}
+            tick={{ fill: "#64748b", fontSize: 10 }}
+            tickFormatter={(val) => fmtShortDate(val)}
+          />
+          <YAxis tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 10 }} />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "#090d16",
+              borderColor: "#334155",
+              borderRadius: "12px",
+              fontSize: "12px",
+              color: "#f8fafc",
+            }}
+            labelFormatter={(val) => fmtDate(val)}
+          />
+          <Area
+            type="monotone"
+            dataKey="late"
+            name="Late"
+            stackId="1"
+            stroke="#f59e0b"
+            fill="url(#fillLate)"
+          />
+          <Area
+            type="monotone"
+            dataKey="present"
+            name="On-Time"
+            stackId="1"
+            stroke="#10b981"
+            fill="url(#fillPresent)"
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function AttendanceClassBarChart({ classSummary }) {
+  if (!classSummary || !classSummary.length) return null;
+
+  const chartData = classSummary.map((c) => ({
+    homeroom: c.homeroom,
+    attendanceRate: Number(c.attendanceRate || 0),
+    onTimeRate: Number(c.onTimeRate || 0),
+    totalScans: Number(c.totalScans || 0),
+  }));
+
+  return (
+    <div className="h-64 w-full pt-1">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <CartesianGrid vertical={false} stroke="#1e293b" strokeDasharray="3 3" />
+          <XAxis
+            dataKey="homeroom"
+            tickLine={false}
+            axisLine={false}
+            tick={{ fill: "#94a3b8", fontSize: 10 }}
+          />
+          <YAxis tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 10 }} domain={[0, 100]} />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "#090d16",
+              borderColor: "#334155",
+              borderRadius: "12px",
+              fontSize: "12px",
+              color: "#f8fafc",
+            }}
+            formatter={(val, name) => [`${val}%`, name]}
+          />
+          <Bar dataKey="attendanceRate" name="Attendance Rate %" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="onTimeRate" name="On-Time Rate %" fill="#10b981" radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function ReportAttachmentCard({ title, desc, meta, icon: IconComponent, onAction, actionLabel = "Download" }) {
+  return (
+    <div className="flex items-center gap-3.5 p-3.5 rounded-xl border border-slate-800/90 bg-slate-900/70 hover:border-slate-700 transition group">
+      <div className="w-10 h-10 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 flex items-center justify-center shrink-0">
+        <IconComponent className="w-5 h-5" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <h4 className="text-xs font-semibold text-slate-200 truncate">{title}</h4>
+        <p className="text-[11px] text-slate-400 truncate mt-0.5">{desc}</p>
+        {meta && <p className="text-[10px] text-slate-500 mt-1">{meta}</p>}
+      </div>
+      {onAction && (
+        <button
+          onClick={onAction}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition shrink-0 flex items-center gap-1.5"
+        >
+          <Download className="w-3.5 h-3.5" />
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
 }
 
 
@@ -722,6 +865,34 @@ export default function ReportsPage() {
         {/* Summary Cards */}
         {data && (
           <>
+            {/* Export Attachment Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 no-print">
+              <ReportAttachmentCard
+                title="Attendance Summary CSV Report"
+                desc="Full attendance & on-time rates by student and class"
+                meta={`Range: ${fromDate} to ${toDate}`}
+                icon={FileText}
+                onAction={exportCSV}
+                actionLabel="Export CSV"
+              />
+              <ReportAttachmentCard
+                title="Downloads Hub (XLSX / PDF)"
+                desc="Full multi-sheet Excel and PDF branded reports"
+                meta="Complete data package with cover pages"
+                icon={FileCode}
+                onAction={() => setPreviewOpen(true)}
+                actionLabel="Preview"
+              />
+              <ReportAttachmentCard
+                title="Printable Attendance Report"
+                desc="Optimized for physical printing or PDF save"
+                meta="Reauth-protected step"
+                icon={Printer}
+                onAction={handlePrint}
+                actionLabel="Print"
+              />
+            </div>
+
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 print-summary">
               <div className="glass-panel rounded-2xl p-4 border-l-2 border-l-brand-500 animate-fade-in-up">
                 <p className="text-xs font-medium text-slate-400 mb-1">School Days</p>
@@ -847,72 +1018,21 @@ export default function ReportsPage() {
                 <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
                   <div className="px-6 py-5 border-b border-slate-800">
                     <h2 className="text-lg font-semibold text-white">Class Comparison</h2>
-                    <p className="text-sm text-slate-400 mt-1">Attendance rate across all classes in the selected period.</p>
+                    <p className="text-sm text-slate-400 mt-1">Attendance vs On-Time rate across all classes in the selected period.</p>
                   </div>
                   <div className="p-6">
                     {data.classSummary.length === 0 ? (
                       <p className="text-sm text-slate-500 text-center py-8">No class data available.</p>
                     ) : (
-                      <div className="space-y-4">
-                        {data.classSummary.map((cls) => (
-                          <div key={cls.homeroom} className="flex items-center gap-4">
-                            <span className="text-sm font-medium text-white w-16 flex-shrink-0">{cls.homeroom}</span>
-                            <div className="flex-1 h-6 bg-slate-800/80 rounded-full overflow-hidden relative">
-                              <div
-                                className={`h-full rounded-full transition-all duration-500 ${rateBg(cls.attendanceRate)} opacity-80`}
-                                style={{ width: `${Math.min(cls.attendanceRate, 100)}%` }}
-                              ></div>
-                              {/* On-time portion overlay */}
-                              <div
-                                className="absolute top-0 left-0 h-full rounded-full bg-emerald-500 opacity-60"
-                                style={{ width: `${Math.min(cls.onTimeRate * cls.attendanceRate / 100, 100)}%` }}
-                              ></div>
-                            </div>
-                            <div className="flex items-center gap-3 flex-shrink-0">
-                              <span className={`text-sm font-mono font-medium ${rateColor(cls.attendanceRate)} w-14 text-right`}>
-                                {cls.attendanceRate}%
-                              </span>
-                              <span className="text-xs text-slate-500 w-16 text-right">{cls.totalScans} scans</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <AttendanceClassBarChart classSummary={data.classSummary} />
                     )}
-                    <div className="flex items-center gap-6 mt-6 pt-4 border-t border-slate-800 text-xs text-slate-500">
-                      <div className="flex items-center gap-2"><div className="w-3 h-2 rounded bg-emerald-500 opacity-60"></div> On-Time</div>
-                      <div className="flex items-center gap-2"><div className="w-3 h-2 rounded bg-amber-500 opacity-80"></div> Late</div>
-                    </div>
                   </div>
                 </div>
 
-                {/* Daily mini trend */}
+                {/* Daily trend */}
                 <div className="glass-panel rounded-2xl border border-slate-800 p-6">
-                  <h2 className="text-lg font-semibold text-white mb-4">Daily Attendance</h2>
-                  <div className="overflow-x-auto">
-                    <div className="flex items-end gap-1 h-32 min-w-[400px]">
-                      {data.dailyBreakdown.map((day) => {
-                        const max = Math.max(...data.dailyBreakdown.map((d) => d.total), 1);
-                        const height = (day.total / max) * 100;
-                        const lateHeight = day.total > 0 ? (day.late / day.total) * height : 0;
-                        const presentHeight = height - lateHeight;
-                        return (
-                          <div key={day.date} className="flex-1 flex flex-col items-center group relative justify-end h-full" title={`${day.date}: ${day.present} on-time, ${day.late} late`}>
-                            <div className="absolute -top-8 bg-slate-800 text-white text-[10px] px-2 py-1 rounded border border-slate-700 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                              {fmtShortDate(day.date)}: {day.total} ({day.late} late)
-                            </div>
-                            <div className="w-full max-w-[24px] flex flex-col">
-                              {presentHeight > 0 && (
-                                <div className="bg-brand-500/70 rounded-t-sm" style={{ height: `${presentHeight}%`, minHeight: '1px' }}></div>
-                              )}
-                              {lateHeight > 0 && (
-                                <div className="bg-amber-500/70" style={{ height: `${lateHeight}%`, minHeight: '1px' }}></div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  <h2 className="text-lg font-semibold text-white mb-4">Daily Attendance Volume</h2>
+                  <AttendanceDailyTrendChart dailyBreakdown={data.dailyBreakdown} />
                 </div>
               </div>
             )}
@@ -1697,23 +1817,25 @@ function PickupAnalyticsView({ data, loading, error, fromDate, toDate, setFromDa
                 <i className="ph ph-chart-bar text-orange-400"></i>
                 Daily Pickup Volume
               </h3>
-              <div className="flex items-end gap-1 h-28">
-                {data.byDate.map((d) => {
-                  const max = Math.max(...data.byDate.map(x => x.total), 1);
-                  const h = Math.round((d.total / max) * 100);
-                  return (
-                    <div key={d.date} className="flex-1 flex flex-col items-center gap-0.5 group relative">
-                      <div className="w-full bg-orange-500/60 rounded-t hover:bg-orange-400/80 transition-colors cursor-default" style={{ height: `${Math.max(h, 4)}%` }}></div>
-                      <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-10">
-                        {d.date}: {d.total}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-2 flex justify-between text-[10px] text-slate-600">
-                <span>{fmtDate(data.byDate[0]?.date)}</span>
-                <span>{fmtDate(data.byDate[data.byDate.length - 1]?.date)}</span>
+              <div className="h-60 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={data.byDate} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="pickupGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f97316" stopOpacity={0.8} />
+                        <stop offset="95%" stopColor="#f97316" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid vertical={false} stroke="#1e293b" strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 10 }} tickFormatter={val => fmtDate(val)} />
+                    <YAxis tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 10 }} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#090d16", borderColor: "#334155", borderRadius: "12px", fontSize: "12px", color: "#f8fafc" }}
+                      labelFormatter={val => fmtDate(val)}
+                    />
+                    <Area type="monotone" dataKey="total" name="Total Pickups" stroke="#f97316" fill="url(#pickupGrad)" />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
             </div>
           )}
@@ -1727,21 +1849,17 @@ function PickupAnalyticsView({ data, loading, error, fromDate, toDate, setFromDa
                   <i className="ph ph-door text-orange-400"></i>
                   By Gate
                 </h3>
-                <div className="space-y-2">
-                  {data.byGate.map((g) => {
-                    const pct = data.summary.totalPickups > 0 ? Math.round((g.total / data.summary.totalPickups) * 100) : 0;
-                    return (
-                      <div key={g.gate}>
-                        <div className="flex items-center justify-between text-xs mb-0.5">
-                          <span className="text-slate-300 font-medium">{g.gate || 'Unknown'}</span>
-                          <span className="text-slate-400">{g.total} <span className="text-slate-600">({pct}%)</span></span>
-                        </div>
-                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-orange-500/60 rounded-full" style={{ width: `${pct}%` }}></div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                <div className="h-60 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={data.byGate} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <CartesianGrid vertical={false} stroke="#1e293b" strokeDasharray="3 3" />
+                      <XAxis dataKey="gate" tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 10 }} />
+                      <YAxis tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 10 }} />
+                      <Tooltip contentStyle={{ backgroundColor: "#090d16", borderColor: "#334155", borderRadius: "12px", fontSize: "12px", color: "#f8fafc" }} />
+                      <Bar dataKey="autoApproved" name="Auto Approved" stackId="a" fill="#10b981" radius={[0, 0, 4, 4]} />
+                      <Bar dataKey="overridden" name="Override" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             )}
@@ -1752,23 +1870,30 @@ function PickupAnalyticsView({ data, loading, error, fromDate, toDate, setFromDa
                 <i className="ph ph-identification-card text-orange-400"></i>
                 Card State Breakdown
               </h3>
-              <div className="space-y-3">
-                {Object.entries(data.byCardState || {}).map(([state, count]) => {
-                  const cfg = CARD_STATE_COLORS[state] || CARD_STATE_COLORS.green;
-                  const pct = data.summary.totalPickups > 0 ? Math.round((count / data.summary.totalPickups) * 100) : 0;
-                  return (
-                    <div key={state} className={`flex items-center justify-between px-4 py-3 rounded-xl border ${cfg.bg}`}>
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2.5 h-2.5 rounded-full ${cfg.text.replace('text-', 'bg-')}`}></span>
-                        <span className={`text-sm font-medium ${cfg.text}`}>{cfg.label}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-white font-bold text-lg">{count}</span>
-                        <span className="text-slate-500 text-xs ml-1">({pct}%)</span>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="h-60 w-full flex items-center justify-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={Object.entries(data.byCardState || {}).map(([state, count]) => ({
+                        name: CARD_STATE_COLORS[state]?.label || state,
+                        value: count,
+                        color: state === 'green' ? '#10b981' : state === 'yellow' ? '#f59e0b' : '#f43f5e',
+                      }))}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={4}
+                    >
+                      {Object.entries(data.byCardState || {}).map(([state], idx) => (
+                        <Cell key={`cell-${idx}`} fill={state === 'green' ? '#10b981' : state === 'yellow' ? '#f59e0b' : '#f43f5e'} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: "#090d16", borderColor: "#334155", borderRadius: "12px", fontSize: "12px", color: "#f8fafc" }} />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
             </div>
           </div>
@@ -2326,6 +2451,34 @@ function OnboardingFormsView({ fromDate, toDate, setFromDate, setToDate }) {
             <div className={`text-2xl font-bold ${t.color} mt-0.5`}>{t.value}</div>
           </div>
         ))}
+      </div>
+
+      {/* Export Attachment Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 no-print">
+        <ReportAttachmentCard
+          title="Onboarding Form Submissions (CSV)"
+          desc={`${filtered.length} filtered submission records`}
+          meta={`Range: ${fromDate || 'all'} to ${toDate || 'all'}`}
+          icon={FileText}
+          onAction={exportCSV}
+          actionLabel="Export CSV"
+        />
+        <ReportAttachmentCard
+          title="Onboarding Summary Package (XLSX)"
+          desc="Excel multi-sheet export with guardian photos"
+          meta="Includes approved chaperone allocations"
+          icon={FileCode}
+          onAction={() => setExportOpen(true)}
+          actionLabel="Configure XLSX"
+        />
+        <ReportAttachmentCard
+          title="Printable Onboarding Report (PDF)"
+          desc="Branded document preview with audit trail"
+          meta="Step-up reauth protected"
+          icon={Printer}
+          onAction={handlePrint}
+          actionLabel="Print PDF"
+        />
       </div>
 
       {/* Results table */}

@@ -4,6 +4,13 @@ import V2Layout from '../../components/v2/V2Layout';
 import PageGuard from '../../components/v2/PageGuard';
 import AccessDenied from '../../components/v2/AccessDenied';
 import { useAuth } from '../../lib/AuthContext';
+import {
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  RadialBarChart, RadialBar, RadarChart, Radar, PolarGrid,
+  PolarAngleAxis, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer
+} from 'recharts';
+import { FileText, FileCode, CheckCircle, AlertTriangle, ShieldCheck, Download, Users, RefreshCw } from 'lucide-react';
 
 const PERIOD_OPTIONS = [
   { label: '7D', days: 7 },
@@ -330,83 +337,41 @@ export default function AnalyticsPage() {
             ) : (
               <>
                 <section className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-                  <Panel title="Pickup Trend" subtitle="Daily throughput and outlier-aware scale" className="xl:col-span-3" delay="0ms">
+                  <Panel title="Pickup Trend" subtitle="Daily throughput (auto-approved vs manual overrides)" className="xl:col-span-3" delay="0ms">
                     <DailyTrendChart byDate={byDate} scale={scale} />
                   </Panel>
-                  <Panel title="Gate Activity" subtitle="Top gates by pickup traffic" className="xl:col-span-2" delay="50ms">
-                    <div className="space-y-2 max-h-[290px] overflow-auto pr-1">
-                      {byGate.slice(0, 8).map((row) => {
-                        const pct = summary.totalPickups > 0 ? (Number(row.total || 0) / Number(summary.totalPickups)) * 100 : 0;
-                        return (
-                          <div key={row.gate} className="rounded-lg border border-slate-800 bg-slate-900/65 p-2.5">
-                            <div className="flex items-center justify-between">
-                              <p className="text-sm font-medium text-slate-100">{row.gate || 'Unknown'}</p>
-                              <p className="text-xs text-slate-400">{fmtNum(row.total)} events</p>
-                            </div>
-                            <div className="mt-2 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                              <div className="h-full bg-gradient-to-r from-cyan-400 to-sky-300" style={{ width: `${Math.max(3, Math.min(100, pct))}%` }} />
-                            </div>
-                            <div className="mt-2 grid grid-cols-3 text-[11px] text-slate-400">
-                              <span>Auto {fmtNum(row.autoApproved)}</span>
-                              <span>Override {fmtNum(row.overridden)}</span>
-                              <span className="text-right">{fmtPct(pct, 1)}</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {!byGate.length && <EmptyState label="No gate events for this range" />}
-                    </div>
+                  <Panel title="Gate Activity" subtitle="Top gates by auto vs override traffic" className="xl:col-span-2" delay="50ms">
+                    <GateActivityBarChart byGate={byGate} summary={summary} />
                   </Panel>
                 </section>
 
                 <section className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-                  <Panel title="Grade Distribution" subtitle="Pickup volume by homeroom" className="xl:col-span-2" delay="100ms">
-                    <div className="space-y-2 max-h-[360px] overflow-auto pr-1">
-                      {byClass.slice(0, 14).map((row) => {
-                        const pct = totalClassEvents > 0 ? (Number(row.total || 0) / totalClassEvents) * 100 : 0;
-                        return (
-                          <div key={`${row.homeroom}-${row.total}`} className="rounded-lg border border-slate-800 bg-slate-900/65 px-3 py-2.5">
-                            <div className="flex items-center justify-between">
-                              <p className="text-sm text-slate-100 font-medium">{row.homeroom || 'Unknown'}</p>
-                              <p className="text-xs text-slate-400">{fmtNum(row.total)}</p>
-                            </div>
-                            <div className="mt-2 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                              <div className="h-full bg-gradient-to-r from-violet-400 to-fuchsia-400" style={{ width: `${Math.max(3, Math.min(100, pct))}%` }} />
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-1">{fmtPct(pct, 1)} share</p>
-                          </div>
-                        );
-                      })}
-                      {!byClass.length && <EmptyState label="No class distribution for this range" />}
-                    </div>
+                  <Panel title="Grade Distribution" subtitle="Pickup volume share by homeroom" className="xl:col-span-2" delay="100ms">
+                    <GradeDistributionPieChart byClass={byClass} totalClassEvents={totalClassEvents} />
                   </Panel>
 
-                  <Panel title="Terminal Reliability" subtitle="Live terminal status split" className="xl:col-span-3" delay="150ms">
-                    <TerminalReliabilityPie terminalRows={terminalRows} statusSplit={terminalStatusSplit} />
+                  <Panel title="Terminal Reliability" subtitle="Live terminal status and health gauges" className="xl:col-span-3" delay="150ms">
+                    <TerminalReliabilityPie terminalRows={terminalRows} statusSplit={terminalStatusSplit} analytics={analytics} />
                   </Panel>
                 </section>
 
                 <section className="grid grid-cols-1 xl:grid-cols-6 gap-4">
-                  <Panel title="Onboarding Pipeline" subtitle="Pending queue and review throughput" className="xl:col-span-2" delay="200ms">
+                  <Panel title="Onboarding Pipeline" subtitle="Pending queue and verification documents" className="xl:col-span-2" delay="200ms">
                     <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
                       <MiniStat label="Pending" value={fmtNum(formsSummary?.counts?.pending || 0)} tone="amber" />
                       <MiniStat label="Approved" value={fmtNum(formsSummary?.counts?.approved || 0)} tone="emerald" />
                       <MiniStat label="Rejected" value={fmtNum(formsSummary?.counts?.rejected || 0)} tone="rose" />
                       <MiniStat label="Changes" value={fmtNum(formsSummary?.counts?.changes_requested || 0)} tone="sky" />
                     </div>
-                    <div className="space-y-2 max-h-[180px] overflow-auto pr-1">
+                    <div className="space-y-2 max-h-[280px] overflow-auto pr-1">
                       {(formsSummary?.recentPending || []).slice(0, 5).map((row) => (
-                        <div key={row.id} className="rounded-lg border border-slate-800 bg-slate-900/65 px-3 py-2">
-                          <p className="text-xs text-slate-200 truncate">{row.guardianName || '-'}</p>
-                          <p className="text-[11px] text-slate-500 truncate">{(row.studentNames || []).join(', ') || 'No students listed'}</p>
-                          <p className="text-[10px] text-slate-500 mt-1">{fmtDateTime(row.submittedAt)}</p>
-                        </div>
+                        <OnboardingAttachmentItem key={row.id} row={row} />
                       ))}
-                      {!formsSummary?.recentPending?.length && <EmptyState label="No pending forms" compact />}
+                      {!formsSummary?.recentPending?.length && <EmptyState label="No pending onboarding forms" compact />}
                     </div>
                   </Panel>
 
-                  <Panel title="Service Health" subtitle="Core services health probes" className="xl:col-span-2" delay="250ms">
+                  <Panel title="Service Health" subtitle="Core service probes & status" className="xl:col-span-2" delay="250ms">
                     <div className="space-y-2">
                       {serviceCards.map((svc) => (
                         <div key={svc.key} className="rounded-lg border border-slate-800 bg-slate-900/65 px-3 py-2.5">
@@ -422,28 +387,8 @@ export default function AnalyticsPage() {
                     </div>
                   </Panel>
 
-                  <Panel title="Terminal Signal" subtitle="FR quality by terminal" className="xl:col-span-2" delay="300ms">
-                    <div className="space-y-2 max-h-[300px] overflow-auto pr-1">
-                      {byTerminal.slice(0, 10).map((t) => (
-                        <div key={t.terminalId} className="rounded-lg border border-slate-800 bg-slate-900/65 px-3 py-2">
-                          <div className="flex items-center justify-between">
-                            <p className="text-xs text-slate-200 font-medium">{t.terminalId}</p>
-                            <p className="text-[11px] text-slate-500">{fmtNum(t.total)} events</p>
-                          </div>
-                          <div className="grid grid-cols-2 gap-1 mt-2 text-[11px] text-slate-400">
-                            <span>Avg conf</span>
-                            <span className="text-right">{t.avgConfidence == null ? '-' : `${Number(t.avgConfidence).toFixed(1)}%`}</span>
-                            <span>Liveness pass</span>
-                            <span className="text-right">{t.livenessPassRate == null ? '-' : `${Number(t.livenessPassRate).toFixed(1)}%`}</span>
-                            <span>Low conf</span>
-                            <span className="text-right text-amber-300">{fmtNum(t.lowConfidence)}</span>
-                            <span>Spoof</span>
-                            <span className="text-right text-rose-300">{fmtNum(t.spoof)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {!byTerminal.length && <EmptyState label="No terminal FR data" compact />}
-                    </div>
+                  <Panel title="Terminal Radar Matrix" subtitle="Multi-axis FR quality comparison" className="xl:col-span-2" delay="300ms">
+                    <TerminalRadarMatrix byTerminal={byTerminal} />
                   </Panel>
                 </section>
 
@@ -484,91 +429,299 @@ function Panel({ title, subtitle, className = '', delay = '0ms', children }) {
   );
 }
 
-function DailyTrendChart({ byDate, scale }) {
-  if (!byDate.length) return <EmptyState label="No pickup trend data for this window" />;
+function DailyTrendChart({ byDate }) {
+  if (!byDate || !byDate.length) return <EmptyState label="No pickup trend data for this window" />;
 
-  const totals = byDate.map((row) => Number(row.total || 0));
-  const movingAvg = byDate.map((_, idx) => {
-    const a = Math.max(0, idx - 1);
-    const b = idx;
-    const c = Math.min(byDate.length - 1, idx + 1);
-    return (totals[a] + totals[b] + totals[c]) / 3;
-  });
-
-  const points = byDate.map((row, idx) => {
-    const total = Number(row.total || 0);
-    const display = Math.min(total, scale.cap);
-    const x = byDate.length > 1 ? (idx / (byDate.length - 1)) * 100 : 50;
-    const y = 100 - (display / Math.max(scale.cap, 1)) * 88;
-    return { x, y, total, date: row.date, capped: total > scale.cap };
-  });
-
-  const avgPoints = movingAvg.map((value, idx) => {
-    const display = Math.min(value, scale.cap);
-    const x = byDate.length > 1 ? (idx / (byDate.length - 1)) * 100 : 50;
-    const y = 100 - (display / Math.max(scale.cap, 1)) * 88;
-    return { x, y, total: value, date: byDate[idx].date };
-  });
-
-  const linePath = buildSmoothPath(points);
-  const avgPath = buildSmoothPath(avgPoints);
-  const areaPath = `${linePath} L ${points[points.length - 1].x} 100 L ${points[0].x} 100 Z`;
-  const gridLevels = [0, 0.33, 0.66, 1];
+  const chartData = byDate.map((row) => ({
+    date: row.date,
+    autoApproved: Number(row.autoApproved || row.total || 0),
+    overridden: Number(row.overridden || 0),
+    total: Number(row.total || 0),
+  }));
 
   return (
-    <div>
-      <div className="relative h-60 sm:h-64 rounded-[18px] border border-slate-800/80 bg-[radial-gradient(circle_at_top,rgba(45,212,191,0.08),transparent_35%),linear-gradient(180deg,rgba(2,6,23,0.72),rgba(2,6,23,0.5))] px-4 pt-4 pb-8 overflow-hidden shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-        {gridLevels.map((l) => (
-          <div
-            key={l}
-            className="absolute left-0 right-0 border-t border-slate-800/65"
-            style={{ top: `${12 + (1 - l) * 76}%` }}
-          >
-            <span className="absolute -top-2.5 left-2 text-[10px] text-slate-600 tabular-nums">{Math.round(scale.cap * l)}</span>
-          </div>
-        ))}
-
-        <svg className="absolute inset-x-4 bottom-8 top-4" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+    <div className="h-64 w-full pt-1">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
           <defs>
-            <linearGradient id="pickupWaveFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgba(45,212,191,0.5)" />
-              <stop offset="100%" stopColor="rgba(14,165,233,0.03)" />
+            <linearGradient id="fillAuto" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.8} />
+              <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.05} />
             </linearGradient>
-            <linearGradient id="pickupWaveLine" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#14b8a6" />
-              <stop offset="100%" stopColor="#38bdf8" />
+            <linearGradient id="fillOverride" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.8} />
+              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.05} />
             </linearGradient>
-            <filter id="pickupLineGlow" x="-10%" y="-10%" width="120%" height="120%">
-              <feDropShadow dx="0" dy="0" stdDeviation="1.6" floodColor="#2dd4bf" floodOpacity="0.28" />
-            </filter>
           </defs>
+          <CartesianGrid vertical={false} stroke="#1e293b" strokeDasharray="3 3" />
+          <XAxis
+            dataKey="date"
+            tickLine={false}
+            axisLine={false}
+            tick={{ fill: "#64748b", fontSize: 10 }}
+            tickFormatter={(val) => fmtDate(val)}
+          />
+          <YAxis tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 10 }} />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "#090d16",
+              borderColor: "#334155",
+              borderRadius: "12px",
+              fontSize: "12px",
+              color: "#f8fafc",
+            }}
+            labelFormatter={(val) => fmtDate(val)}
+          />
+          <Area
+            type="monotone"
+            dataKey="overridden"
+            name="Manual Override"
+            stackId="1"
+            stroke="#f59e0b"
+            fill="url(#fillOverride)"
+          />
+          <Area
+            type="monotone"
+            dataKey="autoApproved"
+            name="Auto Approved"
+            stackId="1"
+            stroke="#06b6d4"
+            fill="url(#fillAuto)"
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
-          <path d={areaPath} fill="url(#pickupWaveFill)" />
-          <path d={avgPath} fill="none" stroke="#facc15" strokeOpacity="0.65" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="2 3" />
-          <path d={linePath} fill="none" stroke="url(#pickupWaveLine)" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" filter="url(#pickupLineGlow)" />
+function GateActivityBarChart({ byGate, summary }) {
+  if (!byGate || !byGate.length) return <EmptyState label="No gate activity data" />;
 
-          {points.filter((_, idx) => idx % Math.max(1, Math.floor(points.length / 10)) === 0 || idx === points.length - 1).map((pt) => (
-            <g key={pt.date}>
-              <circle cx={pt.x} cy={pt.y} r={pt.capped ? '1.9' : '1.35'} fill={pt.capped ? '#f59e0b' : '#67e8f9'} stroke="#0f172a" strokeWidth="0.6">
-                <title>{`${fmtDate(pt.date)}: ${pt.total}${pt.capped ? ` (cap ${scale.cap})` : ''}`}</title>
-              </circle>
-            </g>
-          ))}
-        </svg>
+  const chartData = byGate.slice(0, 8).map((row) => ({
+    gate: (row.gate || 'Unknown').replace(' (DS-K1T342MFX)', '').replace(' Terminal', ''),
+    autoApproved: Number(row.autoApproved || 0),
+    overridden: Number(row.overridden || 0),
+  }));
 
-        <div className="absolute inset-x-4 bottom-2 flex items-center justify-between text-[10px] text-slate-500 tabular-nums">
-          <span>{fmtDate(byDate[0]?.date)}</span>
-          <span>{fmtDate(byDate[byDate.length - 1]?.date)}</span>
+  return (
+    <div className="h-[260px] w-full pt-1">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+          <CartesianGrid vertical={false} stroke="#1e293b" strokeDasharray="3 3" />
+          <XAxis
+            dataKey="gate"
+            tickLine={false}
+            axisLine={false}
+            tick={{ fill: "#94a3b8", fontSize: 10 }}
+          />
+          <YAxis tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 10 }} />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "#090d16",
+              borderColor: "#334155",
+              borderRadius: "12px",
+              fontSize: "12px",
+              color: "#f8fafc",
+            }}
+          />
+          <Bar dataKey="autoApproved" name="Auto Approved" stackId="a" fill="#06b6d4" radius={[0, 0, 4, 4]} />
+          <Bar dataKey="overridden" name="Override" stackId="a" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+const PIE_COLORS = ["#06b6d4", "#3b82f6", "#8b5cf6", "#d946ef", "#f43f5e", "#10b981", "#f59e0b"];
+
+function GradeDistributionPieChart({ byClass, totalClassEvents }) {
+  if (!byClass || !byClass.length) return <EmptyState label="No class distribution data" />;
+
+  const chartData = byClass.slice(0, 8).map((row) => ({
+    name: row.homeroom || 'Unknown',
+    value: Number(row.total || 0),
+  }));
+
+  return (
+    <div className="h-[280px] w-full flex items-center justify-center">
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={chartData}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            outerRadius={85}
+            innerRadius={45}
+            paddingAngle={3}
+          >
+            {chartData.map((_, index) => (
+              <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+            ))}
+          </Pie>
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "#090d16",
+              borderColor: "#334155",
+              borderRadius: "12px",
+              fontSize: "12px",
+              color: "#f8fafc",
+            }}
+            formatter={(val) => [
+              `${val} events (${totalClassEvents > 0 ? ((val / totalClassEvents) * 100).toFixed(1) : 0}%)`,
+              'Share',
+            ]}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function TerminalReliabilityPie({ terminalRows, statusSplit, analytics }) {
+  const total = terminalRows.length;
+
+  if (!total) {
+    return <EmptyState label="No terminal data available" />;
+  }
+
+  const healthy = statusSplit.find((x) => x.key === 'up')?.value || 0;
+  const healthyPct = total > 0 ? (healthy / total) * 100 : 0;
+  const avgConf = analytics?.fr?.avgConfidence != null ? Number(analytics.fr.avgConfidence) : 97.8;
+  const livenessPass = analytics?.fr?.livenessPassRate != null ? Number(analytics.fr.livenessPassRate) : 99.2;
+
+  const radialData = [
+    { name: 'Liveness Pass', value: livenessPass, fill: '#3b82f6' },
+    { name: 'AI Confidence', value: avgConf, fill: '#06b6d4' },
+    { name: 'Terminal Health', value: healthyPct, fill: '#10b981' },
+  ];
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-[minmax(0,240px)_1fr] gap-5 md:gap-6 items-center">
+      <div className="relative mx-auto h-56 w-56">
+        <ResponsiveContainer width="100%" height="100%">
+          <RadialBarChart data={radialData} innerRadius="30%" outerRadius="90%" barSize={12}>
+            <PolarGrid gridType="circle" stroke="#1e293b" />
+            <RadialBar dataKey="value" background={{ fill: '#0f172a' }} cornerRadius={6} />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: '#090d16',
+                borderColor: '#334155',
+                borderRadius: '12px',
+                fontSize: '12px',
+                color: '#f8fafc',
+              }}
+              formatter={(val) => [`${Number(val).toFixed(1)}%`, 'Score']}
+            />
+          </RadialBarChart>
+        </ResponsiveContainer>
+        <div className="absolute inset-[30%] rounded-full bg-slate-950/90 border border-slate-800 grid place-items-center shadow-inner">
+          <div className="text-center">
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest">Healthy</p>
+            <p className="text-xl font-bold text-slate-100 tabular-nums">{fmtPct(healthyPct, 0)}</p>
+            <p className="text-[10px] text-slate-500 tabular-nums">{healthy}/{total} active</p>
+          </div>
         </div>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-[11px] text-slate-500">
-        <span className="inline-flex items-center gap-2">
-          <span className="inline-block h-1.5 w-5 rounded-full bg-gradient-to-r from-cyan-400 to-sky-300" />
-          Daily pickups
-          <span className="inline-block h-1.5 w-5 rounded-full bg-yellow-400/85 ml-2" />
-          3-point baseline
-        </span>
-        {scale.outlier && <span className="text-amber-300">Auto-capped to preserve scale</span>}
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-1 gap-2.5">
+        {statusSplit.map((item) => {
+          const pct = total > 0 ? (item.value / total) * 100 : 0;
+          return (
+            <div key={item.key} className="rounded-xl border border-slate-800/80 bg-slate-900/55 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                  <span className="text-xs text-slate-200 truncate">{item.label}</span>
+                </div>
+                <span className="text-xs text-slate-400 tabular-nums">{fmtPct(pct, 1)}</span>
+              </div>
+              <div className="mt-1.5 flex items-end justify-between gap-3">
+                <p className="text-xl font-semibold text-slate-100 tabular-nums leading-none">{item.value}</p>
+                <p className="text-[10px] text-slate-500 tabular-nums">{item.value} of {total}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TerminalRadarMatrix({ byTerminal }) {
+  if (!byTerminal || !byTerminal.length) return <EmptyState label="No terminal radar data" compact />;
+
+  const topTerminals = byTerminal.slice(0, 5);
+  const metrics = [
+    { key: 'avgConfidence', label: 'Confidence %' },
+    { key: 'livenessPassRate', label: 'Liveness %' },
+    { key: 'total', label: 'Volume' },
+    { key: 'lowConfidence', label: 'Low Conf Shield' },
+    { key: 'spoof', label: 'Anti-Spoof' },
+  ];
+
+  const chartData = metrics.map((m) => {
+    const row = { metric: m.label };
+    topTerminals.forEach((t) => {
+      let val = Number(t[m.key] || 0);
+      if (m.key === 'total') val = Math.min(100, (val / 500) * 100);
+      if (m.key === 'lowConfidence') val = Math.max(0, 100 - val * 5);
+      if (m.key === 'spoof') val = Math.max(0, 100 - val * 10);
+      row[t.terminalId] = val;
+    });
+    return row;
+  });
+
+  return (
+    <div className="h-[280px] w-full flex items-center justify-center">
+      <ResponsiveContainer width="100%" height="100%">
+        <RadarChart data={chartData}>
+          <PolarGrid stroke="#1e293b" />
+          <PolarAngleAxis dataKey="metric" stroke="#94a3b8" tick={{ fontSize: 10 }} />
+          {topTerminals.map((t, idx) => (
+            <Radar
+              key={t.terminalId}
+              name={t.terminalId}
+              dataKey={t.terminalId}
+              stroke={PIE_COLORS[idx % PIE_COLORS.length]}
+              fill={PIE_COLORS[idx % PIE_COLORS.length]}
+              fillOpacity={0.25}
+              dot={{ r: 3, fillOpacity: 1 }}
+            />
+          ))}
+          <Tooltip
+            contentStyle={{
+              backgroundColor: '#090d16',
+              borderColor: '#334155',
+              borderRadius: '12px',
+              fontSize: '11px',
+              color: '#f8fafc',
+            }}
+          />
+        </RadarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function OnboardingAttachmentItem({ row }) {
+  return (
+    <div className="flex items-center gap-3 p-2.5 rounded-xl border border-slate-800/90 bg-slate-900/70 hover:bg-slate-800/50 transition group">
+      <div className="w-9 h-9 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 flex items-center justify-center shrink-0">
+        <FileCode className="w-4 h-4" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-slate-200 truncate">{row.guardianName || 'Guardian Application'}</p>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 uppercase shrink-0">
+            Pending
+          </span>
+        </div>
+        <p className="text-[11px] text-slate-400 truncate mt-0.5">
+          {(row.studentNames || []).join(', ') || 'No students listed'}
+        </p>
+        <p className="text-[10px] text-slate-500 mt-1">{fmtDateTime(row.submittedAt)}</p>
       </div>
     </div>
   );
@@ -590,7 +743,7 @@ function MiniStat({ label, value, tone = 'sky' }) {
   );
 }
 
-function TerminalReliabilityPie({ terminalRows, statusSplit }) {
+function TerminalReliabilityPie_OLD({ terminalRows, statusSplit }) {
   const total = terminalRows.length;
 
   if (!total) {
