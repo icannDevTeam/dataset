@@ -478,95 +478,95 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
 
   // Card framing (color-coded by state)
   const frame = disabled
-    ? { ring: 'border-zinc-700', glow: 'from-zinc-700/10 to-zinc-900/20', halo: 'bg-zinc-700' }
+    ? { ring: 'border-zinc-700/60', glow: 'bg-slate-900/60', halo: 'bg-zinc-600' }
     : isDown
-      ? { ring: 'border-red-500/50', glow: 'from-red-500/15 to-slate-900/40', halo: 'bg-red-500' }
+      ? { ring: 'border-rose-500/50', glow: 'bg-slate-900/60', halo: 'bg-rose-500' }
     : eff.open
-      ? { ring: 'border-emerald-500/40', glow: 'from-emerald-500/10 to-slate-900/40', halo: 'bg-emerald-500' }
-      : { ring: 'border-rose-500/40',    glow: 'from-rose-500/10 to-slate-900/40',    halo: 'bg-rose-500' };
+      ? { ring: 'border-emerald-500/40', glow: 'bg-slate-900/60', halo: 'bg-emerald-500' }
+      : { ring: 'border-rose-500/40',    glow: 'bg-slate-900/60',    halo: 'bg-rose-500' };
 
   const effectiveGroup = draft.releaseGroupId !== undefined ? draft.releaseGroupId : t.releaseGroupId;
   const groupName = (id) => groups.find((g) => g.id === id)?.name || null;
 
   return (
-    <div className={`relative rounded-2xl border ${frame.ring} bg-gradient-to-br ${frame.glow} overflow-hidden`}>
+    <div className={`relative glass-panel rounded-2xl border ${frame.ring} overflow-hidden shadow-[0_14px_40px_rgba(2,6,23,0.45)] hover:border-slate-700 transition`}>
       {/* Top status bar (color stripe) */}
-      <div className={`h-1 w-full ${frame.halo}`}></div>
+      <div className={`h-1.5 w-full ${frame.halo}`}></div>
 
       {/* Header */}
-      <div className="px-4 pt-4 pb-3 flex items-start gap-3">
-        <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
-          disabled ? 'bg-zinc-700/30 text-zinc-400'
-          : eff.open ? 'bg-emerald-500/20 text-emerald-300'
-          : 'bg-rose-500/20 text-rose-300'
+      <div className="px-5 pt-4 pb-3 flex items-start gap-3.5">
+        <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border ${
+          disabled ? 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
+          : eff.open ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+          : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
         }`}>
           <i className={`ph ${disabled ? 'ph-prohibit' : eff.open ? 'ph-door-open' : 'ph-door'} text-2xl`}></i>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-base font-bold text-white truncate" title={t.name}>{t.name}</h3>
+            <h3 className="text-base font-bold text-slate-100 truncate" title={t.name}>{t.name}</h3>
             {disabled ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-zinc-700/50 text-zinc-300 border border-zinc-600">Disabled</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-zinc-500/15 text-zinc-300 border border-zinc-500/30">Disabled</span>
             ) : (
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                eff.open ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                eff.open ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
               }`}>
                 {eff.open ? 'Open' : 'Closed'}
               </span>
             )}
             {isDown && !disabled && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-red-500/20 text-red-300 border border-red-500/40 inline-flex items-center gap-1">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30 inline-flex items-center gap-1">
                 <i className="ph ph-plug"></i>Down
               </span>
             )}
             {!disabled && listenerKnown && (
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider inline-flex items-center gap-1 ${
                 t.listenerRunning
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                  : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                  : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
               }`}>
                 <i className={`ph ${t.listenerRunning ? 'ph-play-circle' : 'ph-stop-circle'}`}></i>
                 Listener {t.listenerRunning ? 'On' : 'Off'}
               </span>
             )}
             {isUnknown && !disabled && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-slate-600/30 text-slate-300 border border-slate-600 inline-flex items-center gap-1">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-slate-800/80 text-slate-300 border border-slate-700 inline-flex items-center gap-1">
                 <i className="ph ph-question"></i>No heartbeat
               </span>
             )}
             {eff.override && !disabled && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40 inline-flex items-center gap-0.5">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30 inline-flex items-center gap-0.5">
                 <i className="ph ph-hand-tap"></i>Manual
               </span>
             )}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-brand-500/30 bg-brand-500/10 text-brand-200">
+          <div className="text-xs text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-brand-500/30 bg-brand-500/15 text-brand-300 font-medium">
                 <i className="ph ph-chalkboard-teacher text-[10px]"></i>{terminalGradeLabel(t)}
               </span>
               <span className="text-slate-300 truncate" title={t.ip || ''}>
-                <i className="ph ph-buildings text-slate-500 mr-0.5"></i>{terminalLocationLabel(t)}
+                <i className="ph ph-buildings text-slate-500 mr-1"></i>{terminalLocationLabel(t)}
               </span>
             {lastSeen && (
               <span className="text-slate-500">
-                <i className="ph ph-clock-clockwise mr-0.5"></i>seen {lastSeen}
+                <i className="ph ph-clock-clockwise mr-1"></i>seen {lastSeen}
               </span>
             )}
             {!lastSeen && (
-              <span className="text-slate-600">
-                <i className="ph ph-clock mr-0.5"></i>never seen
+              <span className="text-slate-500">
+                <i className="ph ph-clock mr-1"></i>never seen
               </span>
             )}
           </div>
-          <div className="text-[10px] text-slate-600 mt-0.5 font-mono truncate" title={t.id}>id: {t.id}</div>
+          <div className="text-[10px] text-slate-500 mt-1 font-mono truncate" title={t.id}>id: {t.id}</div>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={onRename}
             disabled={busy}
             title="Rename terminal"
-            className="p-1.5 rounded-md text-xs bg-slate-800/60 text-slate-400 border border-slate-700 hover:text-brand-300 hover:bg-brand-500/10 hover:border-brand-500/30 disabled:opacity-50"
+            className="p-1.5 rounded-lg text-xs bg-slate-900 text-slate-400 border border-slate-800 hover:text-cyan-300 hover:bg-slate-800 transition disabled:opacity-50"
           >
             <i className="ph ph-pencil-simple"></i>
           </button>
@@ -574,10 +574,10 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
             onClick={onToggleEnabled}
             disabled={busy}
             title={disabled ? 'Enable terminal' : 'Disable terminal'}
-            className={`p-1.5 rounded-md text-xs ${
+            className={`p-1.5 rounded-lg text-xs ${
               disabled ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25'
-                       : 'bg-slate-800/60 text-slate-400 border border-slate-700 hover:text-rose-300 hover:bg-rose-500/10 hover:border-rose-500/30'
-            } disabled:opacity-50`}
+                       : 'bg-slate-900 text-slate-400 border border-slate-800 hover:text-rose-300 hover:bg-slate-800'
+            } transition disabled:opacity-50`}
           >
             <i className={`ph ${disabled ? 'ph-power' : 'ph-prohibit'}`}></i>
           </button>
@@ -585,7 +585,7 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
             onClick={onArchive}
             disabled={busy || disabled}
             title="Archive terminal"
-            className="p-1.5 rounded-md text-xs bg-slate-800/60 text-slate-400 border border-slate-700 hover:text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 disabled:opacity-50"
+            className="p-1.5 rounded-lg text-xs bg-slate-900 text-slate-400 border border-slate-800 hover:text-amber-300 hover:bg-slate-800 transition disabled:opacity-50"
           >
             <i className="ph ph-archive-box"></i>
           </button>
@@ -593,7 +593,7 @@ function TerminalCard({ t, eff, groups, draft, busy, onDraft, onDiscard, onSave,
             onClick={onDelete}
             disabled={busy}
             title="Delete terminal permanently"
-            className="p-1.5 rounded-md text-xs bg-slate-800/60 text-slate-400 border border-slate-700 hover:text-red-300 hover:bg-red-500/10 hover:border-red-500/30 disabled:opacity-50"
+            className="p-1.5 rounded-lg text-xs bg-slate-900 text-slate-400 border border-slate-800 hover:text-rose-300 hover:bg-slate-800 transition disabled:opacity-50"
           >
             <i className="ph ph-trash"></i>
           </button>
