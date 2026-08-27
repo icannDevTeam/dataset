@@ -341,10 +341,28 @@ export default function PickupAdminPage() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sort, setSort] = useState('newest');
-    useEffect(() => {
-      const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
-      return () => clearTimeout(t);
-    }, [search]);
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'card'
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pickup_admin_view_mode');
+      if (saved === 'card' || saved === 'list') {
+        setViewMode(saved);
+      }
+    }
+  }, []);
+
+  const changeViewMode = (mode) => {
+    setViewMode(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('pickup_admin_view_mode', mode);
+    }
+  };
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const [selected, setSelected] = useState({});     // recordId -> bool
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -1483,6 +1501,32 @@ export default function PickupAdminPage() {
                 className="bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-brand-500/60">
                 {SORT_OPTIONS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
               </select>
+              <div className="flex items-center gap-1 p-1 bg-slate-900/70 backdrop-blur border border-slate-800 rounded-xl">
+                <button
+                  onClick={() => changeViewMode('list')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                    viewMode === 'list'
+                      ? 'bg-brand-500 text-white shadow-sm font-semibold'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  }`}
+                  title="List View (Data Table)"
+                >
+                  <i className="ph ph-rows text-base"></i>
+                  <span className="hidden sm:inline">List</span>
+                </button>
+                <button
+                  onClick={() => changeViewMode('card')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                    viewMode === 'card'
+                      ? 'bg-brand-500 text-white shadow-sm font-semibold'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  }`}
+                  title="Grid View (Cards)"
+                >
+                  <i className="ph ph-squares-four text-base"></i>
+                  <span className="hidden sm:inline">Grid</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1561,6 +1605,26 @@ export default function PickupAdminPage() {
               <p className="text-slate-400 text-sm">
                 {search ? `No results for "${search}".` : `No ${tab === 'changes_requested' ? 'awaiting-parent' : tab} submissions.`}
               </p>
+            </div>
+          ) : viewMode === 'card' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {visibleRecords.map((rec) => (
+                <RecordCardGrid
+                  key={rec.id}
+                  rec={rec}
+                  thumbnails={thumbnails}
+                  selected={!!selected[rec.id]}
+                  onToggleSelect={() => setSelected((s) => ({ ...s, [rec.id]: !s[rec.id] }))}
+                  isActive={selectedId === rec.id}
+                  onOpen={() => { setAutoAddChaperone(false); setSelectedId(rec.id); }}
+                  onApprove={() => approve(rec)}
+                  onStartReject={() => { setRejectingId(rec.id); setRejectReason(''); setSelectedId(rec.id); }}
+                  onPrint={() => setPrintRec(rec)}
+                  onAddChaperone={() => { setAutoAddChaperone(true); setSelectedId(rec.id); }}
+                  busy={working[rec.id]}
+                  showSelect={true}
+                />
+              ))}
             </div>
           ) : (
             <div className="space-y-2">
@@ -2265,9 +2329,6 @@ function StatusPill({ status }) {
 }
 
 // ─── Record card (slim, clickable list row) ────────────────────────────────
-// Compact summary row. Clicking anywhere opens the right-hand DetailDrawer.
-// Quick actions (checkbox, Approve, Print) stop propagation so the row click
-// doesn't fire when activating them.
 function RecordCard(props) {
   const {
     rec, selected, onToggleSelect, isActive, onOpen,
@@ -2297,12 +2358,12 @@ function RecordCard(props) {
       tabIndex={0}
       onClick={handleRowClick}
       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onOpen(); } }}
-      className={`group relative bg-white/5 border rounded-xl overflow-hidden transition-all cursor-pointer ${
+      className={`group relative glass-panel rounded-xl overflow-hidden transition-all cursor-pointer ${
         isActive
-          ? 'border-brand-500/60 ring-2 ring-brand-500/30 bg-white/[0.07]'
+          ? 'border-brand-500/60 ring-2 ring-brand-500/30'
           : selected
           ? 'border-brand-500/40 ring-1 ring-brand-500/20'
-          : 'border-slate-800 hover:border-slate-600 hover:bg-white/[0.06]'
+          : 'hover:border-slate-600'
       }`}
     >
       {isActive && (
@@ -2321,42 +2382,56 @@ function RecordCard(props) {
               className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500/40 flex-shrink-0"
             />
           )}
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-500/30 to-brand-500/10 text-brand-200 ring-1 ring-brand-500/30 flex items-center justify-center font-bold flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500/30 to-brand-500/10 text-brand-200 border border-brand-500/30 flex items-center justify-center font-bold flex-shrink-0 shadow-sm">
             {(rec.guardian?.name || '?').charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-white truncate flex items-center gap-2 flex-wrap">
+            <div className="text-sm font-semibold text-slate-100 truncate flex items-center gap-2 flex-wrap">
               {rec.guardian?.name || '—'}
               <StatusPill status={rec.status} />
               {rec.formNumber && (
                 <span
                   title="Submission ID — use this for audit & reports"
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold border bg-brand-500/15 text-brand-200 border-brand-500/40"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold border bg-brand-500/15 text-brand-300 border-brand-500/40"
                 >
                   <i className="ph ph-hash"></i>{rec.formNumber}
                 </span>
               )}
               {enrollSummary && <EnrollPill summary={enrollSummary} />}
             </div>
-            <div className="text-xs text-slate-500 truncate">
-              {rec.guardian?.email} · {rec.guardian?.phone}
-              <span className="mx-1.5 text-slate-700">·</span>
+            <div className="text-xs text-slate-400 truncate mt-0.5 flex items-center gap-2 flex-wrap">
+              <span>{rec.guardian?.email || rec.guardian?.phone || 'No contact'}</span>
+              <span className="text-slate-600">·</span>
               <span title={fmtTime(rec.submittedAt)}>{timeAgo(rec.submittedAt)}</span>
+              {(rec.students || []).length > 0 && (
+                <>
+                  <span className="text-slate-600">·</span>
+                  <div className="inline-flex flex-wrap items-center gap-1">
+                    {(rec.students || []).map((s, idx) => (
+                      <span key={idx} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-900/60 text-slate-200 border border-slate-800">
+                        <i className="ph ph-student text-brand-400"></i>
+                        <span>{s.name || s.firstName || 'Student'}</span>
+                        {s.homeroom && <span className="text-[10px] text-brand-300 font-mono">({s.homeroom})</span>}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
 
         {/* Right: counts + quick actions */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-slate-400 px-2 py-1 rounded bg-white/5 border border-slate-800" title="Students">
-            <i className="ph ph-graduation-cap mr-1"></i>{rec.students?.length || 0}
+          <span className="text-xs text-slate-300 px-2.5 py-1 rounded-lg bg-slate-900/80 border border-slate-800" title="Students">
+            <i className="ph ph-graduation-cap mr-1 text-slate-400"></i>{rec.students?.length || 0}
           </span>
-          <span className="text-xs text-slate-400 px-2 py-1 rounded bg-white/5 border border-slate-800" title="Chaperones">
-            <i className="ph ph-users mr-1"></i>{rec.chaperones?.length || 0}
+          <span className="text-xs text-slate-300 px-2.5 py-1 rounded-lg bg-slate-900/80 border border-slate-800" title="Chaperones">
+            <i className="ph ph-users mr-1 text-slate-400"></i>{rec.chaperones?.length || 0}
           </span>
           <button
             onClick={(e) => { e.stopPropagation(); onPrint(); }}
-            className="text-xs px-2.5 py-1.5 rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10"
+            className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 transition"
             title="Open printable form view"
             aria-label="Print form"
           >
@@ -2369,7 +2444,7 @@ function RecordCard(props) {
               title={(rec.chaperones?.length || 0) >= 5
                 ? 'Maximum 5 chaperones reached'
                 : 'Add a new chaperone to this form'}
-              className="text-xs px-2.5 py-1.5 rounded-lg bg-brand-500/15 border border-brand-500/40 text-brand-200 hover:bg-brand-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-brand-500/15 border border-brand-500/40 text-brand-300 hover:bg-brand-500/25 disabled:opacity-40 disabled:cursor-not-allowed font-semibold"
               aria-label="Add chaperone"
             >
               <i className="ph ph-user-plus mr-1"></i>Add chaperone
@@ -2380,18 +2455,177 @@ function RecordCard(props) {
               onClick={(e) => { e.stopPropagation(); onApprove(); }}
               disabled={!!busy}
               title="Approve and allocate chaperone IDs"
-              className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50"
+              className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-semibold hover:bg-emerald-400 disabled:opacity-50 transition"
             >
               {busy === 'approve' ? '…' : <><i className="ph ph-check mr-1"></i>Approve</>}
             </button>
           )}
           {rec.status === 'changes_requested' && (
-            <span className="text-[11px] text-orange-300/80 px-2 py-1 rounded bg-orange-500/10 border border-orange-500/20"
+            <span className="text-[11px] text-orange-300 px-2.5 py-1 rounded-lg bg-orange-500/15 border border-orange-500/30"
               title={rec.changesRequestedMessage || ''}>
               <i className="ph ph-envelope-simple mr-1"></i>parent emailed
             </span>
           )}
-          <i className="ph ph-caret-right text-slate-600 group-hover:text-slate-300 transition-colors" aria-hidden></i>
+          <i className="ph ph-caret-right text-slate-500 group-hover:text-slate-200 transition-colors" aria-hidden></i>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Record card (Grid / Card View component) ──────────────────────────────
+function RecordCardGrid(props) {
+  const {
+    rec, selected, onToggleSelect, isActive, onOpen,
+    onApprove, onPrint, onAddChaperone, busy, showSelect,
+  } = props;
+
+  const enrollSummary = useMemo(() => {
+    if (rec.status !== 'approved') return null;
+    const allocated = rec.allocatedChaperones || [];
+    if (allocated.length === 0) return null;
+    let ok = 0, fail = 0;
+    allocated.forEach((a) => {
+      const e = (rec.enrollment || []).find((x) => x.chaperoneId === a.chaperoneId);
+      if (e?.ok) ok++; else fail++;
+    });
+    return { ok, fail, total: allocated.length };
+  }, [rec]);
+
+  const handleCardClick = (e) => {
+    if (e.target.closest('button,a,input,label,kbd')) return;
+    onOpen();
+  };
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleCardClick}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onOpen(); } }}
+      className={`group relative glass-panel rounded-2xl p-5 overflow-hidden transition-all cursor-pointer flex flex-col justify-between ${
+        isActive
+          ? 'border-brand-500/60 ring-2 ring-brand-500/30'
+          : selected
+          ? 'border-brand-500/40 ring-1 ring-brand-500/20'
+          : 'hover:border-slate-600'
+      }`}
+    >
+      {isActive && (
+        <span className="absolute left-0 top-0 bottom-0 w-1.5 bg-brand-400 rounded-r" aria-hidden></span>
+      )}
+
+      <div>
+        {/* Top bar */}
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="flex items-start gap-3 min-w-0">
+            {showSelect && (
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={onToggleSelect}
+                onClick={(e) => e.stopPropagation()}
+                className="mt-1 w-4 h-4 rounded border-slate-700 bg-slate-900 text-brand-500 focus:ring-brand-500/40 shrink-0"
+              />
+            )}
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500/30 to-brand-500/10 text-brand-200 border border-brand-500/30 flex items-center justify-center font-bold text-base shrink-0 shadow-sm">
+              {(rec.guardian?.name || '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-slate-100 truncate group-hover:text-cyan-300 transition">
+                {rec.guardian?.name || '—'}
+              </h3>
+              <p className="text-xs text-slate-400 truncate mt-0.5">
+                {rec.guardian?.email || rec.guardian?.phone || 'No contact'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <StatusPill status={rec.status} />
+            {rec.formNumber && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold border bg-brand-500/15 text-brand-300 border-brand-500/40">
+                <i className="ph ph-hash"></i>{rec.formNumber}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Middle Section: Students List */}
+        <div className="my-3 py-2.5 border-y border-slate-800/80 space-y-2">
+          <div className="flex items-center justify-between text-[11px] text-slate-400">
+            <span className="font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+              <i className="ph ph-graduation-cap"></i> Students ({rec.students?.length || 0})
+            </span>
+            <span className="text-slate-500">{timeAgo(rec.submittedAt)}</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(rec.students || []).map((s, i) => (
+              <span key={i} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-900/70 text-slate-200 border border-slate-800">
+                <span className="font-semibold text-slate-100">{s.name || s.firstName || 'Student'}</span>
+                {s.homeroom && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-500/15 text-brand-300 font-mono">
+                    {s.homeroom}
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Chaperones & Enrollment info */}
+        <div className="flex items-center justify-between text-xs text-slate-400 mb-4">
+          <span className="flex items-center gap-1.5">
+            <i className="ph ph-users text-slate-400"></i>
+            <span>Chaperones: <strong className="text-slate-200">{rec.chaperones?.length || 0}</strong></span>
+          </span>
+          {enrollSummary ? (
+            <EnrollPill summary={enrollSummary} />
+          ) : (
+            <span className="text-[10px] text-slate-500">{rec.status}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Footer Action Bar */}
+      <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={(e) => { e.stopPropagation(); onPrint(); }}
+            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700 transition"
+            title="Open printable form view"
+          >
+            <i className="ph ph-printer text-sm"></i>
+          </button>
+          {onAddChaperone && (EDITABLE_ONBOARDING_STATUSES.includes(rec.status) || rec.status === 'approved') && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onAddChaperone(); }}
+              disabled={(rec.chaperones?.length || 0) >= 5}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-brand-500/15 border border-brand-500/40 text-brand-300 hover:bg-brand-500/25 disabled:opacity-40"
+              title="Add chaperone"
+            >
+              <i className="ph ph-user-plus mr-1"></i>Add
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {rec.status === 'pending' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onApprove(); }}
+              disabled={!!busy}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition"
+            >
+              {busy === 'approve' ? '…' : <><i className="ph ph-check mr-1"></i>Approve</>}
+            </button>
+          )}
+          <button
+            onClick={onOpen}
+            className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1"
+          >
+            <span>Details</span>
+            <i className="ph ph-caret-right text-xs"></i>
+          </button>
         </div>
       </div>
     </div>
