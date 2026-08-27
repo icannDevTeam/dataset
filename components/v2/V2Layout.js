@@ -11,6 +11,34 @@ function getWIBTime() {
   return now.toISOString().slice(11, 19);
 }
 
+function getBreadcrumb(pathname, query) {
+  if (pathname === '/v2') return { section: 'Main', page: 'Dashboard' };
+  if (pathname === '/v2/analytics') return { section: 'Main', page: 'Pickup Analytics' };
+  if (pathname === '/v2/reports') return { section: 'Main', page: 'Reports & Exports' };
+  if (pathname === '/v2/pickup-admin') {
+    const v = String(query.view || '').toLowerCase();
+    if (v === 'invites') return { section: 'Pickup System', page: 'Invite Links' };
+    if (v === 'settings') return { section: 'Pickup System', page: 'Pickup Settings' };
+    return { section: 'Pickup System', page: 'Onboarding Review' };
+  }
+  if (pathname === '/v2/email-hub') return { section: 'Pickup System', page: 'Email Hub' };
+  if (pathname === '/v2/student-class-management') return { section: 'Pickup System', page: 'Student & Class Management' };
+  if (pathname === '/v2/pickup-enroll') return { section: 'Pickup System', page: 'Chaperone Enrolment' };
+  if (pathname === '/v2/pickup-map') return { section: 'Pickup System', page: 'Chaperone Map' };
+  if (pathname === '/v2/terminal-assignments') return { section: 'Pickup System', page: 'Terminal Assignments' };
+  if (pathname === '/v2/terminals') return { section: 'Pickup System', page: 'Hikvision Terminals' };
+  if (pathname === '/v2/release-groups') return { section: 'Pickup System', page: 'Release Groups (iPads)' };
+  if (pathname === '/v2/chaperones') return { section: 'Pickup System', page: 'Chaperones' };
+  if (pathname === '/v2/officer-overrides') return { section: 'Pickup System', page: 'Officer Overrides' };
+  if (pathname === '/v2/security') return { section: 'Pickup System', page: 'Security Heatmap' };
+  if (pathname === '/v2/pickup-ops') return { section: 'Pickup System', page: 'Operations Interface' };
+  if (pathname === '/v2/system-interfaces') return { section: 'Pickup System', page: 'Service Interfaces' };
+  if (pathname === '/v2/admin/downloads') return { section: 'System', page: 'Downloads Hub' };
+  if (pathname === '/v2/admin/rbac') return { section: 'System', page: 'Admin Console' };
+  if (pathname === '/v2/admin/users') return { section: 'System', page: 'Users Directory' };
+  return { section: 'Console', page: 'Operations' };
+}
+
 // Full V2 sidebar. Dashboard, Analytics, and Reports are essential and must
 // always be visible — see /memories/ui-rules.md.
 const NAV_SECTIONS = [
@@ -65,6 +93,8 @@ export default function V2Layout({ children }) {
   const [collapsedSections, setCollapsedSections] = useState({}); // sectionLabel -> bool
   const [badges, setBadges] = useState({}); // badgeKey -> count
   const [theme, setTheme] = useState('dark');
+
+  const breadcrumb = useMemo(() => getBreadcrumb(router.pathname, router.query), [router.pathname, router.query]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -460,17 +490,41 @@ export default function V2Layout({ children }) {
         </div>
       )}
 
-      {/* Desktop notification bell & Theme Toggle (fixed top-right) */}
-      <div className="hidden lg:flex fixed top-4 right-5 z-40 items-center gap-3">
-        <button
-          onClick={toggleTheme}
-          className="p-2 rounded-xl border border-slate-700/80 bg-slate-900/80 text-slate-300 hover:text-white hover:bg-slate-800 transition shadow-lg backdrop-blur-md"
-          title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-        >
-          <i className={`ph ${theme === 'dark' ? 'ph-sun' : 'ph-moon'} text-lg`}></i>
-        </button>
-        {user && <NotificationBell />}
-      </div>
+      {/* Desktop Top Header Bar */}
+      <header className={`hidden lg:flex fixed top-0 right-0 z-30 h-14 items-center justify-between px-6 glass-panel border-b border-slate-800/80 transition-all duration-300 ${collapsed ? 'left-[72px]' : 'left-64'}`}>
+        {/* Breadcrumb / Section */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-400 font-medium">{breadcrumb.section}</span>
+          <span className="text-slate-600">/</span>
+          <span className="text-slate-100 font-semibold">{breadcrumb.page}</span>
+        </div>
+
+        {/* Right Header Controls */}
+        <div className="flex items-center gap-3">
+          {/* Live Clock */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs font-mono text-slate-300">
+            <span>{clock}</span>
+            <span className="text-slate-500 font-sans text-[11px]">WIB</span>
+            <span className="relative flex h-2 w-2 ml-0.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+          </div>
+
+          {/* Theme Toggle Button */}
+          <button
+            onClick={toggleTheme}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-700/80 bg-slate-900/80 text-slate-300 hover:text-white hover:bg-slate-800 transition text-xs font-medium"
+            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+          >
+            <i className={`ph ${theme === 'dark' ? 'ph-sun text-amber-400' : 'ph-moon text-indigo-400'} text-base`}></i>
+            <span>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+          </button>
+
+          {/* Notification Bell */}
+          {user && <NotificationBell />}
+        </div>
+      </header>
 
       {/* Desktop layout */}
       <div className="flex min-h-screen">
@@ -480,7 +534,7 @@ export default function V2Layout({ children }) {
         </aside>
 
         {/* Main content */}
-        <main className={`flex-1 relative z-10 ${collapsed ? 'lg:ml-[72px]' : 'lg:ml-64'} transition-all duration-300 pt-14 lg:pt-0`}>
+        <main className={`flex-1 relative z-10 ${collapsed ? 'lg:ml-[72px]' : 'lg:ml-64'} transition-all duration-300 pt-14`}>
           {children}
         </main>
       </div>
