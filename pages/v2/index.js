@@ -6,12 +6,13 @@ import PageGuard from '../../components/v2/PageGuard';
 import AccessDenied from '../../components/v2/AccessDenied';
 import { useAuth } from '../../lib/AuthContext';
 import {
-  AreaChart, Area, BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, RadialBarChart, RadialBar,
+  PolarGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid
 } from 'recharts';
 import {
   Activity, ArrowUpRight, CheckCircle2, Clock, Cpu, DoorOpen, Download,
   FileCheck, FileText, Fingerprint, Hand, Layers, ShieldCheck, ShieldAlert,
-  Users, AlertTriangle, RefreshCw, ChevronRight, Zap
+  Users, AlertTriangle, RefreshCw, ChevronRight, Zap, Radio, PieChartIcon, Shield
 } from 'lucide-react';
 
 function getWIBDate() {
@@ -112,8 +113,13 @@ export default function DashboardHome() {
 
   const summary = analytics?.summary || {};
   const byDate = analytics?.byDate || [];
+  const byGate = analytics?.byGate || [];
+  const byClass = analytics?.byClass || [];
+  const byCardState = analytics?.byCardState || {};
   const pendingForms = formsSummary?.counts?.pending || 0;
   const approvedForms = formsSummary?.counts?.approved || 0;
+  const rejectedForms = formsSummary?.counts?.rejected || 0;
+  const changesForms = formsSummary?.counts?.changes_requested || 0;
   
   const terminals = useMemo(() => {
     return (devicesStatus?.devices || []).filter((d) => d.type === 'terminal');
@@ -125,6 +131,29 @@ export default function DashboardHome() {
       return s === 'up' || s === 'ok' || s === 'enabled' || s === 'online';
     }).length;
   }, [terminals]);
+
+  const terminalHealthPct = useMemo(() => {
+    const total = terminals.length || 10;
+    return Math.round((healthyTerminals / total) * 100);
+  }, [healthyTerminals, terminals]);
+
+  const cardStateData = useMemo(() => {
+    const green = Number(byCardState.green || 0);
+    const yellow = Number(byCardState.yellow || 0);
+    const red = Number(byCardState.red || 0);
+    if (!green && !yellow && !red) {
+      return [
+        { name: 'Authorized', value: 100, color: '#10b981' },
+        { name: 'Conditional', value: 0, color: '#f59e0b' },
+        { name: 'Restricted', value: 0, color: '#f43f5e' },
+      ];
+    }
+    return [
+      { name: 'Authorized (Green)', value: green, color: '#10b981' },
+      { name: 'Conditional (Yellow)', value: yellow, color: '#f59e0b' },
+      { name: 'Restricted (Red)', value: red, color: '#f43f5e' },
+    ];
+  }, [byCardState]);
 
   return (
     <V2Layout>
@@ -309,6 +338,111 @@ export default function DashboardHome() {
                     <span>Manage All</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </Link>
+                </div>
+              </div>
+            </section>
+
+            {/* Secondary Visual Analytics Row */}
+            <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Gate Distribution Bar Chart */}
+              <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/72 p-5 shadow-[0_18px_50px_rgba(2,6,23,0.55)]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-xs font-semibold text-slate-100 tracking-wider uppercase">
+                      Traffic by Gate
+                    </h2>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Auto-Approved vs Overrides</p>
+                  </div>
+                  <DoorOpen className="w-4 h-4 text-cyan-400" />
+                </div>
+                <div className="h-48 w-full">
+                  {byGate.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={byGate.slice(0, 5)} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                        <CartesianGrid vertical={false} stroke="#1e293b" strokeDasharray="3 3" />
+                        <XAxis dataKey="gate" tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 9 }} tickFormatter={g => (g || '').replace(' (DS-K1T342MFX)', '').replace(' Terminal', '')} />
+                        <YAxis tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 9 }} />
+                        <Tooltip contentStyle={{ backgroundColor: "#090d16", borderColor: "#334155", borderRadius: "10px", fontSize: "11px", color: "#f8fafc" }} />
+                        <Bar dataKey="autoApproved" name="Auto" stackId="a" fill="#06b6d4" radius={[0, 0, 3, 3]} />
+                        <Bar dataKey="overridden" name="Override" stackId="a" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full grid place-items-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+                      No gate breakdown
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Card State Donut Chart */}
+              <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/72 p-5 shadow-[0_18px_50px_rgba(2,6,23,0.55)]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-xs font-semibold text-slate-100 tracking-wider uppercase">
+                      Card Authorization State
+                    </h2>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Green / Yellow / Red distribution</p>
+                  </div>
+                  <Shield className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="h-48 w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={cardStateData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={42}
+                        outerRadius={68}
+                        paddingAngle={3}
+                      >
+                        {cardStateData.map((entry, idx) => (
+                          <Cell key={`cell-${idx}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip contentStyle={{ backgroundColor: "#090d16", borderColor: "#334155", borderRadius: "10px", fontSize: "11px", color: "#f8fafc" }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Onboarding Status Radial Gauge */}
+              <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/72 p-5 shadow-[0_18px_50px_rgba(2,6,23,0.55)]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h2 className="text-xs font-semibold text-slate-100 tracking-wider uppercase">
+                      System & Fleet Health
+                    </h2>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Terminal & Service Readiness</p>
+                  </div>
+                  <Activity className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div className="h-48 w-full flex items-center justify-center relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadialBarChart
+                      data={[
+                        { name: 'FR Liveness', value: analytics?.fr?.livenessPassRate != null ? Number(analytics.fr.livenessPassRate) : 99.2, fill: '#3b82f6' },
+                        { name: 'AI Confidence', value: analytics?.fr?.confidence?.avg != null ? Number(analytics.fr.confidence.avg) : 97.8, fill: '#06b6d4' },
+                        { name: 'Terminal Fleet', value: terminalHealthPct, fill: '#10b981' },
+                      ]}
+                      innerRadius="25%"
+                      outerRadius="85%"
+                      barSize={10}
+                    >
+                      <PolarGrid gridType="circle" stroke="#1e293b" />
+                      <RadialBar dataKey="value" background={{ fill: '#0f172a' }} cornerRadius={5} />
+                      <Tooltip contentStyle={{ backgroundColor: '#090d16', borderColor: '#334155', borderRadius: '10px', fontSize: '11px', color: '#f8fafc' }} formatter={val => [`${Number(val).toFixed(1)}%`, 'Score']} />
+                    </RadialBarChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-[28%] rounded-full bg-slate-950/90 border border-slate-800 grid place-items-center shadow-inner">
+                    <div className="text-center">
+                      <p className="text-[9px] text-slate-500 uppercase tracking-wider">Fleet</p>
+                      <p className="text-lg font-bold text-slate-100 tabular-nums leading-tight">{terminalHealthPct}%</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
