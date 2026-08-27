@@ -4389,45 +4389,49 @@ function InviteLinksManager({ pushToast }) {
   }, [items, showArchived]);
 
   return (
-    <div className="max-w-6xl">
-      <div className="flex items-end justify-between flex-wrap gap-3 mb-5">
-        <div>
-          <h2 className="text-lg font-semibold text-white mb-1">Onboarding Invite Links</h2>
-          <p className="text-sm text-slate-400 max-w-2xl">
-            One link can be sent to every parent. Each submission is identified by the form
-            data — not the link itself — so you don&apos;t need to mint a per-parent URL.
-            Use multiple links to track campaigns (e.g. <em>Grade 4 Newsletter</em>,
-            <em> WhatsApp Broadcast</em>) and revoke any of them instantly.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowArchived((v) => !v)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${
-              showArchived
-                ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
-                : 'bg-white/5 border-slate-800 text-slate-300 hover:bg-white/10'
-            }`}
-            title={showArchived ? 'Hide archived links' : 'Show archived links'}>
-            <i className={`ph ${showArchived ? 'ph-eye-slash' : 'ph-archive'} mr-1`}></i>
-            {showArchived ? `Viewing archive (${stats.archived})` : `Archive (${stats.archived})`}
-          </button>
-          <button onClick={() => setShowSettings(true)}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
-            <i className="ph ph-gear-six mr-1"></i>Integrations
-          </button>
-          <button onClick={reload}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-800 text-slate-300 hover:bg-white/10">
-            <i className="ph ph-arrows-clockwise mr-1"></i>Refresh
-          </button>
-          <button onClick={() => setShowCreate(true)}
-            className="px-4 py-2 text-sm font-semibold rounded-lg bg-gradient-to-r from-brand-500 to-emerald-500 hover:from-brand-400 hover:to-emerald-400 text-white shadow-lg shadow-emerald-900/30">
-            <i className="ph ph-plus-circle mr-1.5"></i>New invite link
-          </button>
+    <div className="max-w-6xl space-y-6">
+      <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-r from-brand-500/[0.12] via-slate-900/70 to-slate-950/70 p-6 shadow-xl">
+        <div className="flex items-end justify-between flex-wrap gap-4 relative z-10">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-400 mb-1">
+              <i className="ph ph-link-simple text-base"></i> Onboarding Campaign Links
+            </div>
+            <h2 className="text-2xl font-bold text-white tracking-tight">Onboarding Invite Links</h2>
+            <p className="text-sm text-slate-400 max-w-2xl mt-1.5 leading-relaxed">
+              One link can be shared across channels. Each submission is identified by the guardian form
+              data. Use multiple links to track campaigns (e.g. <em>Grade 4 Newsletter</em>,
+              <em> WhatsApp Broadcast</em>) and revoke or pause any link anytime.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => setShowArchived((v) => !v)}
+              className={`px-3 py-2 text-xs font-semibold rounded-xl border transition-all ${
+                showArchived
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                  : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800'
+              }`}
+              title={showArchived ? 'Hide archived links' : 'Show archived links'}>
+              <i className={`ph ${showArchived ? 'ph-eye-slash' : 'ph-archive'} mr-1.5 text-sm`}></i>
+              {showArchived ? `Archive (${stats.archived})` : `Archive (${stats.archived})`}
+            </button>
+            <button onClick={() => setShowSettings(true)}
+              className="px-3 py-2 text-xs font-semibold rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 hover:bg-slate-800 transition-all">
+              <i className="ph ph-gear-six mr-1.5 text-sm"></i>Integrations
+            </button>
+            <button onClick={reload}
+              className="px-3 py-2 text-xs font-semibold rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 hover:bg-slate-800 transition-all">
+              <i className="ph ph-arrows-clockwise mr-1.5 text-sm"></i>Refresh
+            </button>
+            <button onClick={() => setShowCreate(true)}
+              className="px-4 py-2.5 text-xs font-bold rounded-xl bg-gradient-to-r from-brand-500 to-emerald-500 hover:from-brand-400 hover:to-emerald-400 text-slate-950 shadow-lg shadow-brand-500/20 transition-all active:scale-95">
+              <i className="ph ph-plus-circle mr-1.5 text-sm"></i>New invite link
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Stat strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total links" value={stats.total} icon="ph-link" tone="slate" />
         <StatCard label="Active" value={stats.active} icon="ph-check-circle" tone="emerald" />
         <StatCard label="Revoked / paused" value={stats.revoked} icon="ph-pause-circle" tone="rose" />
@@ -4627,7 +4631,7 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle,
     : `${invite.useCount} use${invite.useCount === 1 ? '' : 's'}`;
 
   return (
-    <div className="rounded-2xl bg-gradient-to-br from-slate-900/80 to-slate-950/80 border border-slate-800 hover:border-slate-700 transition p-5 flex flex-col gap-4">
+    <div className="glass-panel rounded-2xl p-5 border border-slate-800/80 shadow-[0_14px_40px_rgba(2,6,23,0.45)] hover:border-slate-700 transition flex flex-col gap-4">
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -4635,28 +4639,28 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle,
             <div className="flex items-center gap-1.5">
               <input value={draftName} onChange={(e) => setDraftName(e.target.value)}
                 autoFocus
-                className="flex-1 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white"
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-sm text-slate-100 font-medium"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') { onRename(draftName.trim()); setEditingName(false); }
                   if (e.key === 'Escape') { setDraftName(invite.name); setEditingName(false); }
                 }} />
               <button onClick={() => { onRename(draftName.trim()); setEditingName(false); }}
-                className="p-1.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300">
+                className="p-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300">
                 <i className="ph ph-check"></i>
               </button>
               <button onClick={() => { setDraftName(invite.name); setEditingName(false); }}
-                className="p-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300">
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300">
                 <i className="ph ph-x"></i>
               </button>
             </div>
           ) : (
             <button onClick={() => setEditingName(true)}
-              className="text-base font-semibold text-white truncate text-left hover:text-brand-300 transition flex items-center gap-1.5 w-full">
-              {invite.name}
-              <i className="ph ph-pencil-simple text-xs text-slate-500 opacity-0 group-hover:opacity-100"></i>
+              className="text-base font-semibold text-slate-100 truncate text-left hover:text-cyan-300 transition flex items-center gap-1.5 w-full group">
+              <span className="truncate">{invite.name}</span>
+              <i className="ph ph-pencil-simple text-xs text-slate-500 group-hover:text-slate-300 shrink-0"></i>
             </button>
           )}
-          <div className="text-xs text-slate-500 mt-0.5 font-mono">{invite.id}</div>
+          <div className="text-xs text-slate-400 mt-0.5 font-mono">{invite.id}</div>
         </div>
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full border ${status.tone}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>
@@ -4666,32 +4670,32 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle,
 
       {/* Metrics */}
       <div className="grid grid-cols-3 gap-2 text-center">
-        <div className="bg-white/5 rounded-lg py-2">
-          <div className="text-xs text-slate-500">Submissions</div>
-          <div className="text-sm font-bold text-white mt-0.5">{usageLabel}</div>
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-1">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Submissions</div>
+          <div className="text-sm font-bold text-slate-100 mt-0.5">{usageLabel}</div>
         </div>
-        <div className="bg-white/5 rounded-lg py-2">
-          <div className="text-xs text-slate-500">Last used</div>
-          <div className="text-sm font-bold text-white mt-0.5">{lastUsedAgo || '—'}</div>
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-1">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Last used</div>
+          <div className="text-sm font-bold text-slate-100 mt-0.5">{lastUsedAgo || '—'}</div>
         </div>
-        <div className="bg-white/5 rounded-lg py-2">
-          <div className="text-xs text-slate-500">Expires</div>
-          <div className="text-sm font-bold text-white mt-0.5">{expIso || 'Never'}</div>
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl py-2 px-1">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Expires</div>
+          <div className="text-sm font-bold text-slate-100 mt-0.5">{expIso || 'Never'}</div>
         </div>
       </div>
 
       {/* Submission window (if set) */}
       {(invite.windowOpenAt || invite.windowCloseAt) && (
         <div className="grid grid-cols-2 gap-2 -mt-1">
-          <div className="rounded-lg bg-sky-500/5 border border-sky-500/20 px-3 py-2">
-            <div className="text-[11px] text-sky-300/70 flex items-center gap-1"><i className="ph ph-arrow-up-right"></i>Opens</div>
-            <div className="text-xs font-semibold text-white mt-0.5">
+          <div className="rounded-xl bg-sky-500/10 border border-sky-500/25 px-3 py-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-sky-300 flex items-center gap-1"><i className="ph ph-arrow-up-right"></i>Opens</div>
+            <div className="text-xs font-semibold text-slate-100 mt-0.5">
               {invite.windowOpenAt ? new Date(invite.windowOpenAt).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : 'Now'}
             </div>
           </div>
-          <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 px-3 py-2">
-            <div className="text-[11px] text-amber-300/70 flex items-center gap-1"><i className="ph ph-clock-countdown"></i>Closes</div>
-            <div className="text-xs font-semibold text-white mt-0.5">
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/25 px-3 py-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1"><i className="ph ph-clock-countdown"></i>Closes</div>
+            <div className="text-xs font-semibold text-slate-100 mt-0.5">
               {invite.windowCloseAt ? new Date(invite.windowCloseAt).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : 'Open-ended'}
             </div>
           </div>
@@ -4699,45 +4703,43 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle,
       )}
 
       {/* URL preview */}
-      <div className="bg-black/40 border border-slate-800 rounded-lg p-2.5 flex items-center gap-2 group">
-        <i className="ph ph-link text-slate-500"></i>
-        <code className="flex-1 text-[11px] text-slate-300 truncate font-mono">{invite.url}</code>
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-2.5 flex items-center gap-2 group">
+        <i className="ph ph-link text-slate-500 shrink-0"></i>
+        <code className="flex-1 text-[11px] text-slate-200 truncate font-mono">{invite.url}</code>
         <button onClick={() => onCopy(invite.url, 'Invite URL copied')}
           title="Copy URL"
-          className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-white/10">
-          <i className="ph ph-copy"></i>
+          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition">
+          <i className="ph ph-copy text-sm"></i>
         </button>
       </div>
 
-      {/* Actions ───────────────────────────────────────────────────────
-          Two cohesive clusters separated by a thin divider.
-          Each cluster wraps as a unit so buttons never split awkwardly. */}
+      {/* Actions */}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 pt-1">
         {/* Share / preview cluster */}
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => onCopy(invite.url, 'Invite URL copied')}
-            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-500 hover:bg-brand-400 text-white shadow-sm">
+            className="px-3 py-1.5 text-xs font-bold rounded-xl bg-brand-500 hover:bg-brand-400 text-slate-950 shadow-sm transition">
             <i className="ph ph-copy mr-1"></i>Copy link
           </button>
           <button onClick={onSend}
-            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm">
+            className="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-sm transition">
             <i className="ph ph-paper-plane-tilt mr-1"></i>Send
           </button>
           <button onClick={onPreview}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
+            className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-900 border border-slate-800 text-slate-200 hover:bg-slate-800 transition">
             <i className="ph ph-arrow-square-out mr-1"></i>Preview
           </button>
           <button onClick={onShowQr}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-200 hover:bg-white/10">
+            className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-900 border border-slate-800 text-slate-200 hover:bg-slate-800 transition">
             <i className="ph ph-qr-code mr-1"></i>QR
           </button>
         </div>
 
-        {/* Lifecycle cluster — stays grouped on wrap */}
+        {/* Lifecycle cluster */}
         <div className="flex flex-wrap items-center gap-2">
           {onEdit && !invite.revoked && !invite.archived && (
             <button onClick={onEdit}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-300 hover:bg-sky-500/20"
+              className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-300 hover:bg-sky-500/25 transition"
               title="Edit details, extend expiration, change submission window">
               <i className="ph ph-pencil-simple mr-1"></i>Edit
             </button>
@@ -4745,10 +4747,10 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle,
           {!invite.revoked && (
             <button
               onClick={() => onToggle(!invite.enabled)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg border ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition ${
                 invite.enabled
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
-                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                  ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
+                  : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
               }`}
               title={invite.enabled ? 'Pause new submissions' : 'Resume submissions'}>
               <i className={`ph ${invite.enabled ? 'ph-pause' : 'ph-play'} mr-1`}></i>
@@ -4757,20 +4759,20 @@ function InviteLinkCard({ invite, onCopy, onShowQr, onSend, onPreview, onToggle,
           )}
           {!invite.revoked && !invite.archived && (
             <button onClick={onRevoke}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20">
+              className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 hover:bg-rose-500/25 transition">
               <i className="ph ph-prohibit mr-1"></i>Revoke
             </button>
           )}
           <div className="relative" onClick={(e) => e.stopPropagation()}>
             <button onClick={() => setMenuOpen((v) => !v)}
-              className="px-2 py-1.5 text-xs font-medium rounded-lg bg-white/5 border border-slate-700 text-slate-300 hover:bg-white/10"
+              className="px-2 py-1.5 text-xs font-semibold rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 transition"
               title="More actions">
               <i className="ph ph-dots-three-vertical"></i>
             </button>
             {menuOpen && (
-              <div className="absolute right-0 bottom-full mb-1 w-48 rounded-lg bg-slate-900 border border-slate-700 shadow-xl py-1 z-20">
+              <div className="absolute right-0 bottom-full mb-1 w-48 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl py-1 z-20">
                 <button onClick={() => { setMenuOpen(false); onArchive && onArchive(); }}
-                  className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-white/5 flex items-center gap-2">
+                  className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 flex items-center gap-2">
                   <i className={`ph ${invite.archived ? 'ph-arrow-counter-clockwise' : 'ph-archive'} text-amber-300`}></i>
                   {invite.archived ? 'Restore from archive' : 'Archive (hide from list)'}
                 </button>
