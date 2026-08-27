@@ -101,20 +101,22 @@ img {
     radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.08) 0%, transparent 40%) !important;
 }
 
-/* Cards, Glass Panels & Containers */
-.v2-light .glass-panel,
-.v2-light [class*="bg-slate-9"],
-.v2-light [class*="bg-slate-8"],
-.v2-light [class*="bg-white/5"],
-.v2-light [class*="bg-white/10"],
-.v2-light [class*="bg-white/[0.0"],
-.v2-light [class*="bg-white/[0.1"],
-.v2-light [class*="bg-gradient-to-"] {
+/* Glass Panels & Primary Surface Cards */
+.v2-light .glass-panel {
   background: #ffffff !important;
-  border-color: #e2e8f0 !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.06), 0 2px 4px -1px rgba(15, 23, 42, 0.04) !important;
   color: #0f172a !important;
 }
 
+/* Page Headers & Hero Banners */
+.v2-light [class*="bg-gradient-to-r"] {
+  background: linear-gradient(to right, #f1f5f9, #ffffff) !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+/* Sidebar & Layout Elements */
 .v2-light aside,
 .v2-light header,
 .v2-light nav,
@@ -124,7 +126,55 @@ img {
 
 .v2-light aside {
   background: #ffffff !important;
-  border-color: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Inner Panels, Sub-Cards & Containers */
+.v2-light .bg-slate-950,
+.v2-light .bg-slate-900,
+.v2-light [class*="bg-slate-950"],
+.v2-light [class*="bg-slate-900"] {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+.v2-light .bg-slate-800,
+.v2-light [class*="bg-slate-800"],
+.v2-light .bg-slate-700,
+.v2-light [class*="bg-slate-700"] {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+/* Subtle Transparent Backgrounds (Pills, Rows, Sub-items) */
+.v2-light [class*="bg-white/5"],
+.v2-light [class*="bg-white/10"],
+.v2-light [class*="bg-white/[0.0"],
+.v2-light [class*="bg-white/[0.1"] {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+/* Tables in Light Mode */
+.v2-light table thead {
+  background-color: #f1f5f9 !important;
+  border-bottom: 2px solid #cbd5e1 !important;
+}
+
+.v2-light table thead th {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+
+.v2-light table tbody tr {
+  border-bottom: 1px solid #f1f5f9 !important;
+}
+
+.v2-light table tbody tr:hover {
+  background-color: #f8fafc !important;
 }
 
 /* Scrollbars in Light Mode */
@@ -137,10 +187,10 @@ img {
 .v2-light [class*="border-slate-800"],
 .v2-light [class*="border-slate-700"],
 .v2-light [class*="border-slate-600"] {
-  border-color: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
 }
 
-/* Typography in Light Mode */
+/* Typography Contrast in Light Mode */
 .v2-light .text-white,
 .v2-light .text-slate-100,
 .v2-light .text-slate-200,
@@ -167,7 +217,13 @@ img {
   color-scheme: light !important;
   background-color: #ffffff !important;
   color: #0f172a !important;
-  border-color: #cbd5e1 !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+
+.v2-light input::placeholder,
+.v2-light textarea::placeholder {
+  color: #94a3b8 !important;
 }
 
 .v2-light select option,
@@ -201,36 +257,47 @@ img {
 .v2-light [class*="bg-indigo-500"] *,
 .v2-light [class*="bg-violet-500"] *,
 .v2-light [class*="bg-sky-500"] * {
-  color: inherit !important;
+  color: #ffffff !important;
 }
 
-/* Tinted Badge Backgrounds & Readable Text in Light Mode */
+/* Tinted Badges in Light Mode */
 .v2-light .bg-emerald-500\/10, .v2-light .bg-emerald-500\/15, .v2-light .bg-emerald-500\/20 {
   background-color: #d1fae5 !important;
-  color: #065f46 !important;
+  border-color: #a7f3d0 !important;
+  color: #047857 !important;
 }
 .v2-light .bg-amber-500\/10, .v2-light .bg-amber-500\/15, .v2-light .bg-amber-500\/20 {
   background-color: #fef3c7 !important;
-  color: #92400e !important;
+  border-color: #fde68a !important;
+  color: #b45309 !important;
 }
 .v2-light .bg-red-500\/10, .v2-light .bg-red-500\/15, .v2-light .bg-red-500\/20 {
   background-color: #fee2e2 !important;
-  color: #991b1b !important;
+  border-color: #fecaca !important;
+  color: #b91c1c !important;
 }
 .v2-light .bg-brand-500\/10, .v2-light .bg-brand-500\/15, .v2-light .bg-brand-500\/20 {
   background-color: #e0f2fe !important;
-  color: #075985 !important;
+  border-color: #bae6fd !important;
+  color: #0369a1 !important;
+}
+.v2-light .bg-orange-500\/10, .v2-light .bg-orange-500\/15, .v2-light .bg-orange-500\/20 {
+  background-color: #ffedd5 !important;
+  border-color: #fed7aa !important;
+  color: #c2410c !important;
 }
 .v2-light .bg-violet-500\/10, .v2-light .bg-violet-500\/15, .v2-light .bg-violet-500\/20 {
   background-color: #f3e8ff !important;
+  border-color: #e9d5ff !important;
   color: #6b21a8 !important;
 }
 
-.v2-light .text-emerald-400, .v2-light .text-emerald-300 { color: #059669 !important; }
-.v2-light .text-amber-400, .v2-light .text-amber-300 { color: #d97706 !important; }
-.v2-light .text-red-400, .v2-light .text-red-300 { color: #dc2626 !important; }
-.v2-light .text-brand-400, .v2-light .text-brand-300 { color: #0284c7 !important; }
-.v2-light .text-orange-400, .v2-light .text-orange-300 { color: #ea580c !important; }
+/* Explicit colored text overrides in Light Mode */
+.v2-light .text-emerald-400, .v2-light .text-emerald-300 { color: #047857 !important; }
+.v2-light .text-amber-400, .v2-light .text-amber-300 { color: #b45309 !important; }
+.v2-light .text-red-400, .v2-light .text-red-300 { color: #b91c1c !important; }
+.v2-light .text-brand-400, .v2-light .text-brand-300 { color: #0369a1 !important; }
+.v2-light .text-orange-400, .v2-light .text-orange-300 { color: #c2410c !important; }
 
 .aura-theme .noise-overlay {
   position: fixed;
