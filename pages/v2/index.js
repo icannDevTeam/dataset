@@ -355,14 +355,14 @@ export default function DashboardHome() {
                   </div>
                   <DoorOpen className="w-4 h-4 text-cyan-400" />
                 </div>
-                <div className="h-48 w-full">
+                <div className="h-44 w-full">
                   {byGate.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={byGate.slice(0, 5)} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                         <CartesianGrid vertical={false} stroke="#1e293b" strokeDasharray="3 3" />
-                        <XAxis dataKey="gate" tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 9 }} tickFormatter={g => (g || '').replace(' (DS-K1T342MFX)', '').replace(' Terminal', '')} />
-                        <YAxis tickLine={false} axisLine={false} tick={{ fill: "#64748b", fontSize: 9 }} />
-                        <Tooltip contentStyle={{ backgroundColor: "#090d16", borderColor: "#334155", borderRadius: "10px", fontSize: "11px", color: "#f8fafc" }} />
+                        <XAxis dataKey="gate" tickLine={false} axisLine={false} tick={{ fontSize: 9 }} tickFormatter={g => (g || '').replace(' (DS-K1T342MFX)', '').replace(' Terminal', '')} />
+                        <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 9 }} />
+                        <Tooltip />
                         <Bar dataKey="autoApproved" name="Auto" stackId="a" fill="#06b6d4" radius={[0, 0, 3, 3]} />
                         <Bar dataKey="overridden" name="Override" stackId="a" fill="#f59e0b" radius={[3, 3, 0, 0]} />
                       </BarChart>
@@ -376,8 +376,8 @@ export default function DashboardHome() {
               </div>
 
               {/* Card State Donut Chart */}
-              <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/72 p-5 shadow-[0_18px_50px_rgba(2,6,23,0.55)]">
-                <div className="flex items-center justify-between mb-3">
+              <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/72 p-5 shadow-[0_18px_50px_rgba(2,6,23,0.55)] flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-2">
                   <div>
                     <h2 className="text-xs font-semibold text-slate-100 tracking-wider uppercase">
                       Card Authorization State
@@ -386,7 +386,7 @@ export default function DashboardHome() {
                   </div>
                   <Shield className="w-4 h-4 text-emerald-400" />
                 </div>
-                <div className="h-48 w-full flex items-center justify-center">
+                <div className="h-36 w-full flex items-center justify-center relative">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -395,23 +395,34 @@ export default function DashboardHome() {
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        innerRadius={42}
-                        outerRadius={68}
-                        paddingAngle={3}
+                        innerRadius={38}
+                        outerRadius={60}
+                        paddingAngle={4}
                       >
                         {cardStateData.map((entry, idx) => (
                           <Cell key={`cell-${idx}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <Tooltip contentStyle={{ backgroundColor: "#090d16", borderColor: "#334155", borderRadius: "10px", fontSize: "11px", color: "#f8fafc" }} />
+                      <Tooltip />
                     </PieChart>
                   </ResponsiveContainer>
+                  <div className="absolute inset-[28%] rounded-full border border-slate-800/60 bg-slate-900/60 backdrop-blur-sm grid place-items-center">
+                    <div className="text-center">
+                      <p className="text-[8px] text-slate-500 uppercase tracking-widest">State</p>
+                      <p className="text-xs font-bold text-slate-100">Green</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-center gap-3 text-[10px] text-slate-400 pt-1">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> Authorized</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500"></span> Conditional</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500"></span> Restricted</span>
                 </div>
               </div>
 
               {/* Onboarding Status Radial Gauge */}
               <div className="rounded-[22px] border border-slate-800/80 bg-slate-950/72 p-5 shadow-[0_18px_50px_rgba(2,6,23,0.55)]">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-2">
                   <div>
                     <h2 className="text-xs font-semibold text-slate-100 tracking-wider uppercase">
                       System & Fleet Health
@@ -420,7 +431,7 @@ export default function DashboardHome() {
                   </div>
                   <Activity className="w-4 h-4 text-indigo-400" />
                 </div>
-                <div className="h-48 w-full flex items-center justify-center relative">
+                <div className="h-44 w-full flex items-center justify-center relative">
                   <ResponsiveContainer width="100%" height="100%">
                     <RadialBarChart
                       data={[
@@ -430,17 +441,17 @@ export default function DashboardHome() {
                       ]}
                       innerRadius="25%"
                       outerRadius="85%"
-                      barSize={10}
+                      barSize={9}
                     >
                       <PolarGrid gridType="circle" stroke="#1e293b" />
                       <RadialBar dataKey="value" background={{ fill: '#0f172a' }} cornerRadius={5} />
-                      <Tooltip contentStyle={{ backgroundColor: '#090d16', borderColor: '#334155', borderRadius: '10px', fontSize: '11px', color: '#f8fafc' }} formatter={val => [`${Number(val).toFixed(1)}%`, 'Score']} />
+                      <Tooltip formatter={val => [`${Number(val).toFixed(1)}%`, 'Score']} />
                     </RadialBarChart>
                   </ResponsiveContainer>
-                  <div className="absolute inset-[28%] rounded-full bg-slate-950/90 border border-slate-800 grid place-items-center shadow-inner">
+                  <div className="absolute inset-[30%] rounded-full border border-slate-800/60 bg-slate-900/60 backdrop-blur-sm grid place-items-center">
                     <div className="text-center">
-                      <p className="text-[9px] text-slate-500 uppercase tracking-wider">Fleet</p>
-                      <p className="text-lg font-bold text-slate-100 tabular-nums leading-tight">{terminalHealthPct}%</p>
+                      <p className="text-[8px] text-slate-500 uppercase tracking-wider">Fleet</p>
+                      <p className="text-base font-bold text-slate-100 tabular-nums leading-tight">{terminalHealthPct}%</p>
                     </div>
                   </div>
                 </div>

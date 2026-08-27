@@ -299,6 +299,28 @@ img {
 .v2-light .text-brand-400, .v2-light .text-brand-300 { color: #0369a1 !important; }
 .v2-light .text-orange-400, .v2-light .text-orange-300 { color: #c2410c !important; }
 
+/* Recharts Light Mode Styling Overrides */
+.v2-light .recharts-cartesian-grid line {
+  stroke: #e2e8f0 !important;
+}
+.v2-light .recharts-text,
+.v2-light .recharts-label {
+  fill: #475569 !important;
+}
+.v2-light .recharts-polar-grid line,
+.v2-light .recharts-polar-grid circle {
+  stroke: #cbd5e1 !important;
+}
+.v2-light .recharts-radial-bar-background-sector {
+  fill: #f1f5f9 !important;
+}
+.v2-light .recharts-default-tooltip {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1) !important;
+}
+
 .aura-theme .noise-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
