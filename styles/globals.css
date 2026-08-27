@@ -92,6 +92,63 @@ img {
   background-attachment: fixed;
 }
 
+/* ── Light Mode (.v2-light) Design System Overrides ────────────────── */
+.v2-light.aura-theme {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+  background-image:
+    radial-gradient(circle at 15% 50%, rgba(6, 182, 212, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.08) 0%, transparent 40%) !important;
+}
+
+.v2-light .glass-panel {
+  background: rgba(255, 255, 255, 0.88) !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03) !important;
+}
+
+.v2-light select,
+.v2-light input[type="text"],
+.v2-light input[type="search"],
+.v2-light input[type="date"],
+.v2-light textarea {
+  color-scheme: light !important;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.v2-light select option,
+.v2-light select optgroup {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.v2-light .text-white,
+.v2-light .text-slate-100,
+.v2-light .text-slate-200 {
+  color: #0f172a !important;
+}
+
+.v2-light .text-slate-300,
+.v2-light .text-slate-400 {
+  color: #475569 !important;
+}
+
+.v2-light .bg-slate-900,
+.v2-light .bg-slate-950 {
+  background-color: #ffffff !important;
+}
+
+.v2-light .bg-slate-800 {
+  background-color: #f1f5f9 !important;
+}
+
+.v2-light .border-slate-800,
+.v2-light .border-slate-700 {
+  border-color: #e2e8f0 !important;
+}
+
 .aura-theme .noise-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;

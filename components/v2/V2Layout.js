@@ -64,6 +64,24 @@ export default function V2Layout({ children }) {
   const [expandedNav, setExpandedNav] = useState(null);
   const [collapsedSections, setCollapsedSections] = useState({}); // sectionLabel -> bool
   const [badges, setBadges] = useState({}); // badgeKey -> count
+  const [theme, setTheme] = useState('dark');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('v2_theme');
+      if (saved === 'light' || saved === 'dark') {
+        setTheme(saved);
+      }
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('v2_theme', next);
+    }
+  };
 
   const filteredNav = useMemo(() => filterNavForRole(NAV_SECTIONS, permissions), [permissions]);
 
@@ -405,7 +423,7 @@ export default function V2Layout({ children }) {
   );
 
   return (
-    <div className="aura-theme v2-dark antialiased min-h-screen selection:bg-brand-500/30 selection:text-brand-400 overflow-x-hidden relative">
+    <div className={`aura-theme ${theme === 'light' ? 'v2-light' : 'v2-dark'} antialiased min-h-screen selection:bg-brand-500/30 selection:text-brand-400 overflow-x-hidden relative`}>
       <div className="noise-overlay"></div>
 
       {/* Mobile header */}
@@ -418,6 +436,13 @@ export default function V2Layout({ children }) {
           <span className="font-bold text-sm text-white">BINUS <span className="text-slate-400 font-normal text-xs">Simprug</span></span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={toggleTheme}
+            className="p-1.5 rounded-lg border border-slate-700/80 bg-slate-900/80 text-slate-300 hover:text-white transition"
+            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+          >
+            <i className={`ph ${theme === 'dark' ? 'ph-sun' : 'ph-moon'} text-lg`}></i>
+          </button>
           {user && <NotificationBell />}
           <button onClick={signOut} title="Sign out" className="text-slate-400 hover:text-red-400 transition-colors">
             <i className="ph ph-sign-out text-xl"></i>
@@ -435,12 +460,17 @@ export default function V2Layout({ children }) {
         </div>
       )}
 
-      {/* Desktop notification bell (fixed top-right) */}
-      {user && (
-        <div className="hidden lg:block fixed top-4 right-5 z-40">
-          <NotificationBell />
-        </div>
-      )}
+      {/* Desktop notification bell & Theme Toggle (fixed top-right) */}
+      <div className="hidden lg:flex fixed top-4 right-5 z-40 items-center gap-3">
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded-xl border border-slate-700/80 bg-slate-900/80 text-slate-300 hover:text-white hover:bg-slate-800 transition shadow-lg backdrop-blur-md"
+          title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+        >
+          <i className={`ph ${theme === 'dark' ? 'ph-sun' : 'ph-moon'} text-lg`}></i>
+        </button>
+        {user && <NotificationBell />}
+      </div>
 
       {/* Desktop layout */}
       <div className="flex min-h-screen">
