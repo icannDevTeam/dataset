@@ -4810,7 +4810,7 @@ function CreateInviteModal({ busy, onCancel, onSubmit }) {
   return (
     <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
          onClick={onCancel}>
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl"
+      <div className="glass-panel border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl"
            onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 mb-5">
           <div className="w-10 h-10 rounded-full bg-brand-500/20 flex items-center justify-center">
@@ -4915,9 +4915,7 @@ function CreateInviteModal({ busy, onCancel, onSubmit }) {
                 </label>
                 <input type="datetime-local" value={windowOpenAt}
                   onChange={(e) => setWindowOpenAt(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
-                             [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/40
-                             cursor-pointer hover:border-slate-600" />
+                  className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 cursor-pointer hover:border-slate-600 font-medium" />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-slate-400 mb-1">
@@ -4926,9 +4924,7 @@ function CreateInviteModal({ busy, onCancel, onSubmit }) {
                 <input type="datetime-local" value={windowCloseAt}
                   min={windowOpenAt || undefined}
                   onChange={(e) => setWindowCloseAt(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
-                             [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/40
-                             cursor-pointer hover:border-slate-600" />
+                  className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 cursor-pointer hover:border-slate-600 font-medium" />
               </div>
             </div>
             {(windowOpenAt || windowCloseAt) && !windowError && (
@@ -5046,7 +5042,7 @@ function EditInviteModal({ invite, busy, onCancel, onSubmit }) {
   return (
     <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
          onClick={onCancel}>
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl my-8"
+      <div className="glass-panel border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 shadow-2xl my-8"
            onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 mb-5">
           <div className="w-10 h-10 rounded-full bg-sky-500/20 flex items-center justify-center">
@@ -5124,9 +5120,7 @@ function EditInviteModal({ invite, busy, onCancel, onSubmit }) {
               <input type="datetime-local" value={customExpiresAt}
                 min={_toLocalInput(Date.now() + 60_000)}
                 onChange={(e) => { setCustomExpiresAt(e.target.value); setExtendDays(''); }}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
-                           [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-sky-500/40
-                           cursor-pointer hover:border-slate-600" />
+                className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500/40 cursor-pointer hover:border-slate-600 font-medium" />
             </div>
             {willRotateUrl && (
               <div className="rounded-md bg-amber-500/10 border border-amber-500/30 px-2.5 py-2 text-[11px] text-amber-200 leading-relaxed flex gap-2">
@@ -5158,9 +5152,7 @@ function EditInviteModal({ invite, busy, onCancel, onSubmit }) {
                 </label>
                 <input type="datetime-local" value={windowOpenAt}
                   onChange={(e) => setWindowOpenAt(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
-                             [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/40
-                             cursor-pointer hover:border-slate-600" />
+                  className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 cursor-pointer hover:border-slate-600 font-medium" />
               </div>
               <div>
                 <label className="block text-[11px] font-medium text-slate-400 mb-1">
@@ -5169,9 +5161,7 @@ function EditInviteModal({ invite, busy, onCancel, onSubmit }) {
                 <input type="datetime-local" value={windowCloseAt}
                   min={windowOpenAt || undefined}
                   onChange={(e) => setWindowCloseAt(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white
-                             [color-scheme:dark] focus:outline-none focus:ring-2 focus:ring-brand-500/40
-                             cursor-pointer hover:border-slate-600" />
+                  className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 cursor-pointer hover:border-slate-600 font-medium" />
               </div>
             </div>
             {windowError && (
