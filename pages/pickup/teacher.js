@@ -1498,15 +1498,23 @@ export default function TeacherTabletPage() {
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      applyGateSignal(j.gateSignal);
+      // When the server signals a manual override open, wipe the stale learned
+      // window — a cached schedule (e.g. 13:40–16:00) would otherwise make the
+      // local clock check lock the tablet closed even though the server is open.
+      const isManualOpen = j.gateSignal?.reason === 'manual-open'
+        || (Array.isArray(j.gateSignal?.reasons) && j.gateSignal.reasons.includes('manual-open'));
       if (j.windowOpen || j.windowClose) {
         const fallbackWindow = localDismissalWindow();
         setWindowLabel({
           open: j.windowOpen || fallbackWindow.open,
           close: j.windowClose || fallbackWindow.close,
         });
-        saveLearnedWindow(j.windowOpen, j.windowClose);
+        if (!isManualOpen) saveLearnedWindow(j.windowOpen, j.windowClose);
       }
-      applyGateSignal(j.gateSignal);
+      if (isManualOpen) {
+        try { localStorage.removeItem(WINDOW_CACHE_KEY); } catch {}
+      }
       if (typeof j.inWindow === 'boolean') {
         serverClosedRef.current = !j.inWindow;
         setInWindow(j.inWindow);
@@ -1553,7 +1561,11 @@ export default function TeacherTabletPage() {
         if (prev.open === fallbackWindow.open && prev.close === fallbackWindow.close) return prev;
         return fallbackWindow;
       });
-      if (local && serverClosedRef.current) pollFeed();
+      // Always poll every 30s while closed — local clock may be stale (learned
+      // window) or an admin override may be active. Keeps the tablet from
+      // latching shut indefinitely when gateOverride: 'open' is set in Firestore.
+      if (!inWindowRef.current) pollFeed();
+      else if (local && serverClosedRef.current) pollFeed();
       setInWindow((prev) => {
         if (!local) {
           // Don't override the server when a manual gate override is active —
