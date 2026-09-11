@@ -157,6 +157,13 @@ function hhmmToMinutes(s) {
 }
 
 function summarizeWindow(gateStates) {
+  // When every open terminal is manually force-opened, there is no meaningful
+  // schedule window to surface — showing one would confuse staff into thinking
+  // the gate closes at that time when it won't.
+  const hasManualOpen = gateStates.some((s) => s?.manualOverride === 'open');
+  const hasNonManualOpen = gateStates.some((s) => s?.open && s?.manualOverride !== 'open');
+  if (hasManualOpen && !hasNonManualOpen) return { windowOpen: null, windowClose: null };
+
   const windows = gateStates
     .map((s) => ({
       open: s?.scheduled?.opensAt || null,
@@ -353,7 +360,11 @@ export default async function handler(req, res) {
         held: [],
         todayReleased: 0,
       };
-      setOffWindowCache(tokenKey, closedPayload);
+      // Don't cache when any terminal has a manual override active — the admin
+      // may flip the override at any moment and we want the tablet to see it
+      // within the next poll cycle, not after a 60-second cache window.
+      const hasManualOverride = gateStates.some((s) => s?.manualOverride);
+      if (!hasManualOverride) setOffWindowCache(tokenKey, closedPayload);
       return res.status(200).json({ ...closedPayload, now: new Date().toISOString() });
     }
     OFF_WINDOW_FEED_CACHE.delete(tokenKey);

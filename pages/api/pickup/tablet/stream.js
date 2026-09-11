@@ -242,7 +242,8 @@ export default async function handler(req, res) {
         gateSignal = summarizeGateSignal(gateStates, inWindow);
         if (!inWindow) {
           const closedPayload = { ok: false, inWindow: false, gateSignal };
-          setOffWindowCache(tokenKey, closedPayload);
+          const hasManualOverride = gateStates.some((s) => s?.manualOverride);
+          if (!hasManualOverride) setOffWindowCache(tokenKey, closedPayload);
           res.status(200).json(closedPayload);
           return;
         }

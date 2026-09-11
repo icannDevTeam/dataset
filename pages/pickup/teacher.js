@@ -15,6 +15,7 @@
  */
 import Head from 'next/head';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CheckCircle2, CircleAlert, Download, LockKeyhole, LogOut, ShieldCheck } from 'lucide-react';
 
 const POLL_MS = 10_000;          // when SSE is offline (fallback hydration)
 const POLL_MS_LIVE = 60_000;     // when SSE is healthy (just a safety net)
@@ -25,7 +26,8 @@ const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 // closed screen needs ZERO network — that is the cost-control contract).
 const DEFAULT_WINDOW = { open: '10:00', close: '15:00' };
 const WINDOW_BY_WEEKDAY = {
-  fri: { open: '10:00', close: '13:00' },
+  wed: { open: '11:30', close: '16:00' },
+  fri: { open: '09:00', close: '14:30' },
 };
 const WINDOW_CACHE_KEY = 'pickup.tablet.windowByDay';
 
@@ -59,6 +61,11 @@ function weekdayKeyWib() {
 function localDismissalWindow() {
   const key = weekdayKeyWib();
   const learned = typeof window !== 'undefined' ? loadLearnedWindows()[key] : null;
+  if (key === 'wed') {
+    // Electives apply to all grades today; ignore stale cached windows that still
+    // reflect the earlier shorter Wednesday cutoff.
+    return { open: '11:30', close: '16:00' };
+  }
   return learned || WINDOW_BY_WEEKDAY[key] || DEFAULT_WINDOW;
 }
 
@@ -86,7 +93,8 @@ function isInDismissalWindow() {
 const TOKEN_KEY = 'pickup.tablet.deviceToken';
 const IDENTITY_KEY = 'pickup.tablet.identity';
 const BINUS_MAROON = '#8B1538';
-const BINUS_GOLD = '#FCBF11';
+const BINUS_GOLD = '#C58A00';
+const BINUS_MUSTARD = '#8A5A00';
 
 function secUntilOpen(openHHMM) {
   const now = new Date(Date.now() + 7 * 3600 * 1000);
@@ -150,7 +158,7 @@ function Avatar({ src, name, size = 80, ring = '#334155' }) {
   const [imgErr, setImgErr] = useState(false);
   const initials = (name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
   return (
-    <div style={{
+    <div className="pickup-light pairing-screen" style={{
       width: size, height: size, borderRadius: '50%', overflow: 'hidden',
       border: `3px solid ${ring}`, background: '#1E293B',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -168,7 +176,7 @@ function Avatar({ src, name, size = 80, ring = '#334155' }) {
 
 function StudentChip({ s }) {
   return (
-    <div style={{
+    <div className="pickup-light standby-hero" style={{
       display: 'flex', alignItems: 'center', gap: 8,
       background: '#fff7ea', border: '1.5px solid #FFD86A',
       borderRadius: 12, padding: '6px 10px',
@@ -275,7 +283,7 @@ function PairingScreen({ onPaired }) {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: `linear-gradient(135deg, ${BINUS_MAROON} 0%, #5a0d24 100%)`,
+      background: 'linear-gradient(135deg, #fff7ed 0%, #fdf5e6 52%, #f8eef1 100%)',
       fontFamily: 'system-ui, -apple-system, sans-serif',
     }}>
       <form onSubmit={submit} style={{
@@ -283,7 +291,8 @@ function PairingScreen({ onPaired }) {
         width: 'min(92vw, 440px)', boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
         textAlign: 'center',
       }}>
-        <div style={{ fontSize: 14, color: BINUS_MAROON, fontWeight: 800, letterSpacing: 2, marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14, color: BINUS_MAROON, fontWeight: 800, letterSpacing: 2, marginBottom: 8 }}>
+          <ShieldCheck size={18} strokeWidth={2.4} aria-hidden="true" />
           BINUS · PICKUP SYSTEM
         </div>
         <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: '0 0 4px' }}>Pair this iPad</h1>
@@ -311,7 +320,7 @@ function PairingScreen({ onPaired }) {
             borderRadius: 12, fontSize: 16, fontWeight: 700, cursor: 'pointer',
             opacity: busy ? 0.6 : 1,
           }}>
-          {busy ? 'Pairing…' : 'Pair Device'}
+          {busy ? 'Pairing…' : <><LockKeyhole size={17} aria-hidden="true" /> Pair Device</>}
         </button>
       </form>
     </div>
@@ -335,7 +344,7 @@ function Card({ ev, onAction, busy, exiting, big = true, minHeight = ACTIVE_CARD
   }
 
   return (
-    <div style={{
+    <div className="pickup-light pickup-card" style={{
       background: '#fff', borderRadius: 20,
       border: `4px solid ${ring}`, boxShadow: `0 12px 40px ${ring}33`,
       padding: big ? 22 : 14,
@@ -353,7 +362,7 @@ function Card({ ev, onAction, busy, exiting, big = true, minHeight = ACTIVE_CARD
         <div style={{
           background: ring, color: '#fff', fontWeight: 800, fontSize: 12,
           padding: '4px 12px', borderRadius: 999, letterSpacing: 1,
-        }}>{label}</div>
+        }}>{blocked ? <CircleAlert size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}{label}</div>
         <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
           {fmtTime(ev.scannedAt)} · {timeAgo(ev.scannedAt)}
         </div>
@@ -717,9 +726,9 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
     <div style={{
       position: 'relative', overflow: 'hidden',
       borderRadius: 28, padding: '48px 40px',
-      background: 'radial-gradient(120% 120% at 0% 0%, rgba(252,191,17,0.10), transparent 55%), radial-gradient(120% 120% at 100% 100%, rgba(139,21,56,0.30), transparent 55%), linear-gradient(180deg, #0f172a 0%, #0b1224 100%)',
-      border: '1px solid rgba(148,163,184,0.12)',
-      boxShadow: '0 30px 80px -30px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04)',
+      background: 'linear-gradient(135deg, #fffaf2 0%, #ffffff 56%, #f8eef1 100%)',
+      border: '1px solid #e2e8f0',
+      boxShadow: '0 24px 60px -30px rgba(15,23,42,0.28), inset 0 1px 0 rgba(255,255,255,0.9)',
       minHeight: 460,
     }}>
       {/* ambient blobs */}
@@ -742,8 +751,8 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 10,
             padding: '6px 14px', borderRadius: 999,
-            background: 'rgba(252,191,17,0.12)', border: '1px solid rgba(252,191,17,0.35)',
-            color: BINUS_GOLD, fontSize: 11, fontWeight: 800, letterSpacing: 2,
+            background: '#fff3c4', border: '1px solid #d6a72d',
+            color: BINUS_MAROON, fontSize: 11, fontWeight: 800, letterSpacing: 2,
           }}>
             <span style={{
               width: 8, height: 8, borderRadius: '50%', background: '#22c55e',
@@ -752,10 +761,10 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
             LIVE · LISTENING
           </div>
 
-          <div style={{ marginTop: 18, fontSize: 13, color: '#94a3b8', letterSpacing: 1.5, fontWeight: 700 }}>
+          <div style={{ marginTop: 18, fontSize: 13, color: '#64748b', letterSpacing: 1.5, fontWeight: 700 }}>
             RELEASE GROUP
           </div>
-          <div style={{ fontSize: 38, fontWeight: 900, color: '#f8fafc', lineHeight: 1.05, marginTop: 4, letterSpacing: -0.5 }}>
+          <div style={{ fontSize: 38, fontWeight: 900, color: '#172033', lineHeight: 1.05, marginTop: 4, letterSpacing: -0.5 }}>
             {identity?.releaseGroupName || '—'}
           </div>
           {identity?.gradeLabel && (
@@ -769,15 +778,15 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
           <div style={{
             marginTop: 32, display: 'flex', alignItems: 'baseline', gap: 4,
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            color: '#f1f5f9',
+            color: '#172033',
           }}>
             <span style={{ fontSize: 64, fontWeight: 700, letterSpacing: -2 }}>{wibTime.hh}</span>
-            <span style={{ fontSize: 64, fontWeight: 200, color: '#475569', animation: 'pgBlink 1s steps(2,end) infinite' }}>:</span>
+            <span style={{ fontSize: 64, fontWeight: 200, color: '#cbd5e1', animation: 'pgBlink 1s steps(2,end) infinite' }}>:</span>
             <span style={{ fontSize: 64, fontWeight: 700, letterSpacing: -2 }}>{wibTime.mm}</span>
             <span style={{ fontSize: 28, fontWeight: 400, color: '#64748b', marginLeft: 6 }}>{wibTime.ss}</span>
             <span style={{ fontSize: 14, fontWeight: 700, color: BINUS_GOLD, marginLeft: 10, letterSpacing: 1 }}>WIB</span>
           </div>
-          <div style={{ marginTop: 4, fontSize: 13, color: '#94a3b8' }}>{wibDate}</div>
+          <div style={{ marginTop: 4, fontSize: 13, color: '#64748b' }}>{wibDate}</div>
         </div>
 
         {/* RIGHT: standby visualizer + stats */}
@@ -805,7 +814,7 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
               </svg>
             </div>
           </div>
-          <div style={{ textAlign: 'center', color: '#cbd5e1' }}>
+          <div style={{ textAlign: 'center', color: '#172033' }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>Awaiting next pickup</div>
             <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>
               {lastSeenAgo ? `Last activity ${lastSeenAgo}` : 'Standing by for terminal scans'}
@@ -819,8 +828,8 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
               width: '100%',
               padding: '14px 18px',
               borderRadius: 16,
-              background: 'linear-gradient(135deg, rgba(252,191,17,0.10), rgba(139,21,56,0.18))',
-              border: '1px solid rgba(252,191,17,0.25)',
+              background: '#fff3c4',
+              border: '1px solid #f5cf52',
               display: 'flex', alignItems: 'center', gap: 14,
               animation: 'pgValueIn 700ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
@@ -833,9 +842,10 @@ function StandbyHero({ identity, todayReleased, heldCount, lastEventAt }) {
               <div style={{
                 fontSize: 10, fontWeight: 800, letterSpacing: 2,
                 color: BINUS_GOLD, textTransform: 'uppercase',
+                              color: BINUS_MUSTARD, textTransform: 'uppercase',
               }}>BINUS Spirit · {spirit.title}</div>
               <div style={{
-                fontSize: 15, fontWeight: 700, color: '#f1f5f9',
+                fontSize: 15, fontWeight: 700, color: '#334155',
                 marginTop: 2, lineHeight: 1.25,
               }}>{spirit.line}</div>
             </div>
@@ -882,7 +892,7 @@ function Stat({ label, value, accent }) {
   return (
     <div style={{
       padding: '14px 12px', borderRadius: 14,
-      background: 'rgba(15,23,42,0.55)', border: `1px solid rgba(148,163,184,0.15)`,
+      background: '#ffffff', border: '1px solid #e2e8f0',
       textAlign: 'center',
     }}>
       <div style={{ fontSize: 28, fontWeight: 800, color: accent, lineHeight: 1, fontFamily: 'ui-monospace, monospace' }}>{value}</div>
@@ -913,7 +923,7 @@ function SpiritValuesRotator() {
 
   return (
     <div style={{ textAlign: 'center', marginBottom: 'clamp(6px, 1.4vh, 14px)' }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(252,191,17,0.4)', letterSpacing: 3, marginBottom: 'clamp(4px, 1vh, 8px)' }}>
+      <div style={{ fontSize: 9, fontWeight: 800, color: BINUS_MUSTARD, letterSpacing: 3, marginBottom: 'clamp(4px, 1vh, 8px)' }}>
         BINUSIAN SPIRIT
       </div>
 
@@ -940,7 +950,7 @@ function SpiritValuesRotator() {
 
       {/* Active value text — re-keyed each cycle to retrigger the animation */}
       <div key={idx} className="bps-spirit-word" style={{
-        fontSize: 17, fontWeight: 800, color: '#f1f5f9', letterSpacing: 1.2,
+        fontSize: 17, fontWeight: 800, color: '#334155', letterSpacing: 1.2,
       }}>
         {active.text}
       </div>
@@ -967,9 +977,9 @@ function DismissalWaitingScreen({ windowLabel, identity }) {
   const isOpening = secondsLeft === 0;
 
   return (
-    <div className="bps-wait-root" style={{
+    <div className="pickup-light bps-wait-root" style={{
       minHeight: '100vh',
-      background: 'linear-gradient(160deg, #2D0A14 0%, #0f172a 55%)',
+      background: 'linear-gradient(160deg, #fff7ed 0%, #fdf5e6 55%, #f8eef1 100%)',
       display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center',
       fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -993,7 +1003,7 @@ function DismissalWaitingScreen({ windowLabel, identity }) {
         }
         @keyframes bpsWaitPulse {
           0%,100% { opacity: 1; }
-          50%     { opacity: 0.35; }
+          50%     { opacity: 0.78; }
         }
         @keyframes bpsSpiritWordIn {
           0%   { opacity: 0; transform: translateY(10px) scale(0.96); filter: blur(3px); }
@@ -1017,7 +1027,7 @@ function DismissalWaitingScreen({ windowLabel, identity }) {
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 5, background: BINUS_GOLD, zIndex: 10 }} />
 
       {/* Brand */}
-      <div style={{ fontSize: 11, fontWeight: 700, color: BINUS_GOLD, letterSpacing: 3.5, marginBottom: 'clamp(8px, 1.6vh, 18px)', opacity: 0.75 }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: BINUS_MAROON, letterSpacing: 3.5, marginBottom: 'clamp(8px, 1.6vh, 18px)', opacity: 0.95 }}>
         BINUS PICK-UP SYSTEM
       </div>
 
@@ -1042,46 +1052,46 @@ function DismissalWaitingScreen({ windowLabel, identity }) {
       </div>
 
       {/* Title */}
-      <div style={{ fontSize: 'clamp(16px, 2.6vh, 22px)', fontWeight: 900, color: '#ffffff', letterSpacing: 2, textAlign: 'center', marginBottom: 'clamp(8px, 1.8vh, 16px)', textTransform: 'uppercase' }}>
+      <div style={{ fontSize: 'clamp(16px, 2.6vh, 22px)', fontWeight: 900, color: BINUS_MAROON, letterSpacing: 2, textAlign: 'center', marginBottom: 'clamp(8px, 1.8vh, 16px)', textTransform: 'uppercase' }}>
         Dismissal Not Yet Open
       </div>
 
       {/* Opens / Closes row */}
       <div style={{ display: 'flex', gap: 28, marginBottom: 'clamp(10px, 2vh, 18px)', alignItems: 'stretch', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(252,191,17,0.6)', letterSpacing: 2.5, marginBottom: 6 }}>OPENS AT</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#a16207', letterSpacing: 2.5, marginBottom: 6 }}>OPENS AT</div>
           <div style={{ fontSize: 'clamp(30px, 5vh, 44px)', fontWeight: 900, color: BINUS_GOLD, fontFamily: 'ui-monospace,monospace', lineHeight: 1 }}>
             {windowLabel.open}
           </div>
-          <div style={{ fontSize: 11, color: 'rgba(252,191,17,0.45)', marginTop: 4, letterSpacing: 1 }}>WIB</div>
+          <div style={{ fontSize: 11, color: '#a16207', marginTop: 4, letterSpacing: 1 }}>WIB</div>
         </div>
 
         <div style={{ width: 1, background: 'rgba(252,191,17,0.18)', alignSelf: 'stretch' }} />
 
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.35)', letterSpacing: 2.5, marginBottom: 6 }}>CLOSES AT</div>
-          <div style={{ fontSize: 'clamp(30px, 5vh, 44px)', fontWeight: 900, color: '#e2e8f0', fontFamily: 'ui-monospace,monospace', lineHeight: 1 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', letterSpacing: 2.5, marginBottom: 6 }}>CLOSES AT</div>
+          <div style={{ fontSize: 'clamp(30px, 5vh, 44px)', fontWeight: 900, color: '#334155', fontFamily: 'ui-monospace,monospace', lineHeight: 1 }}>
             {windowLabel.close}
           </div>
-          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', marginTop: 4, letterSpacing: 1 }}>WIB</div>
+          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4, letterSpacing: 1 }}>WIB</div>
         </div>
       </div>
 
       {/* Countdown */}
       <div style={{ marginBottom: 'clamp(8px, 1.8vh, 16px)', textAlign: 'center' }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(252,191,17,0.45)', letterSpacing: 3, marginBottom: 'clamp(6px, 1.2vh, 10px)' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: '#a16207', letterSpacing: 3, marginBottom: 'clamp(6px, 1.2vh, 10px)' }}>
           TIME REMAINING
         </div>
 
         {isOpening ? (
-          <div className="bps-wait-opening" style={{ fontSize: 26, fontWeight: 800, color: BINUS_GOLD, letterSpacing: 2 }}>
+          <div className="bps-wait-opening" style={{ fontSize: 26, fontWeight: 900, color: BINUS_MAROON, letterSpacing: 2 }}>
             Opening now…
           </div>
         ) : (
           <div className="bps-wait-glow" style={{
             display: 'inline-flex', gap: 4, alignItems: 'center',
-            background: 'rgba(139,21,56,0.18)',
-            border: '1px solid rgba(252,191,17,0.22)',
+            background: '#ffffff',
+            border: '1px solid #d6a72d',
             borderRadius: 16, padding: 'clamp(8px, 1.4vh, 12px) 22px',
           }}>
             {[{ v: pad(hrs), l: 'HRS' }, { v: pad(min), l: 'MIN' }, { v: pad(sec), l: 'SEC', key: sec }].map(({ v, l, key }, i) => (
@@ -1094,8 +1104,8 @@ function DismissalWaitingScreen({ windowLabel, identity }) {
                   className={key !== undefined ? 'bps-wait-tick' : undefined}
                   style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', minWidth: 50 }}
                 >
-                  <span style={{ fontSize: 'clamp(28px, 4.6vh, 42px)', fontWeight: 900, color: BINUS_GOLD, fontFamily: 'ui-monospace,monospace', lineHeight: 1 }}>{v}</span>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(252,191,17,0.4)', letterSpacing: 1.5, marginTop: 5 }}>{l}</span>
+                  <span style={{ fontSize: 'clamp(28px, 4.6vh, 42px)', fontWeight: 900, color: BINUS_MAROON, fontFamily: 'ui-monospace,monospace', lineHeight: 1 }}>{v}</span>
+                  <span style={{ fontSize: 9, fontWeight: 800, color: BINUS_MUSTARD, letterSpacing: 1.5, marginTop: 5 }}>{l}</span>
                 </span>
               </span>
             ))}
@@ -1108,8 +1118,8 @@ function DismissalWaitingScreen({ windowLabel, identity }) {
 
       {/* Date + live clock */}
       <div style={{ textAlign: 'center', marginBottom: 'clamp(6px, 1.2vh, 14px)' }}>
-        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.38)', marginBottom: 3 }}>{clock.date}</div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: 'rgba(252,191,17,0.5)', fontFamily: 'ui-monospace,monospace', letterSpacing: 1 }}>
+        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 3 }}>{clock.date}</div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: BINUS_MUSTARD, fontFamily: 'ui-monospace,monospace', letterSpacing: 1 }}>
           {clock.time} WIB
         </div>
       </div>
@@ -1544,8 +1554,11 @@ export default function TeacherTabletPage() {
         return fallbackWindow;
       });
       if (local && serverClosedRef.current) pollFeed();
-      setInWindow(() => {
+      setInWindow((prev) => {
         if (!local) {
+          // Don't override the server when a manual gate override is active —
+          // admin has explicitly force-opened outside the scheduled window.
+          if (prev && !serverClosedRef.current) return prev;
           serverClosedRef.current = false;
           return false;
         }
@@ -1788,12 +1801,19 @@ export default function TeacherTabletPage() {
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Pick-Up System" />
       </Head>
-      <div style={{
-        minHeight: '100vh', background: '#0f172a',
+      <div className="pickup-light teacher-shell" style={{
+        minHeight: '100vh', background: '#f6f8fb',
         fontFamily: 'system-ui, -apple-system, sans-serif',
-        color: '#e2e8f0',
+        color: '#172033',
       }}>
         <style>{`
+          .pickup-light { color-scheme: light; }
+          .teacher-shell .pickup-card { background: #ffffff !important; border-color: #cbd5e1 !important; box-shadow: 0 14px 34px rgba(15,23,42,0.10) !important; }
+          .teacher-shell .standby-hero { color: #172033; }
+          .teacher-shell button:focus-visible,
+          .pairing-screen button:focus-visible,
+          .pairing-screen input:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
+          .pickup-light button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
           @keyframes pickupHeldIn {
             from { opacity: 0; transform: translateY(-12px) scale(0.96); }
             to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1849,17 +1869,17 @@ export default function TeacherTabletPage() {
           }
         `}</style>
         <div style={{
-          background: BINUS_MAROON, padding: '14px 22px',
+          background: '#ffffff', padding: '14px 22px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           borderBottom: `3px solid ${BINUS_GOLD}`,
-          backgroundImage: `linear-gradient(90deg, ${BINUS_MAROON} 0%, #a01a44 50%, ${BINUS_MAROON} 100%), linear-gradient(90deg, transparent, rgba(252,191,17,0.18), transparent)`,
+          backgroundImage: 'linear-gradient(90deg, #ffffff 0%, #fffaf2 50%, #ffffff 100%), linear-gradient(90deg, transparent, rgba(252,191,17,0.18), transparent)',
           backgroundSize: '100% 100%, 200% 100%',
           backgroundRepeat: 'no-repeat, no-repeat',
           animation: 'pickupHeaderShimmer 7s linear infinite',
         }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 800, color: BINUS_GOLD, letterSpacing: 2 }}>BINUS · PICKUP SYSTEM</div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', marginTop: 2 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: BINUS_MAROON, letterSpacing: 2 }}>BINUS · PICKUP SYSTEM</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#172033', marginTop: 2 }}>
               {identity?.releaseGroupName || '—'}
               {identity?.gradeLabel && <span style={{ fontSize: 13, color: '#fcd34d', marginLeft: 10 }}>{identity.gradeLabel}</span>}
             </div>
@@ -1867,27 +1887,27 @@ export default function TeacherTabletPage() {
           <div style={{ display: 'flex', gap: 8 }}>
             {showInstall && (
               <button onClick={installPwa}
-                style={{ padding: '6px 12px', background: BINUS_GOLD, color: BINUS_MAROON, border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>
-                Install
+                style={{ padding: '8px 12px', background: BINUS_GOLD, color: BINUS_MAROON, border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>
+                <Download size={15} aria-hidden="true" /> Install
               </button>
             )}
             <button onClick={unpair}
-              style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.15)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
-              Unpair
+              style={{ padding: '8px 12px', background: '#fff1f2', color: '#9f1239', border: '1px solid #fecdd3', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>
+              <LogOut size={15} aria-hidden="true" /> Unpair
             </button>
           </div>
         </div>
 
         {err && (
-          <div style={{ background: '#7f1d1d', color: '#fecaca', padding: '8px 22px', fontSize: 13 }}>
+          <div style={{ background: '#fff1f2', color: '#9f1239', borderBottom: '1px solid #fecdd3', padding: '8px 22px', fontSize: 13 }}>
             {err}
           </div>
         )}
 
         {gateNotice && (
           <div style={{
-            background: gateNotice.kind === 'open' ? '#064e3b' : '#7f1d1d',
-            color: gateNotice.kind === 'open' ? '#bbf7d0' : '#fecaca',
+            background: gateNotice.kind === 'open' ? '#ecfdf5' : '#fff1f2',
+            color: gateNotice.kind === 'open' ? '#047857' : '#9f1239',
             padding: '8px 22px',
             fontSize: 13,
             borderTop: '1px solid rgba(255,255,255,0.08)',
@@ -1898,10 +1918,10 @@ export default function TeacherTabletPage() {
 
         {gateSignal && (
           <div style={{
-            background: 'rgba(15,23,42,0.65)',
-            borderTop: '1px solid rgba(148,163,184,0.18)',
-            borderBottom: '1px solid rgba(148,163,184,0.18)',
-            color: '#cbd5e1',
+            background: '#ffffff',
+            borderTop: '1px solid #e2e8f0',
+            borderBottom: '1px solid #e2e8f0',
+            color: '#475569',
             padding: '8px 22px',
             fontSize: 12,
             display: 'flex',
