@@ -21,8 +21,10 @@ async function fetcher(ctx) {
   const db = admin.firestore();
   const tid = ctx.tenantId || tenancy.getTenantId();
 
+  // No orderBy: 545 of 551 chaperone docs lack createdAt and Firestore
+  // silently drops docs missing the orderBy field. Sorted in code below.
   const snap = await db.collection(tenancy.chaperonesPath(tid))
-    .orderBy('createdAt', 'desc').limit(MAX_ROWS + 1).get().catch(() => null);
+    .limit(MAX_ROWS + 1).get().catch(() => null);
 
   const rows = [];
   let truncated = false;
@@ -54,6 +56,7 @@ async function fetcher(ctx) {
       });
     });
   }
+  rows.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   return { rows, meta: { truncated } };
 }
 

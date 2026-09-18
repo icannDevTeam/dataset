@@ -61,6 +61,10 @@ async function handler(req, res) {
           email: cleanEmail,
           password: password,
           displayName: 'Admin',
+          // Invite-only account gated by SUPER_ADMIN_EMAIL allowlist, not
+          // self-signup — mark verified so TOTP MFA enrollment isn't blocked
+          // by Firebase's auth/unverified-email check.
+          emailVerified: true,
         });
       } else {
         throw err;

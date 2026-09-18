@@ -39,8 +39,12 @@ function AuthGate({ Component, pageProps }) {
   useEffect(() => {
     if (!loading && authorized && permissions) {
       const path = router.pathname;
-      // Skip access check for index/dashboard and public pages
-      if (path === '/v2' || isPublicRoute(path)) {
+      // Skip access check for index/dashboard, public pages, the forced
+      // first-login password change page, and account-security (2FA
+      // enrollment must stay reachable regardless of role — viewer/guard
+      // roles have settings:false and would otherwise be locked out of
+      // enrolling their own MFA factor).
+      if (path === '/v2' || path === '/v2/change-password' || path === '/v2/account-security' || isPublicRoute(path)) {
         setAccessDenied(false);
       } else if (!canAccessPath(permissions, path)) {
         setAccessDenied(true);

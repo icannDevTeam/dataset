@@ -6,8 +6,8 @@
   "scope": "/pickup/teacher",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#8B1538",
-  "theme_color": "#8B1538",
+  "background_color": "#F6F8FB",
+  "theme_color": "#F6F8FB",
   "icons": [
     {
       "src": "/pwa/teacher-icon-192.png",

@@ -14,11 +14,12 @@ function normalizeRedirectTarget(path) {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { user, authorized, loading, error, signIn } = useAuth();
+  const { user, authorized, loading, error, signIn, mfaResolver, completeMfaSignIn, cancelMfaSignIn } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [mfaCode, setMfaCode] = useState('');
 
   const redirectTo = normalizeRedirectTarget(router.query.from || '/v2');
   const sessionExpired = router.query.expired === '1';
@@ -38,6 +39,69 @@ export default function LoginPage() {
     const email = username.trim().includes('@') ? username.trim() : `${username.trim().toLowerCase()}@binus.edu`;
     await signIn(email, password);
     setSubmitting(false);
+  }
+
+  async function handleMfaSubmit(e) {
+    e.preventDefault();
+    if (!mfaCode.trim()) return;
+    setSubmitting(true);
+    await completeMfaSignIn(mfaCode.trim());
+    setSubmitting(false);
+  }
+
+  if (mfaResolver) {
+    return (
+      <div className="aura-theme antialiased min-h-screen flex items-center justify-center relative overflow-hidden">
+        <div className="noise-overlay"></div>
+        <div className="relative z-10 w-full max-w-md mx-4">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-6 bg-white/10 backdrop-blur border border-slate-700/50 shadow-lg shadow-black/20">
+              <i className="ph ph-shield-check text-4xl text-brand-400"></i>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-white">Two-Factor Verification</h1>
+            <p className="text-slate-400 mt-2">Enter the 6-digit code from your authenticator app</p>
+          </div>
+
+          <div className="rounded-2xl overflow-hidden glass-panel border border-slate-800 shadow-2xl shadow-black/30">
+            <div className="p-8">
+              {error && (
+                <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start gap-3">
+                  <i className="ph ph-warning-circle text-xl flex-shrink-0 mt-0.5"></i>
+                  <span>{error}</span>
+                </div>
+              )}
+              <form onSubmit={handleMfaSubmit} className="space-y-4">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoFocus
+                  value={mfaCode}
+                  onChange={e => setMfaCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  maxLength={6}
+                  required
+                  className="w-full bg-slate-950/50 border rounded-xl py-3 px-4 text-center text-2xl tracking-[0.5em] text-white placeholder-slate-700 focus:outline-none transition-colors border-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+                <button
+                  type="submit"
+                  disabled={submitting || mfaCode.length !== 6}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl text-sm font-bold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed bg-brand-500 hover:bg-brand-400 text-slate-950 shadow-lg shadow-brand-500/20"
+                >
+                  {submitting ? 'Verifying...' : 'Verify & Sign In'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { cancelMfaSignIn(); setMfaCode(''); }}
+                  className="w-full text-center text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  Cancel and use a different account
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (loading && !submitting) {

@@ -98,6 +98,10 @@ async function handler(req, res) {
             email: cleanEmail,
             password: row.password,
             displayName: row.name || cleanEmail.split('@')[0],
+            // Invite-only account added by an owner/admin, not self-signup —
+            // mark verified so TOTP MFA enrollment isn't blocked by Firebase's
+            // auth/unverified-email check.
+            emailVerified: true,
           });
         } else {
           throw err;

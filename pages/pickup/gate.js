@@ -31,6 +31,7 @@ import { useRouter } from 'next/router';
 const POLL_MS         = 4_000;
 const ACTIVE_WINDOW_MS = 45_000;   // show event for 45 seconds
 const FADE_START_MS   = 37_000;    // start fading 8s before expiry
+const WIB_TIME_ZONE   = 'Asia/Jakarta';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function elapsed(iso) {
@@ -44,7 +45,10 @@ function elapsed(iso) {
 function fmtTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return d.toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    timeZone: WIB_TIME_ZONE,
+  });
 }
 
 // ─── Decision colours ────────────────────────────────────────────────────────
@@ -86,8 +90,14 @@ function Avatar({ src, name, size = 200, ring }) {
 // ─── Idle Screen ─────────────────────────────────────────────────────────────
 function IdleScreen({ gateName, gateStatus, tick }) {
   const now = new Date();
-  const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    timeZone: WIB_TIME_ZONE,
+  });
+  const dateStr = now.toLocaleDateString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    timeZone: WIB_TIME_ZONE,
+  });
 
   const gateOpen = gateStatus?.open !== false;
   const isManual = !!gateStatus?.manualOverride;
@@ -152,7 +162,7 @@ function IdleScreen({ gateName, gateStatus, tick }) {
       {/* Clock */}
       <div style={{ position: 'absolute', bottom: 40, textAlign: 'center' }}>
         <div style={{ fontSize: 56, fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: -2, color: '#E2E8F0' }}>
-          {timeStr}
+          {timeStr} WIB
         </div>
         <div style={{ fontSize: 16, color: '#475569', fontWeight: 500, marginTop: 4 }}>{dateStr}</div>
         {gateName && (

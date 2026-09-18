@@ -35,8 +35,11 @@ async function fetcher(ctx) {
   const toMs   = new Date(`${ctx.to}T23:59:59.999Z`).getTime();
   const statusFilter = ctx.filters?.status ? String(ctx.filters.status).toLowerCase() : null;
 
+  // pickup_onboarding docs use submittedAt + nested guardian{} (see
+  // pages/api/pickup/onboarding/submit.js) — orderBy on a missing field
+  // silently returns zero docs in Firestore.
   const snap = await db.collection(tenancy.pickupOnboardingPath(tid))
-    .orderBy('createdAt', 'desc').limit(MAX_ROWS + 1).get().catch(() => null);
+    .orderBy('submittedAt', 'desc').limit(MAX_ROWS + 1).get().catch(() => null);
 
   const rows = [];
   let truncated = false;
@@ -44,19 +47,20 @@ async function fetcher(ctx) {
     snap.forEach((d) => {
       if (rows.length >= MAX_ROWS) { truncated = true; return; }
       const s = d.data() || {};
-      const createdIso = toIso(s.createdAt);
+      const createdIso = toIso(s.submittedAt || s.createdAt);
       const createdMs = createdIso ? new Date(createdIso).getTime() : 0;
       if (createdMs && (createdMs < fromMs || createdMs > toMs)) return;
       const status = String(s.status || s.state || 'pending').toLowerCase();
       if (statusFilter && status !== statusFilter) return;
       const chaps = Array.isArray(s.chaperones) ? s.chaperones : [];
       const studs = Array.isArray(s.students) ? s.students : [];
+      const guardian = (s.guardian && typeof s.guardian === 'object') ? s.guardian : {};
       rows.push({
-        submissionId: d.id,
+        submissionId: s.formNumber || d.id,
         submitted:    createdIso ? createdIso.slice(0, 10) : '\u2014',
-        parent:       s.parentName || s.submitterName || '\u2014',
-        email:        s.parentEmail || s.email || '',
-        phone:        s.parentPhone || s.phone || '',
+        parent:       guardian.name || s.parentName || s.submitterName || '\u2014',
+        email:        guardian.email || s.parentEmail || s.email || '',
+        phone:        guardian.phone || s.parentPhone || s.phone || '',
         students:     studs.map((x) => x.name || x.binusId || '').filter(Boolean).join(', '),
         chaperones:   chaps.map((c) => c.name || '').filter(Boolean).join(', '),
         status,

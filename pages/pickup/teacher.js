@@ -27,7 +27,7 @@ const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
 const DEFAULT_WINDOW = { open: '10:00', close: '15:00' };
 const WINDOW_BY_WEEKDAY = {
   wed: { open: '11:30', close: '16:00' },
-  fri: { open: '09:00', close: '14:30' },
+  fri: { open: '09:00', close: '16:00' },
 };
 const WINDOW_CACHE_KEY = 'pickup.tablet.windowByDay';
 
@@ -1468,14 +1468,17 @@ export default function TeacherTabletPage() {
         if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
         if (!cancelled) {
           setIdentity(j);
+          const hasManualOverride = Array.isArray(j.terminals)
+            && j.terminals.some((terminal) => terminal.gateOverride === 'open' || terminal.gateOverride === 'closed');
           if (j.windowOpen || j.windowClose) {
             const fallbackWindow = localDismissalWindow();
             setWindowLabel({
               open: j.windowOpen || fallbackWindow.open,
               close: j.windowClose || fallbackWindow.close,
             });
-            saveLearnedWindow(j.windowOpen, j.windowClose);
+            if (!hasManualOverride) saveLearnedWindow(j.windowOpen, j.windowClose);
           }
+          if (hasManualOverride) localStorage.removeItem(WINDOW_CACHE_KEY);
           try { localStorage.setItem(IDENTITY_KEY, JSON.stringify(j)); } catch {}
           setErr(null);
         }

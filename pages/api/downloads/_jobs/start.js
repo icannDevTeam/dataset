@@ -36,6 +36,11 @@ const MUST_HAVE_CARD_IDS = new Set([
   'class-directory',
   'security-incidents',
   'audit-log',
+  'onboarding-forms',
+  'chaperone-roster',
+  'chaperone-audit',
+  'chaperone-activity',
+  'runs-diff',
 ]);
 
 export const config = { api: { bodyParser: { sizeLimit: '128kb' } } };

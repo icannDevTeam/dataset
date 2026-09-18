@@ -2,6 +2,7 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import V2Layout from '../../components/v2/V2Layout';
+import TwoFactorSetup from '../../components/v2/TwoFactorSetup';
 import { useAuth } from '../../lib/AuthContext';
 import { getAllowedSettingsTabs, FEATURES, FEATURE_GROUPS, resolvePermissions, diffFromDefaults } from '../../lib/permissions';
 import { downloadBlob } from '../../lib/download';
@@ -20,6 +21,7 @@ export default function SettingsPage() {
   const [inviteName, setInviteName] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
   const [showInvitePassword, setShowInvitePassword] = useState(false);
+  const [sendInviteEmail, setSendInviteEmail] = useState(true);
   const [inviteRole, setInviteRole] = useState('viewer');
   const [inviteClassScopes, setInviteClassScopes] = useState('');
   const [inviteError, setInviteError] = useState('');
@@ -88,8 +90,9 @@ export default function SettingsPage() {
 
   async function handleInvite(e) {
     e.preventDefault();
-    if (!inviteEmail.trim() || !invitePassword) return;
-    if (invitePassword.length < 6) {
+    if (!inviteEmail.trim()) return;
+    if (!sendInviteEmail && !invitePassword) return;
+    if (!sendInviteEmail && invitePassword.length < 6) {
       setInviteError('Password must be at least 6 characters.');
       return;
     }
@@ -108,7 +111,7 @@ export default function SettingsPage() {
         body: JSON.stringify({
           email: inviteEmail.trim(),
           name: inviteName.trim(),
-          password: invitePassword,
+          ...(sendInviteEmail ? { wantsInvite: true } : { password: invitePassword }),
           role: inviteRole,
           classScopes,
         }),
@@ -430,6 +433,8 @@ export default function SettingsPage() {
                 {/* ─── Security & Audit Tab ─── */}
                 {activeTab === 'security' && (
                   <div className="space-y-6">
+                    <TwoFactorSetup />
+
                     {/* Stats row */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div className="glass-panel rounded-xl border border-slate-800 p-5">
@@ -594,21 +599,28 @@ export default function SettingsPage() {
                               placeholder="user@binus.edu" required
                               className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
                           </div>
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <label className="text-xs text-slate-400 block">Password</label>
-                              <button
-                                type="button"
-                                onClick={() => setShowInvitePassword((s) => !s)}
-                                className="text-[11px] text-slate-500 hover:text-slate-200"
-                              >
-                                {showInvitePassword ? 'Hide' : 'Show'}
-                              </button>
+                          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                            <input type="checkbox" checked={sendInviteEmail} onChange={e => setSendInviteEmail(e.target.checked)}
+                              className="rounded border-slate-700 bg-slate-950/50" />
+                            Send invite email with an auto-generated password (recommended — forces a password change on first login)
+                          </label>
+                          {!sendInviteEmail && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-xs text-slate-400 block">Password</label>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowInvitePassword((s) => !s)}
+                                  className="text-[11px] text-slate-500 hover:text-slate-200"
+                                >
+                                  {showInvitePassword ? 'Hide' : 'Show'}
+                                </button>
+                              </div>
+                              <input type={showInvitePassword ? 'text' : 'password'} value={invitePassword} onChange={e => setInvitePassword(e.target.value)}
+                                placeholder="Min. 6 characters" required minLength={6}
+                                className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
                             </div>
-                            <input type={showInvitePassword ? 'text' : 'password'} value={invitePassword} onChange={e => setInvitePassword(e.target.value)}
-                              placeholder="Min. 6 characters" required minLength={6}
-                              className="w-full bg-slate-950/50 border border-slate-700 rounded-lg py-2.5 px-4 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-                          </div>
+                          )}
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <label className="text-xs text-slate-400 block mb-1">Display Name (optional)</label>

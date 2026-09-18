@@ -29,8 +29,11 @@ async function fetcher(ctx) {
   const toMs   = new Date(`${ctx.to}T23:59:59.999Z`).getTime();
   const classFilter = ctx.filters?.class ? String(ctx.filters.class).toLowerCase() : null;
 
+  // pickup_events docs use recordedAt/scannedAt (see backend/
+  // pickup_event_writer.py) — orderBy on a missing field silently
+  // returns zero docs in Firestore.
   const snap = await db.collection(tenancy.pickupEventsPath(tid))
-    .orderBy('createdAt', 'desc').limit(MAX_ROWS + 1).get().catch(() => null);
+    .orderBy('recordedAt', 'desc').limit(MAX_ROWS + 1).get().catch(() => null);
 
   const rows = [];
   let truncated = false;
@@ -38,25 +41,33 @@ async function fetcher(ctx) {
     snap.forEach((d) => {
       if (rows.length >= MAX_ROWS) { truncated = true; return; }
       const e = d.data() || {};
-      const createdIso = toIso(e.createdAt || e.ts || e.timestamp);
+      const createdIso = toIso(e.recordedAt || e.scannedAt || e.createdAt || e.ts || e.timestamp);
       const createdMs = createdIso ? new Date(createdIso).getTime() : 0;
       if (createdMs && (createdMs < fromMs || createdMs > toMs)) return;
-      const cls = (e.studentHomeroom || e.studentClass || '').toString();
+      // Real schema nests these: chaperone{name,relation}, students[],
+      // fr{confidence} — flat fields kept as fallback for legacy docs.
+      const chap = (e.chaperone && typeof e.chaperone === 'object') ? e.chaperone : {};
+      const studs = Array.isArray(e.students) ? e.students : [];
+      const cls = studs.map((s) => s?.homeroom).filter(Boolean).join(', ')
+        || (e.studentHomeroom || e.studentClass || '').toString();
       if (classFilter && cls.toLowerCase() !== classFilter) return;
-      const method = String(e.method || e.matchMethod || (e.officerOverride ? 'override' : 'fr')).toLowerCase();
-      const gate = e.gate || e.terminal || e.terminalId || '\u2014';
+      const isOverride = !!e.officerOverride || !!e.overrideCode;
+      const method = String(e.method || e.matchMethod || (isOverride ? 'override' : 'fr')).toLowerCase();
+      const gate = e.gate || e.deviceName || e.terminal || e.terminalId || '\u2014';
+      const frConf = (e.fr && typeof e.fr.confidence === 'number') ? e.fr.confidence
+        : (typeof e.confidence === 'number' ? e.confidence : null);
       rows.push({
         time:        createdIso ? createdIso.slice(0, 19).replace('T', ' ') : '\u2014',
-        student:     e.studentName || '\u2014',
-        binusId:     e.studentBinusId || e.studentId || '',
+        student:     studs.map((s) => s?.name).filter(Boolean).join(', ') || e.studentName || '\u2014',
+        binusId:     studs.map((s) => s?.id || s?.binusId).filter(Boolean).join(', ') || e.studentBinusId || e.studentId || '',
         class:       cls,
-        chaperone:   e.chaperoneName || '\u2014',
-        relation:    e.chaperoneRelation || '',
+        chaperone:   chap.name || e.chaperoneName || '\u2014',
+        relation:    chap.relation || e.chaperoneRelation || '',
         gate,
         method,
-        confidence:  typeof e.confidence === 'number' ? `${(e.confidence * 100).toFixed(1)}%` : '',
-        officer:     e.officer || e.releasedBy || '',
-        notes:       e.notes || '',
+        confidence:  frConf != null ? `${(frConf * 100).toFixed(1)}%` : '',
+        officer:     e.officerOverride?.by || e.officerOverride?.email || e.officer || e.releasedBy || '',
+        notes:       e.decision && e.decision !== 'ok' ? e.decision : (e.notes || ''),
       });
     });
   }

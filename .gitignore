@@ -48,3 +48,4 @@ server.log
 
 # Commit message scratch file (PS 5.1 multi-line workaround)
 .git-commit-msg.tmp
+.next.corrupt-*/

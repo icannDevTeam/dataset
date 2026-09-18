@@ -81,6 +81,59 @@ export default async function handler(req, res) {
       teacherRelease: releasePayload,
     }, { merge: true });
 
+    // Parent notification email — enqueue to email_queue (processed by
+    // Cloud Functions). Gated behind settings.releaseEmailEnabled which
+    // defaults OFF; failures never block the release itself.
+    if (norm === 'release') {
+      try {
+        const settingsSnap = await db.doc(tenancy.pickupSettingsDoc(tid)).get();
+        const releaseEmailEnabled = !!(settingsSnap.exists && settingsSnap.data().releaseEmailEnabled);
+        if (releaseEmailEnabled) {
+          const chap = (ev.chaperone && typeof ev.chaperone === 'object') ? ev.chaperone : {};
+          const students = Array.isArray(ev.students) ? ev.students : [];
+          // Guardian email lives on the chaperone doc (guardianEmail = form
+          // submitter; email = the chaperone themself as fallback).
+          let guardianEmail = null;
+          let guardianName = null;
+          const chapDocId = chap.id || chap._id || null;
+          if (chapDocId) {
+            const chapSnap = await db.doc(`${tenancy.chaperonesPath(tid)}/${chapDocId}`).get();
+            if (chapSnap.exists) {
+              const c = chapSnap.data() || {};
+              guardianEmail = c.guardianEmail || c.email || null;
+              guardianName = c.guardianName || null;
+            }
+          }
+          if (guardianEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(guardianEmail)) {
+            const wib = new Date(Date.now() + 7 * 3600 * 1000);
+            const releasedAtWib = wib.toISOString().slice(11, 16);
+            await db.collection('email_queue').add({
+              status: 'pending',
+              to: guardianEmail,
+              templateType: 'pickup_child_released',
+              tenantId: tid,
+              recordId: eventId,
+              templateData: {
+                guardianName: guardianName || chap.name || 'Parent/Guardian',
+                studentNames: students.map((s) => s?.name).filter(Boolean),
+                chaperoneName: chap.name || '',
+                chaperoneRelation: chap.relation || '',
+                gate: ev.gate || ev.deviceName || '',
+                releasedAtWib,
+              },
+              retryCount: 0,
+              maxRetries: 3,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              source: 'tablet-release',
+            });
+          }
+        }
+      } catch (mailErr) {
+        console.error('[pickup/tablet/release] email enqueue failed (non-blocking):', mailErr.message);
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       eventId,

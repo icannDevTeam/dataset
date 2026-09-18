@@ -85,7 +85,7 @@ const BOTTOM_NAV = [
 
 export default function V2Layout({ children }) {
   const router = useRouter();
-  const { user, role, permissions, signOut, mustChangePassword } = useAuth();
+  const { user, role, permissions, signOut, mustChangePassword, mfaEnrolled } = useAuth();
   const [clock, setClock] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -93,6 +93,21 @@ export default function V2Layout({ children }) {
   const [collapsedSections, setCollapsedSections] = useState({}); // sectionLabel -> bool
   const [badges, setBadges] = useState({}); // badgeKey -> count
   const [theme, setTheme] = useState('dark');
+  const [mfaBannerDismissed, setMfaBannerDismissed] = useState(true);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setMfaBannerDismissed(sessionStorage.getItem('v2_mfa_banner_dismissed') === '1');
+    }
+  }, []);
+
+  const dismissMfaBanner = () => {
+    setMfaBannerDismissed(true);
+    if (typeof window !== 'undefined') sessionStorage.setItem('v2_mfa_banner_dismissed', '1');
+  };
+
+  const showMfaBanner = !!user && !mfaEnrolled && !mfaBannerDismissed && router.pathname !== '/v2/account-security';
+
 
   const breadcrumb = useMemo(() => getBreadcrumb(router.pathname, router.query), [router.pathname, router.query]);
 
@@ -535,6 +550,18 @@ export default function V2Layout({ children }) {
 
         {/* Main content */}
         <main className={`flex-1 relative z-10 ${collapsed ? 'lg:ml-[72px]' : 'lg:ml-64'} transition-all duration-300 pt-14`}>
+          {showMfaBanner && (
+            <div className="mx-4 mt-4 lg:mx-6 flex items-center justify-between gap-3 rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-300 animate-pulse">
+              <span className="flex items-center gap-2">
+                <i className="ph ph-shield-warning text-lg flex-shrink-0"></i>
+                Two-factor authentication is required on your account and isn&apos;t set up yet.
+                <Link href="/v2/account-security" className="underline font-semibold hover:text-amber-200">Set it up now</Link>
+              </span>
+              <button onClick={dismissMfaBanner} className="text-amber-400/70 hover:text-amber-200 flex-shrink-0" title="Dismiss for this session">
+                <i className="ph ph-x text-lg"></i>
+              </button>
+            </div>
+          )}
           {children}
         </main>
       </div>

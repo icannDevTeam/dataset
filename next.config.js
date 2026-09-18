@@ -2,6 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   serverRuntimeConfig: {
     // Only available on the server side
     MAX_UPLOAD_SIZE: 10485760, // 10MB

@@ -17,6 +17,7 @@ const { invalidateUser } = require('../../../lib/api-auth');
 const { generateOtp } = require('../../../lib/otp');
 const { sendEmail } = require('../../../lib/email');
 const { renderInviteEmail } = require('../../../lib/email-templates');
+const { setUserTenantClaims } = require('../../../lib/tenant-claims');
 
 const SUPER_ADMIN = (process.env.SUPER_ADMIN_EMAIL || '').toLowerCase().trim();
 const TEACHER_EMAIL_DOMAIN = (process.env.TEACHER_EMAIL_DOMAIN || 'binus.edu').toLowerCase();
@@ -224,6 +225,10 @@ async function handler(req, res) {
             email: cleanEmail,
             password: finalPassword,
             displayName: name || cleanEmail.split('@')[0],
+            // Invite-only account added by an owner/admin, not self-signup —
+            // mark verified so TOTP MFA enrollment isn't blocked by Firebase's
+            // auth/unverified-email check.
+            emailVerified: true,
           });
           createdAuthUser = true;
         } else {
@@ -285,6 +290,18 @@ async function handler(req, res) {
         lastOtpIssuedAt: wantsInvite ? admin.firestore.FieldValue.serverTimestamp() : null,
         lastOtpIssuedBy: wantsInvite ? caller.email : null,
       });
+
+      // Firestore rules check tenantId/role custom claims (not this doc) for
+      // direct client reads of tenant-scoped data — without this, new users
+      // get access-denied on everything despite a correct dashboard_users role.
+      try {
+        await setUserTenantClaims({
+          uid: authUser.uid,
+          role: ['owner', 'admin'].includes(assignedRole) ? assignedRole : 'viewer',
+        });
+      } catch (claimsErr) {
+        console.error('[USERS POST] setUserTenantClaims failed:', claimsErr.message);
+      }
 
       await logAudit(db, {
         actor: caller, req,

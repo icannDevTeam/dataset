@@ -50,6 +50,11 @@ const MUST_HAVE_CARD_IDS = new Set([
   'class-directory',
   'security-incidents',
   'audit-log',
+  'onboarding-forms',
+  'chaperone-roster',
+  'chaperone-audit',
+  'chaperone-activity',
+  'runs-diff',
 ]);
 
 function dateInTz(tz, offsetDays = 0) {
@@ -112,7 +117,7 @@ const SECTIONS = [
         filters: ['class', 'status'],
         permission: 'download_operational',
         tags: ['attendance', 'operations', 'daily'],
-        formats: ['csv', 'xlsx'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'chaperone-roster',
@@ -124,7 +129,7 @@ const SECTIONS = [
         needsRange: false,
         permission: 'download_compliance',
         tags: ['pickup', 'directory'],
-        formats: ['csv', 'xlsx'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'pickup-events',
@@ -137,11 +142,14 @@ const SECTIONS = [
         filters: ['class'],
         permission: 'download_operational',
         tags: ['pickup', 'operations', 'daily'],
-        formats: ['csv', 'xlsx'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'onboarding-forms',
         endpoint: '/api/downloads/onboarding-forms',
+        // PDF uses the deep per-form designed export (photos, one form per
+        // page) instead of the flat table renderer.
+        pdfEndpoint: '/api/pickup/admin/onboarding-export',
         icon: 'ph-clipboard-text',
         title: 'Onboarding Forms',
         blurb: 'Parent-submitted onboarding forms — status, chaperones, students.',
@@ -150,7 +158,7 @@ const SECTIONS = [
         filters: ['formStatus'],
         permission: 'download_directory',
         tags: ['pickup', 'directory', 'compliance'],
-        formats: ['csv', 'xlsx'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'daily-brief',
@@ -204,7 +212,7 @@ const SECTIONS = [
         needsRange: false,
         anyPermission: ['download_operational', 'download_directory'],
         tags: ['directory', 'students'],
-        formats: ['csv', 'xlsx'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'students-by-class',
@@ -270,7 +278,7 @@ const SECTIONS = [
         needsRange: true,
         permission: 'download_security',
         tags: ['security', 'incidents'],
-        formats: ['csv', 'xlsx'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'access-logs',
@@ -295,7 +303,7 @@ const SECTIONS = [
         filters: ['auditKind'],
         permission: 'download_compliance',
         tags: ['compliance', 'security', 'audit'],
-        formats: ['csv', 'xlsx'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'chaperone-audit',
@@ -307,7 +315,7 @@ const SECTIONS = [
         needsRange: true,
         permission: 'download_compliance',
         tags: ['pickup', 'compliance', 'audit'],
-        formats: ['csv', 'xlsx'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'audit-export',
@@ -344,7 +352,7 @@ const SECTIONS = [
         needsRange: true,
         permission: 'download_compliance',
         tags: ['chaperones', 'pickups'],
-        formats: ['csv', 'xlsx'],
+        formats: ['csv', 'xlsx', 'pdf'],
       },
       {
         id: 'consent-audit',
@@ -747,14 +755,21 @@ function DownloadCard({
   const runGenerate = useCallback(async (reauthToken) => {
     setBusy(true); setMsg(null);
     try {
-      const res = await fetch(card.endpoint, {
+      // Cards can route PDF to a dedicated designed renderer (e.g. the
+      // per-form onboarding export) which takes a flat body contract.
+      const usePdfEndpoint = format === 'pdf' && card.pdfEndpoint;
+      const endpoint = usePdfEndpoint ? card.pdfEndpoint : card.endpoint;
+      const body = usePdfEndpoint
+        ? { format: 'pdf', from, to, status: filters.status || 'all', includeChaperonePhotos: true }
+        : buildBody();
+      const res = await fetch(endpoint, {
         method: 'POST',
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           ...(reauthToken ? { 'X-Reauth-Token': reauthToken } : {}),
         },
-        body: JSON.stringify(buildBody()),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;

@@ -5,6 +5,7 @@
   "main": "api/index.js",
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/guard-next-build.js",
     "build": "next build",
     "start": "next start",
     "export": "next export",
@@ -25,7 +26,7 @@
     "firebase": "^10.5.0",
     "firebase-admin": "^13.6.1",
     "jszip": "^3.10.1",
-    "lucide-react": "^1.34.0",
+    "lucide-react": "^1.40.0",
     "next": "^14.0.0",
     "prom-client": "^15.1.3",
     "qrcode": "^1.5.4",

@@ -78,11 +78,11 @@ async function fetcher(ctx) {
     });
   }
 
-  // Pickup events in range. We orderBy createdAt desc and filter range
-  // in code (pickup-events.js follows the same pattern — Firestore range
-  // queries on createdAt aren't guaranteed indexed in this collection).
+  // Pickup events in range. We orderBy recordedAt desc and filter range
+  // in code (pickup_events docs use recordedAt/scannedAt, never createdAt
+  // — see backend/pickup_event_writer.py).
   const peSnap = await db.collection(tenancy.pickupEventsPath(tid))
-    .orderBy('createdAt', 'desc').limit(MAX_ROWS + 1).get().catch(() => null);
+    .orderBy('recordedAt', 'desc').limit(MAX_ROWS + 1).get().catch(() => null);
 
   // chaperoneId -> { pickupCount, lastPickup, students:Set, lateCount }
   const agg = new Map();
@@ -97,7 +97,7 @@ async function fetcher(ctx) {
   if (peSnap) {
     peSnap.forEach((d) => {
       const e = d.data() || {};
-      const createdIso = toIso(e.createdAt || e.recordedAt || e.scannedAt || e.ts || e.timestamp);
+      const createdIso = toIso(e.recordedAt || e.scannedAt || e.createdAt || e.ts || e.timestamp);
       const ms = createdIso ? Date.parse(createdIso) : NaN;
       if (Number.isNaN(ms) || ms < fromMs || ms > toMs) return;
 

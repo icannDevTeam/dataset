@@ -35,10 +35,6 @@ function tsToIso(v) {
 
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
-  return res.status(410).json({
-    error: 'disabled_for_cost_control',
-    message: 'Forms export is temporarily disabled for cost control. Use dashboard statistics.',
-  });
 
   const status = String(req.query.status || 'all');
   const grade = req.query.grade ? String(req.query.grade).trim().toUpperCase() : null;
