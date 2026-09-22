@@ -14,12 +14,16 @@
  * PWA: registers /teacher-sw.js and shows install prompt (carried from Phase 1).
  */
 import Head from 'next/head';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { CheckCircle2, CircleAlert, Download, LockKeyhole, LogOut, ShieldCheck } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, CheckCircle2, CircleAlert, Download, LockKeyhole, LogOut, Search, ShieldCheck, X } from 'lucide-react';
+
+const { searchStudents } = require('../../lib/manual-pickup-search');
 
 const POLL_MS = 10_000;          // when SSE is offline (fallback hydration)
 const POLL_MS_LIVE = 60_000;     // when SSE is healthy (just a safety net)
 const SSE_RECONNECT_MS = 4 * 60_000; // proactive reconnect (Vercel ~5min cap)
+const MANUAL_PICKUP_ENABLED = process.env.NEXT_PUBLIC_MANUAL_PICKUP_ENABLED === 'true';
+const MANUAL_ROSTER_MAX_AGE_MS = 5 * 60_000;
 
 // Local fallback only until the server teaches us this pole's real window
 // (learned windows are persisted per weekday and reused the next day, so the
@@ -1134,6 +1138,191 @@ function DismissalWaitingScreen({ windowLabel, identity }) {
   );
 }
 
+function newManualRequestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `manual-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function ManualPickupModal({
+  token, identity, students, loading, loadError, onRetry, onClose, onReleased,
+}) {
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [relationship, setRelationship] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
+  const requestIdRef = useRef(newManualRequestId());
+  const results = useMemo(() => searchStudents(students, query), [students, query]);
+  const searchable = query.trim().length >= 2;
+
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (event) => { if (event.key === 'Escape' && !submitting) onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose, submitting]);
+
+  const chooseStudent = (student) => {
+    setSelected(student);
+    setRelationship(null);
+    setSubmitError(null);
+    requestIdRef.current = newManualRequestId();
+  };
+
+  const submit = async () => {
+    if (!selected || !relationship || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      if (token === 'preview-token') {
+        onReleased({ student: selected, relationship, releasedAt: new Date().toISOString() });
+        return;
+      }
+      const response = await fetch('/api/pickup/tablet/manual-release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tablet-device-token': token },
+        body: JSON.stringify({
+          studentId: selected.id,
+          relationship,
+          requestId: requestIdRef.current,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Manual release failed');
+      onReleased({ student: selected, relationship, releasedAt: payload.releasedAt });
+    } catch (error) {
+      setSubmitError(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Find student for manual pickup" style={{
+      position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(15,23,42,0.72)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18,
+      backdropFilter: 'blur(4px)',
+    }}>
+      <div style={{
+        width: 'min(880px, 100%)', height: 'min(760px, calc(100dvh - 36px))',
+        background: '#fff', borderRadius: 16, overflow: 'hidden',
+        boxShadow: '0 28px 80px rgba(15,23,42,0.35)', display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{
+          minHeight: 68, padding: '14px 18px', borderBottom: '1px solid #e2e8f0',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            {selected && (
+              <button type="button" onClick={() => { setSelected(null); setSubmitError(null); }} disabled={submitting}
+                aria-label="Back to student search" style={{ width: 42, height: 42, borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', cursor: 'pointer' }}>
+                <ArrowLeft size={22} />
+              </button>
+            )}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 1.8, color: BINUS_MAROON }}>MANUAL PICKUP</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: '#172033', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {selected ? 'Confirm release' : `Find student · ${identity?.releaseGroupName || 'Current pole'}`}
+              </div>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} disabled={submitting} aria-label="Close manual pickup"
+            style={{ width: 44, height: 44, flex: '0 0 44px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#f8fafc', color: '#334155', cursor: 'pointer' }}>
+            <X size={23} />
+          </button>
+        </div>
+
+        {!selected ? (
+          <>
+            <div style={{ padding: '16px 18px 12px' }}>
+              <label style={{ position: 'relative', display: 'block' }}>
+                <Search size={22} aria-hidden="true" style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+                <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Type 2 letters, student ID, or class"
+                  style={{
+                    width: '100%', height: 58, border: '2px solid #94a3b8', borderRadius: 10,
+                    padding: '0 50px', fontSize: 19, color: '#172033', outline: 'none', boxSizing: 'border-box',
+                  }} />
+                {query && (
+                  <button type="button" onClick={() => setQuery('')} aria-label="Clear search"
+                    style={{ position: 'absolute', right: 8, top: 7, width: 44, height: 44, border: 0, background: 'transparent', color: '#64748b', cursor: 'pointer' }}>
+                    <X size={20} />
+                  </button>
+                )}
+              </label>
+              <div style={{ marginTop: 9, fontSize: 13, color: '#64748b', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <span>{students.length} students available at this pole</span>
+                {searchable && !loading && <strong style={{ color: '#334155' }}>{results.length} matches</strong>}
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 18px 18px', WebkitOverflowScrolling: 'touch' }}>
+              {loading && <div style={{ padding: 32, textAlign: 'center', color: '#64748b', fontWeight: 700 }}>Loading pole roster…</div>}
+              {!loading && loadError && (
+                <div style={{ padding: 28, textAlign: 'center', color: '#9f1239' }}>
+                  <div style={{ fontWeight: 800 }}>{loadError}</div>
+                  <button type="button" onClick={onRetry} style={{ marginTop: 14, padding: '11px 18px', borderRadius: 8, border: 0, background: BINUS_MAROON, color: '#fff', fontWeight: 800 }}>Retry</button>
+                </div>
+              )}
+              {!loading && !loadError && !searchable && (
+                <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>Enter at least 2 characters to see matching students.</div>
+              )}
+              {!loading && !loadError && searchable && results.length === 0 && (
+                <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No student matches at this pole.</div>
+              )}
+              {!loading && !loadError && searchable && results.map((student) => (
+                <button key={student.id} type="button" onClick={() => chooseStudent(student)} style={{
+                  width: '100%', minHeight: 68, padding: '11px 14px', marginBottom: 8,
+                  display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', alignItems: 'center', gap: 12,
+                  textAlign: 'left', border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff', cursor: 'pointer',
+                }}>
+                  <span style={{ minWidth: 0 }}>
+                    <strong style={{ display: 'block', fontSize: 17, color: '#172033', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{student.name}</strong>
+                    <span style={{ display: 'block', marginTop: 3, color: '#64748b', fontSize: 13 }}>{student.studentId || student.id}</span>
+                  </span>
+                  <span style={{ padding: '7px 10px', background: '#f1f5f9', color: '#334155', borderRadius: 7, fontWeight: 900 }}>{student.homeroom}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, overflowY: 'auto', padding: 22 }}>
+            <div style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 10, background: '#f8fafc' }}>
+              <div style={{ fontSize: 22, fontWeight: 900, color: '#172033' }}>{selected.name}</div>
+              <div style={{ marginTop: 6, color: '#475569' }}>{selected.homeroom} · {selected.studentId || selected.id}</div>
+              <div style={{ marginTop: 4, color: '#64748b', fontSize: 13 }}>{identity?.releaseGroupName}</div>
+            </div>
+            <fieldset style={{ border: 0, padding: 0, margin: '24px 0 0' }}>
+              <legend style={{ fontSize: 13, fontWeight: 900, letterSpacing: 1.2, color: '#475569', marginBottom: 10 }}>WHO IS PICKING UP?</legend>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+                {['Mother', 'Father', 'Guardian'].map((option) => (
+                  <button key={option} type="button" onClick={() => setRelationship(option)} style={{
+                    minHeight: 62, padding: 10, borderRadius: 9, fontSize: 16, fontWeight: 900, cursor: 'pointer',
+                    border: relationship === option ? `3px solid ${BINUS_MAROON}` : '1px solid #94a3b8',
+                    background: relationship === option ? '#fff1f2' : '#fff', color: BINUS_MAROON,
+                  }}>{option}</button>
+                ))}
+              </div>
+            </fieldset>
+            {submitError && <div role="alert" style={{ marginTop: 16, padding: 12, borderRadius: 8, background: '#fff1f2', color: '#9f1239', fontWeight: 700 }}>{submitError}</div>}
+            <button type="button" onClick={submit} disabled={!relationship || submitting} style={{
+              width: '100%', minHeight: 60, marginTop: 24, border: 0, borderRadius: 10,
+              background: relationship && !submitting ? BINUS_MAROON : '#cbd5e1',
+              color: relationship && !submitting ? '#fff' : '#64748b', fontSize: 18, fontWeight: 900,
+              cursor: relationship && !submitting ? 'pointer' : 'not-allowed',
+            }}>{submitting ? 'Recording release…' : `Release to ${relationship || 'selected relationship'}`}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function TeacherTabletPage() {
   const localWindow = localDismissalWindow();
   const [token, setToken] = useState(null);
@@ -1151,12 +1340,20 @@ export default function TeacherTabletPage() {
   const [windowLabel, setWindowLabel] = useState(localWindow);
   const [gateSignal, setGateSignal] = useState(null);
   const [gateNotice, setGateNotice] = useState(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualRoster, setManualRoster] = useState([]);
+  const [manualRosterLoadedAt, setManualRosterLoadedAt] = useState(0);
+  const [manualRosterLoading, setManualRosterLoading] = useState(false);
+  const [manualRosterError, setManualRosterError] = useState(null);
+  const [manualSuccess, setManualSuccess] = useState(null);
+  const [previewMode, setPreviewMode] = useState(false);
   const serverClosedRef = useRef(false);
   const inWindowRef = useRef(false);
   const windowLabelRef = useRef(localWindow);
   const gateFingerprintRef = useRef('');
   const pollRef = useRef(null);
   const isPreviewRef = useRef(false);
+  const rosterLoadRef = useRef(null);
   // Tombstones: cards the teacher just released/held. Stale poll responses
   // (in-flight when the tap happened, or served before the write landed)
   // must not resurrect them. id → expiry epoch ms.
@@ -1195,9 +1392,59 @@ export default function TeacherTabletPage() {
           ? `Gate opened by ${normalized.source} (${gateReasonLabel(normalized.reason)})`
           : `Gate closed by ${normalized.source} (${gateReasonLabel(normalized.reason)})`,
       });
+      // Gate/scope state changed — the pole's eligible-student set may differ.
+      setManualRoster([]);
+      setManualRosterLoadedAt(0);
     }
     gateFingerprintRef.current = fp;
   }, []);
+
+  const loadManualRoster = useCallback(async (force = false) => {
+    if (!token || isPreviewRef.current) return null;
+    if (!force && manualRoster.length > 0 && Date.now() - manualRosterLoadedAt < MANUAL_ROSTER_MAX_AGE_MS) {
+      return manualRoster;
+    }
+    if (rosterLoadRef.current) return rosterLoadRef.current;
+    setManualRosterLoading(true);
+    setManualRosterError(null);
+    const load = fetch('/api/pickup/tablet/student-roster', {
+      headers: { 'x-tablet-device-token': token },
+      cache: force ? 'reload' : 'default',
+    }).then(async (response) => {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || 'Could not load pole roster');
+      const nextRoster = Array.isArray(payload.students) ? payload.students : [];
+      setManualRoster(nextRoster);
+      setManualRosterLoadedAt(Date.now());
+      return nextRoster;
+    }).catch((error) => {
+      setManualRosterError(error.message);
+      throw error;
+    }).finally(() => {
+      setManualRosterLoading(false);
+      rosterLoadRef.current = null;
+    });
+    rosterLoadRef.current = load;
+    return load;
+  }, [token, manualRoster, manualRosterLoadedAt]);
+
+  useEffect(() => {
+    if (isPreviewRef.current) return;
+    setManualRoster([]);
+    setManualRosterLoadedAt(0);
+    setManualRosterError(null);
+  }, [token, identity?.releaseGroupId]);
+
+  useEffect(() => {
+    if (!MANUAL_PICKUP_ENABLED || !token || !identity || !inWindow || isPreviewRef.current) return;
+    loadManualRoster().catch(() => {});
+  }, [token, identity, inWindow, loadManualRoster]);
+
+  useEffect(() => {
+    if (!manualSuccess) return;
+    const timer = setTimeout(() => setManualSuccess(null), 6000);
+    return () => clearTimeout(timer);
+  }, [manualSuccess]);
 
   useEffect(() => {
     if (!gateNotice) return;
@@ -1212,6 +1459,9 @@ export default function TeacherTabletPage() {
     if (isPreview) {
       const now = Date.now();
       isPreviewRef.current = true;
+      setPreviewMode(true);
+      serverClosedRef.current = false;
+      setInWindow(true);
       setErr(null);
       setToken('preview-token');
       setIdentity({
@@ -1220,6 +1470,15 @@ export default function TeacherTabletPage() {
         gradeLabel: 'Grade 2 / EY',
         terminalIds: ['term-g2-a', 'term-ey-a', 'term-ey-b'],
       });
+      setManualRoster([
+        { id: 'pv-stu-1', studentId: '2470001001', name: 'ANAYA PUTRI', homeroom: '2A', searchKey: '2470001001 anaya putri 2a' },
+        { id: 'pv-stu-2', studentId: '2470001002', name: 'JAYDEN LEE', homeroom: '2B', searchKey: '2470001002 jayden lee 2b' },
+        { id: 'pv-stu-3', studentId: '2470001003', name: 'MILA TAN', homeroom: 'EY2', searchKey: '2470001003 mila tan ey2' },
+        { id: 'pv-stu-4', studentId: '2470001004', name: 'CLARA NUGROHO', homeroom: 'EY1', searchKey: '2470001004 clara nugroho ey1' },
+        { id: 'pv-stu-5', studentId: '2470001005', name: 'ELLA MAHESA', homeroom: '2C', searchKey: '2470001005 ella mahesa 2c' },
+        { id: 'pv-stu-6', studentId: '2470001006', name: 'ARVIN PUTRA', homeroom: '2C', searchKey: '2470001006 arvin putra 2c' },
+      ]);
+      setManualRosterLoadedAt(Date.now());
       setFeed({
         active: [
           {
@@ -1746,6 +2005,10 @@ export default function TeacherTabletPage() {
     setToken(null);
     setIdentity(null);
     setFeed({ active: [], held: [], todayReleased: 0 });
+    setManualOpen(false);
+    setManualRoster([]);
+    setManualRosterLoadedAt(0);
+    setManualRosterError(null);
   };
 
   if (isBootstrapping) {
@@ -1757,6 +2020,7 @@ export default function TeacherTabletPage() {
   const activeCards = (feed.active || []).slice(0, activeLimit);
   const activeCardMinHeight = hasHeld ? ACTIVE_CARD_MIN_H_WITH_HELD : ACTIVE_CARD_MIN_H_NO_HELD;
   const noHeldDense = !hasHeld && activeCards.length >= 9;
+  const manualPickupVisible = MANUAL_PICKUP_ENABLED || previewMode;
 
   if (token && !inWindow) {
     return (
@@ -1815,6 +2079,7 @@ export default function TeacherTabletPage() {
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Pick-Up System" />
+        <meta name="robots" content="noindex,nofollow,noarchive" />
       </Head>
       <div className="pickup-light teacher-shell" style={{
         minHeight: '100vh', background: '#f6f8fb',
@@ -1900,6 +2165,12 @@ export default function TeacherTabletPage() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
+            {manualPickupVisible && (
+              <button onClick={() => { setManualOpen(true); loadManualRoster().catch(() => {}); }}
+                style={{ padding: '8px 12px', background: BINUS_MAROON, color: '#fff', border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>
+                <Search size={16} aria-hidden="true" /> Find student
+              </button>
+            )}
             {showInstall && (
               <button onClick={installPwa}
                 style={{ padding: '8px 12px', background: BINUS_GOLD, color: BINUS_MAROON, border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 12, cursor: 'pointer' }}>
@@ -1912,6 +2183,16 @@ export default function TeacherTabletPage() {
             </button>
           </div>
         </div>
+
+        {manualSuccess && (
+          <div role="status" style={{
+            position: 'fixed', right: 20, top: 82, zIndex: 10001, maxWidth: 420,
+            padding: '13px 16px', borderRadius: 9, background: '#047857', color: '#fff',
+            boxShadow: '0 14px 35px rgba(15,23,42,0.25)', fontWeight: 800,
+          }}>
+            {manualSuccess.student.name} released to {manualSuccess.relationship} · {new Date(manualSuccess.releasedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        )}
 
         {err && (
           <div style={{ background: '#fff1f2', color: '#9f1239', borderBottom: '1px solid #fecdd3', padding: '8px 22px', fontSize: 13 }}>
@@ -2113,6 +2394,22 @@ export default function TeacherTabletPage() {
           )}
         </div>
       </div>
+      {manualPickupVisible && manualOpen && (
+        <ManualPickupModal
+          token={token}
+          identity={identity}
+          students={manualRoster}
+          loading={manualRosterLoading}
+          loadError={manualRosterError}
+          onRetry={() => loadManualRoster(true).catch(() => {})}
+          onClose={() => setManualOpen(false)}
+          onReleased={(result) => {
+            setManualOpen(false);
+            setManualSuccess(result);
+            pollFeed();
+          }}
+        />
+      )}
       {showIosHint && (
         <div
           onClick={() => setShowIosHint(false)}
