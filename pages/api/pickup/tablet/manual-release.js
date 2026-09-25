@@ -5,6 +5,7 @@ const tenancy = require('../../../../lib/tenancy');
 const { auditLogPath } = require('../../../../lib/audit-log');
 const {
   buildManualEvent,
+  buildManualReleaseEmailJob,
   compactStudent,
   manualEventId,
   manualEventMatchesIntent,
@@ -106,6 +107,46 @@ export default async function handler(req, res) {
     const persisted = await eventRef.get();
     const releasedAtValue = persisted.data()?.teacherRelease?.at || persisted.data()?.recordedAt;
     const releasedAt = releasedAtValue?.toDate?.()?.toISOString?.() || audit.at;
+
+    try {
+      const settingsSnap = await db.doc(tenancy.pickupSettingsDoc(tenantId)).get();
+      const releaseEmailEnabled = !!(settingsSnap.exists && settingsSnap.data().releaseEmailEnabled);
+      if (releaseEmailEnabled) {
+        const chapSnap = await db.collection(tenancy.chaperonesPath(tenantId))
+          .where('authorizedStudentIds', 'array-contains', student.id)
+          .limit(20)
+          .get();
+        const chaperone = chapSnap.docs.find((doc) => {
+          const data = doc.data() || {};
+          const rel = String(data.relation || '').trim();
+          return !rel || rel === relationship;
+        }) || chapSnap.docs[0] || null;
+        const guardianEmail = chaperone ? (chaperone.data()?.guardianEmail || chaperone.data()?.email || null) : null;
+        const guardianName = chaperone ? (chaperone.data()?.guardianName || chaperone.data()?.name || null) : null;
+        if (guardianEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(guardianEmail)) {
+          const releasedAtWib = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(11, 16);
+          const job = buildManualReleaseEmailJob({
+            tenantId,
+            eventId,
+            guardianEmail,
+            guardianName,
+            chaperoneName: chaperone?.data()?.name || '',
+            relationship,
+            studentNames: Array.isArray(event.students) ? event.students.map((entry) => entry?.name).filter(Boolean) : [student.name],
+            gate: context.releaseGroup.name || context.releaseGroup.id,
+            releasedAtWib,
+            source: 'tablet-manual-release',
+          });
+          await db.collection('email_queue').add({
+            ...job,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    } catch (mailErr) {
+      console.error('[pickup/tablet/manual-release] email enqueue failed (non-blocking):', mailErr?.message || mailErr);
+    }
 
     return res.status(duplicate ? 200 : 201).json({
       ok: true,

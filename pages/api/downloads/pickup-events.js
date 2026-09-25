@@ -21,22 +21,12 @@ function toIso(v) {
   return '';
 }
 
-function formatWib(iso) {
-  if (!iso) return '\u2014';
-  try {
-    return new Intl.DateTimeFormat('sv-SE', {
-      timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    }).format(new Date(iso));
-  } catch { return '\u2014'; }
-}
-
 async function fetcher(ctx) {
   initializeFirebase();
   const db = admin.firestore();
   const tid = ctx.tenantId || tenancy.getTenantId();
-  const fromMs = new Date(`${ctx.from}T00:00:00.000+07:00`).getTime();
-  const toMs   = new Date(`${ctx.to}T23:59:59.999+07:00`).getTime();
+  const fromMs = new Date(`${ctx.from}T00:00:00.000Z`).getTime();
+  const toMs   = new Date(`${ctx.to}T23:59:59.999Z`).getTime();
   const classFilter = ctx.filters?.class ? String(ctx.filters.class).toLowerCase() : null;
 
   // pickup_events docs use recordedAt/scannedAt (see backend/
@@ -51,7 +41,7 @@ async function fetcher(ctx) {
     snap.forEach((d) => {
       if (rows.length >= MAX_ROWS) { truncated = true; return; }
       const e = d.data() || {};
-      const createdIso = toIso(e.teacherRelease?.at || e.recordedAt || e.scannedAt || e.createdAt || e.ts || e.timestamp);
+      const createdIso = toIso(e.recordedAt || e.scannedAt || e.createdAt || e.ts || e.timestamp);
       const createdMs = createdIso ? new Date(createdIso).getTime() : 0;
       if (createdMs && (createdMs < fromMs || createdMs > toMs)) return;
       // Real schema nests these: chaperone{name,relation}, students[],
@@ -63,21 +53,20 @@ async function fetcher(ctx) {
       if (classFilter && cls.toLowerCase() !== classFilter) return;
       const isOverride = !!e.officerOverride || !!e.overrideCode;
       const method = String(e.method || e.matchMethod || (isOverride ? 'override' : 'fr')).toLowerCase();
-      const gate = e.releaseGroupName || e.gate || e.deviceName || e.terminal || e.terminalId || '\u2014';
+      const gate = e.gate || e.deviceName || e.terminal || e.terminalId || '\u2014';
       const frConf = (e.fr && typeof e.fr.confidence === 'number') ? e.fr.confidence
         : (typeof e.confidence === 'number' ? e.confidence : null);
       rows.push({
-        time:        formatWib(createdIso),
+        time:        createdIso ? createdIso.slice(0, 19).replace('T', ' ') : '\u2014',
         student:     studs.map((s) => s?.name).filter(Boolean).join(', ') || e.studentName || '\u2014',
-        binusId:     studs.map((s) => s?.binusId || s?.id).filter(Boolean).join(', ') || e.studentBinusId || e.studentId || '',
+        binusId:     studs.map((s) => s?.id || s?.binusId).filter(Boolean).join(', ') || e.studentBinusId || e.studentId || '',
         class:       cls,
         chaperone:   chap.name || e.chaperoneName || '\u2014',
         relation:    chap.relation || e.chaperoneRelation || '',
         gate,
         method,
         confidence:  frConf != null ? `${(frConf * 100).toFixed(1)}%` : '',
-        officer:     e.officerOverride?.by || e.officerOverride?.email || e.officer || e.releasedBy
-          || e.teacherRelease?.displayName || e.teacherRelease?.by || '',
+        officer:     e.officerOverride?.by || e.officerOverride?.email || e.officer || e.releasedBy || '',
         notes:       e.decision && e.decision !== 'ok' ? e.decision : (e.notes || ''),
       });
     });

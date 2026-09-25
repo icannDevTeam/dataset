@@ -119,3 +119,26 @@ test('manual event contains relationship but no collector identity PII', () => {
     relationship: 'Mother',
   }), false);
 });
+
+test('manual release email job uses guardian details and the release email template', () => {
+  const { buildManualReleaseEmailJob } = require('../lib/manual-pickup');
+  const job = buildManualReleaseEmailJob({
+    tenantId: 'school',
+    eventId: 'manual-123',
+    guardianEmail: 'parent@example.com',
+    guardianName: 'Jane Parent',
+    chaperoneName: 'Jane',
+    relationship: 'Mother',
+    studentNames: ['Alice', 'Bob'],
+    gate: 'Pole 1',
+    releasedAtWib: '15:00',
+    source: 'tablet-manual-release',
+  });
+
+  assert.equal(job.to, 'parent@example.com');
+  assert.equal(job.templateType, 'pickup_child_released');
+  assert.equal(job.source, 'tablet-manual-release');
+  assert.deepEqual(job.templateData.studentNames, ['Alice', 'Bob']);
+  assert.equal(job.templateData.guardianName, 'Jane Parent');
+  assert.equal(job.templateData.gate, 'Pole 1');
+});
