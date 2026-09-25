@@ -33,6 +33,7 @@ function getBreadcrumb(pathname, query) {
   if (pathname === '/v2/security') return { section: 'Pickup System', page: 'Security Heatmap' };
   if (pathname === '/v2/pickup-ops') return { section: 'Pickup System', page: 'Operations Interface' };
   if (pathname === '/v2/system-interfaces') return { section: 'Pickup System', page: 'Service Interfaces' };
+  if (pathname === '/v2/cost-monitor') return { section: 'Owner', page: 'Cost Monitor' };
   if (pathname === '/v2/admin/downloads') return { section: 'System', page: 'Downloads Hub' };
   if (pathname === '/v2/admin/rbac') return { section: 'System', page: 'Admin Console' };
   if (pathname === '/v2/admin/users') return { section: 'System', page: 'Users Directory' };
@@ -68,6 +69,7 @@ const NAV_SECTIONS = [
       { href: '/v2/security', icon: 'ph-shield-warning', label: 'Security Heatmap' },
       { href: '/v2/pickup-ops', icon: 'ph-terminal-window', label: 'Operations Interface' },
       { href: '/v2/system-interfaces', icon: 'ph-plugs-connected', label: 'Service Interfaces' },
+      { href: '/v2/cost-monitor', icon: 'ph-currency-dollar', label: 'Cost Monitor', permissionKey: 'cost_monitor' },
     ],
   },
 ];
