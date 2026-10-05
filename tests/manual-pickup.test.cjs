@@ -33,6 +33,21 @@ test('EY students match specific and broad EY scope tokens', () => {
   assert.equal(studentMatchesScopes({ homeroom: 'EY2A' }, broad), true);
 });
 
+test('mixed-sibling release email names only the releasing pole\'s child', () => {
+  // Raelynn (Grade 1) + Raesha (EY1) family: each pole's release email
+  // must name only the sibling that pole serves (2026-10-05 incident).
+  const siblings = [
+    { name: 'RAELYNN', homeroom: '1' },
+    { name: 'RAESHA', homeroom: 'EY1' },
+  ];
+  const eyPole = releaseScopeTokens([{ gradeScopes: ['EY1', 'EY2', 'EY3'] }], {});
+  const gradePole = releaseScopeTokens([{ gradeScopes: ['1', '2'] }], {});
+  assert.deepEqual(siblings.filter((s) => studentMatchesScopes(s, eyPole)).map((s) => s.name), ['RAESHA']);
+  assert.deepEqual(siblings.filter((s) => studentMatchesScopes(s, gradePole)).map((s) => s.name), ['RAELYNN']);
+  // Unscoped pole filters nothing — the endpoint falls back to all names.
+  assert.equal(siblings.filter((s) => studentMatchesScopes(s, new Set())).length, 0);
+});
+
 test('closed terminals do not contribute manual-release grade scope', () => {
   const terminals = [
     { gradeScopes: ['1'] },

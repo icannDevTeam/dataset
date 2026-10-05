@@ -14,6 +14,27 @@
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
+const { releaseScopeTokens, studentMatchesScopes } = require('../../../../lib/manual-pickup');
+
+/**
+ * Only the children that belong to the releasing pole's grade scopes should
+ * be named in the parent email. A mixed-grade family event (EY + Grade 1
+ * siblings) otherwise emails "both released" from a single pole's tap.
+ * Fail-open: when the pole has no scopes or nothing matches, keep all names.
+ */
+async function emailStudentsForRelease(db, tid, ev, students) {
+  try {
+    if (!ev.terminalId || students.length < 2) return students;
+    const termSnap = await db.doc(`${tenancy.terminalsPath(tid)}/${ev.terminalId}`).get();
+    if (!termSnap.exists) return students;
+    const scopes = releaseScopeTokens([termSnap.data() || {}], null);
+    if (scopes.size === 0) return students;
+    const matching = students.filter((s) => studentMatchesScopes(s, scopes));
+    return matching.length > 0 ? matching : students;
+  } catch {
+    return students;
+  }
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method' });
@@ -105,6 +126,7 @@ export default async function handler(req, res) {
             }
           }
           if (guardianEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(guardianEmail)) {
+            const emailStudents = await emailStudentsForRelease(db, tid, ev, students);
             const wib = new Date(Date.now() + 7 * 3600 * 1000);
             const releasedAtWib = wib.toISOString().slice(11, 16);
             await db.collection('email_queue').add({
@@ -115,7 +137,7 @@ export default async function handler(req, res) {
               recordId: eventId,
               templateData: {
                 guardianName: guardianName || chap.name || 'Parent/Guardian',
-                studentNames: students.map((s) => s?.name).filter(Boolean),
+                studentNames: emailStudents.map((s) => s?.name).filter(Boolean),
                 chaperoneName: chap.name || '',
                 chaperoneRelation: chap.relation || '',
                 gate: ev.gate || ev.deviceName || '',
