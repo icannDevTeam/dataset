@@ -266,6 +266,24 @@ async function approveOne(db, bucket, tid, recordId, approvalNotes, reviewer) {
     await sref.set({ authorizedChaperones: merged }, { merge: true });
   }
 
+  // Child-specific notification contact (custody safety) — see approve.js.
+  const notifyEmail = String(rec.guardian?.email || '').trim().toLowerCase();
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(notifyEmail)) {
+    for (const row of (rec.students || [])) {
+      const sid = String(row?.id || row?.studentId || '').trim();
+      if (!sid) continue;
+      await db.doc(`${tenancy.studentsPath(tid)}/${sid}`).set({
+        pickupNotify: {
+          email: notifyEmail,
+          name: rec.guardian?.name || null,
+          recordId,
+          formNumber: rec.formNumber || null,
+          updatedAt: now,
+        },
+      }, { merge: true }).catch((e) => console.error('[bulk-approve] pickupNotify', sid, e.message));
+    }
+  }
+
   const approvalPatch = {
     status: 'approved',
     reviewedAt: now,

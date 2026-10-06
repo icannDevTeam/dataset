@@ -112,17 +112,12 @@ export default async function handler(req, res) {
       const settingsSnap = await db.doc(tenancy.pickupSettingsDoc(tenantId)).get();
       const releaseEmailEnabled = !!(settingsSnap.exists && settingsSnap.data().releaseEmailEnabled);
       if (releaseEmailEnabled) {
-        const chapSnap = await db.collection(tenancy.chaperonesPath(tenantId))
-          .where('authorizedStudentIds', 'array-contains', student.id)
-          .limit(20)
-          .get();
-        const chaperone = chapSnap.docs.find((doc) => {
-          const data = doc.data() || {};
-          const rel = String(data.relation || '').trim();
-          return !rel || rel === relationship;
-        }) || chapSnap.docs[0] || null;
-        const guardianEmail = chaperone ? (chaperone.data()?.guardianEmail || chaperone.data()?.email || null) : null;
-        const guardianName = chaperone ? (chaperone.data()?.guardianName || chaperone.data()?.name || null) : null;
+        // Custody safety: recipient is the child's approved-form contact
+        // (students/{id}.pickupNotify) — never a chaperone's own email.
+        const studentSnap = await db.doc(`${tenancy.studentsPath(tenantId)}/${student.id}`).get();
+        const notify = studentSnap.exists ? (studentSnap.data() || {}).pickupNotify : null;
+        const guardianEmail = notify?.email || null;
+        const guardianName = notify?.name || null;
         if (guardianEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(guardianEmail)) {
           const releasedAtWib = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(11, 16);
           const job = buildManualReleaseEmailJob({
@@ -130,9 +125,9 @@ export default async function handler(req, res) {
             eventId,
             guardianEmail,
             guardianName,
-            chaperoneName: chaperone?.data()?.name || '',
+            chaperoneName: '',
             relationship,
-            studentNames: Array.isArray(event.students) ? event.students.map((entry) => entry?.name).filter(Boolean) : [student.name],
+            studentNames: [student.name],
             gate: context.releaseGroup.name || context.releaseGroup.id,
             releasedAtWib,
             source: 'tablet-manual-release',
@@ -142,6 +137,8 @@ export default async function handler(req, res) {
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
+        } else {
+          console.warn(`[pickup/tablet/manual-release] no approved notification contact for student on ${eventId} — no email sent`);
         }
       }
     } catch (mailErr) {

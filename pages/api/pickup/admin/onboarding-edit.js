@@ -642,6 +642,15 @@ async function handler(req, res) {
           chaperones: chaps,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
+        // Child no longer on this form — revoke its notify contact if this
+        // record was the source (custody safety: fail closed, never stale).
+        try {
+          const sref = db.doc(`${tenancy.studentsPath(tid)}/${id}`);
+          const ssnap = await sref.get();
+          if (ssnap.exists && ssnap.data()?.pickupNotify?.recordId === recordId) {
+            await sref.update({ pickupNotify: admin.firestore.FieldValue.delete() });
+          }
+        } catch (e) { console.error('[onboarding-edit] pickupNotify cleanup', e.message); }
       } else {
         return res.status(400).json({ error: 'unsupported action for student' });
       }

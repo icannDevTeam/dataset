@@ -14,7 +14,7 @@
 import admin from 'firebase-admin';
 import { initializeFirebase } from '../../../../lib/firebase-admin';
 const tenancy = require('../../../../lib/tenancy');
-const { releaseScopeTokens, studentMatchesScopes } = require('../../../../lib/manual-pickup');
+const { releaseScopeTokens, studentMatchesScopes, buildChildReleaseJobs } = require('../../../../lib/manual-pickup');
 
 /**
  * Only the children that belong to the releasing pole's grade scopes should
@@ -34,6 +34,25 @@ async function emailStudentsForRelease(db, tid, ev, students) {
   } catch {
     return students;
   }
+}
+
+/**
+ * Resolve each child's approved-form notification contact from
+ * students/{id}.pickupNotify (written at ACOP approval). Returns a map
+ * studentId -> {email, name} for buildChildReleaseJobs.
+ */
+async function notifyContactsForStudents(db, tid, students) {
+  const ids = [...new Set((students || [])
+    .map((s) => String(s?.id || s?.studentId || '').trim())
+    .filter(Boolean))];
+  if (ids.length === 0) return {};
+  const snaps = await db.getAll(...ids.slice(0, 30).map((sid) => db.doc(`${tenancy.studentsPath(tid)}/${sid}`)));
+  const out = {};
+  snaps.forEach((snap) => {
+    const n = snap.exists ? (snap.data() || {}).pickupNotify : null;
+    if (n && n.email) out[snap.id] = { email: n.email, name: n.name || null };
+  });
+  return out;
 }
 
 export default async function handler(req, res) {
@@ -112,32 +131,27 @@ export default async function handler(req, res) {
         if (releaseEmailEnabled) {
           const chap = (ev.chaperone && typeof ev.chaperone === 'object') ? ev.chaperone : {};
           const students = Array.isArray(ev.students) ? ev.students : [];
-          // Guardian email lives on the chaperone doc (guardianEmail = form
-          // submitter; email = the chaperone themself as fallback).
-          let guardianEmail = null;
-          let guardianName = null;
-          const chapDocId = chap.id || chap._id || null;
-          if (chapDocId) {
-            const chapSnap = await db.doc(`${tenancy.chaperonesPath(tid)}/${chapDocId}`).get();
-            if (chapSnap.exists) {
-              const c = chapSnap.data() || {};
-              guardianEmail = c.guardianEmail || c.email || null;
-              guardianName = c.guardianName || null;
-            }
+          // Per-child recipients: each child's approved-form guardian only.
+          // Custody safety — no fallback to the scanned chaperone's email or
+          // generic contacts; children without an approved contact get no email.
+          const emailStudents = await emailStudentsForRelease(db, tid, ev, students);
+          const notifyByStudentId = await notifyContactsForStudents(db, tid, emailStudents);
+          const { jobs, skipped } = buildChildReleaseJobs(emailStudents, notifyByStudentId);
+          if (skipped.length > 0) {
+            console.warn(`[pickup/tablet/release] no approved notification contact for ${skipped.length} student(s) on ${eventId} — no email sent for them`);
           }
-          if (guardianEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(guardianEmail)) {
-            const emailStudents = await emailStudentsForRelease(db, tid, ev, students);
-            const wib = new Date(Date.now() + 7 * 3600 * 1000);
-            const releasedAtWib = wib.toISOString().slice(11, 16);
+          const wib = new Date(Date.now() + 7 * 3600 * 1000);
+          const releasedAtWib = wib.toISOString().slice(11, 16);
+          for (const job of jobs) {
             await db.collection('email_queue').add({
               status: 'pending',
-              to: guardianEmail,
+              to: job.to,
               templateType: 'pickup_child_released',
               tenantId: tid,
               recordId: eventId,
               templateData: {
-                guardianName: guardianName || chap.name || 'Parent/Guardian',
-                studentNames: emailStudents.map((s) => s?.name).filter(Boolean),
+                guardianName: job.guardianName || 'Parent/Guardian',
+                studentNames: job.studentNames,
                 chaperoneName: chap.name || '',
                 chaperoneRelation: chap.relation || '',
                 gate: ev.gate || ev.deviceName || '',

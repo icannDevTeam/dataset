@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  buildChildReleaseJobs,
   buildManualEvent,
   compactStudent,
   manualEventId,
@@ -46,6 +47,37 @@ test('mixed-sibling release email names only the releasing pole\'s child', () =>
   assert.deepEqual(siblings.filter((s) => studentMatchesScopes(s, gradePole)).map((s) => s.name), ['RAELYNN']);
   // Unscoped pole filters nothing — the endpoint falls back to all names.
   assert.equal(siblings.filter((s) => studentMatchesScopes(s, new Set())).length, 0);
+});
+
+test('child release jobs go only to each child\'s approved-form contact', () => {
+  const students = [
+    { id: 'stu-a', name: 'RAELYNN', homeroom: '1' },
+    { id: 'stu-b', name: 'RAESHA', homeroom: 'EY1' },
+    { id: 'stu-c', name: 'NO CONTACT CHILD', homeroom: '2A' },
+  ];
+  // Different approved guardians per child → separate jobs; missing contact → skipped.
+  const { jobs, skipped } = buildChildReleaseJobs(students, {
+    'stu-a': { email: 'mom@example.com', name: 'Mom' },
+    'stu-b': { email: 'dad@example.com', name: 'Dad' },
+  });
+  assert.deepEqual(jobs.map((j) => [j.to, j.studentNames]).sort(), [
+    ['dad@example.com', ['RAESHA']],
+    ['mom@example.com', ['RAELYNN']],
+  ]);
+  assert.deepEqual(skipped, ['NO CONTACT CHILD']);
+
+  // Same approved guardian for both → one job naming both children.
+  const shared = buildChildReleaseJobs(students.slice(0, 2), {
+    'stu-a': { email: 'mom@example.com', name: 'Mom' },
+    'stu-b': { email: 'MOM@example.com', name: 'Mom' },
+  });
+  assert.equal(shared.jobs.length, 1);
+  assert.deepEqual(shared.jobs[0].studentNames, ['RAELYNN', 'RAESHA']);
+
+  // No contacts at all → fail closed: zero jobs, never a fallback recipient.
+  const none = buildChildReleaseJobs(students, {});
+  assert.equal(none.jobs.length, 0);
+  assert.equal(none.skipped.length, 3);
 });
 
 test('closed terminals do not contribute manual-release grade scope', () => {
